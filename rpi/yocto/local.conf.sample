@@ -305,7 +305,7 @@ DISTRO_FEATURES:append = " opengl eglfs"
 IMAGE_INSTALL:append = " kernel-modules linux-firmware-rpidistro-bcm43455"
 
 # GUI (Qt6) - 기본 라이브러리 및 폰트
-IMAGE_INSTALL:append = " qtbase qtbase-plugins qtdeclarative qtdeclarative-plugins qtmultimedia qtmultimedia-plugins ttf-dejavu-sans"
+# IMAGE_INSTALL:append = " qtbase qtbase-plugins qtdeclarative qtdeclarative-plugins qtmultimedia qtmultimedia-plugins ttf-dejavu-sans"
 
 # 영상 처리 (GStreamer + OpenCV)
 # 하드웨어 가속 플러그인 및 코덱 포함
@@ -319,3 +319,14 @@ IMAGE_INSTALL:append = " gdbserver strace"
 
 # 라이선스 동의 (ffmpeg 등 일부 코덱 사용 시 필요할 수 있음)
 LICENSE_FLAGS_ACCEPTED = "commercial synaptics-killswitch"
+
+INHERIT += "rm_work"
+
+# 불필요한 테스트 패키지(ptest) 빌드 방지
+DISTRO_FEATURES:remove = "ptest"
+# BB_NUMBER_THREADS = "2"
+# PARALLEL_MAKE = "-j 2"
+
+# 패키지 관리 기능 추가 (rpm 사용)
+EXTRA_IMAGE_FEATURES += "package-management"
+PACKAGE_CLASSES = "package_rpm"
