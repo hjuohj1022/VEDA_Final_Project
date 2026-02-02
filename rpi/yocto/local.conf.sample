@@ -341,4 +341,5 @@ CMDLINE:append = " cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1"
 # K3s가 컨테이너 이미지를 받을 때 필요
 IMAGE_ROOTFS_EXTRA_SPACE = "2097152"
 
-
+# 보안을 위한 sudo 패키지 추가
+IMAGE_INSTALL:append = " sudo"
