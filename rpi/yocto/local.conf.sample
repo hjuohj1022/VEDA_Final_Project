@@ -330,3 +330,15 @@ DISTRO_FEATURES:remove = "ptest"
 # 패키지 관리 기능 추가 (rpm 사용)
 EXTRA_IMAGE_FEATURES += "package-management"
 PACKAGE_CLASSES = "package_rpm"
+
+# 편의 도구 추가 (nano, vim, curl, mosquitto 등) 
+IMAGE_INSTALL:append = " nano vim curl mosquitto mosquitto-clients"
+
+# K3s 구동을 위한 필수 커널 설정 (cgroup 메모리 활성화 등)
+CMDLINE:append = " cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1"
+
+# 루트 파일 시스템에 2GB(2097152KB) 정도 여유 공간 확보
+# K3s가 컨테이너 이미지를 받을 때 필요
+IMAGE_ROOTFS_EXTRA_SPACE = "2097152"
+
+
