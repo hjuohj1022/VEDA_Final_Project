@@ -47,17 +47,26 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_btnPlay_clicked()
 {
-    // 윈도우에서는 http, https 모두 지원
-    const QUrl url("http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
+    QString id = "admin";
+    QString pw = "team6cam!";
+    QString ip = "192.168.0.11";
+    QString port = "554";
+
+    // 프로파일 선택 (보통 2번이 H.264 메인)
+    // profile1: MJPEG (웹브라우저용, Qt에서 느릴 수 있음)
+    // profile2: H.264 (가장 부드러움)
+    // profile3: H.264 또는 Mobile
+    QString profile = "profile2";
+
+    // 최종 URL 조합
+    // 예: rtsp://admin:1234@192.168.0.11:554/profile2/media.smp
+    QString urlStr = QString("rtsp://%1:%2@%3:%4/%5/media.smp")
+                         .arg(id, pw, ip, port, profile);
+
+    const QUrl url(urlStr);
+
+    qDebug() << "Attempting to connect:" << url.toString();
 
     player->setSource(url);
-
-    // 디버깅용: 상태가 변할 때 출력
-    connect(player, &QMediaPlayer::mediaStatusChanged, [&](QMediaPlayer::MediaStatus status){
-        if(status == QMediaPlayer::LoadedMedia) {
-            player->play();
-        }
-    });
-
     player->play();
 }
