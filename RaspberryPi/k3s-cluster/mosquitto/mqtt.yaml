@@ -1,0 +1,35 @@
+# 1. 실행 명세서 (Deployment)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-broker  # Jenkinsfile의 이름과 통일 (중요!)
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt
+  template:
+    metadata:
+      labels:
+        app: mqtt
+    spec:
+      containers:
+      - name: mqtt
+        image: hjuohj/mqtt-broker:latest
+        imagePullPolicy: Always # 항상 최신 이미지를 당겨오도록 설정
+        ports:
+        - containerPort: 1883
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: mqtt
+  ports:
+    - protocol: TCP
+      port: 1883
+      targetPort: 1883
