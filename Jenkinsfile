@@ -9,7 +9,7 @@ pipeline {
     stages {
         stage('소스 가져오기') {
             steps {
-                git branch: 'main', url: GIT_URL
+                git branch: 'develop', url: GIT_URL
             }
         }
 
