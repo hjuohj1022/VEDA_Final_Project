@@ -28,7 +28,7 @@ pipeline {
                     // 배포 명령 (yaml 파일도 각 폴더 안에 있다고 가정하면 경로 수정 필요)
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         // yaml 파일이 crow_server 폴더 안에 있다면 경로를 명시
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f crow-server.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/crow-server"
                     }
                 }
@@ -49,7 +49,7 @@ pipeline {
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         // yaml 파일 경로 주의: mosquitto/mqtt.yaml
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
                 }
@@ -70,7 +70,7 @@ pipeline {
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         // yaml 파일 경로 주의: mediamtx/mediamtx.yaml
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f mediamtx.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server"
                     }
                 }
