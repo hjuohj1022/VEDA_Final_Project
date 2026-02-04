@@ -49,7 +49,7 @@ pipeline {
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         // yaml 파일 경로 주의: mosquitto/mqtt.yaml
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f mqtt.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
                 }
@@ -70,7 +70,7 @@ pipeline {
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         // yaml 파일 경로 주의: mediamtx/mediamtx.yaml
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f mediamtx.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server"
                     }
                 }
