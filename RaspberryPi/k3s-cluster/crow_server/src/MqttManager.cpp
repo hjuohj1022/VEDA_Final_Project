@@ -31,6 +31,7 @@ bool MqttManager::publishMessage(const std::string& topic, const std::string& pa
     }
 }
 
+
 void MqttManager::on_connect(int rc) {
     if (rc == 0) {
         std::cout << "[MQTT] Connected successfully!" << std::endl;

@@ -1,0 +1,5 @@
+# 터미널에 복사/붙여넣기
+cat <<EOF > mediamtx.yml
+paths:
+  all:
+EOF

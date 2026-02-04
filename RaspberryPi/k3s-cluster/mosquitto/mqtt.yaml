@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mqtt-broker  # Jenkinsfile의 이름과 통일 (중요!)
+  name: mqtt-broker
 spec:
   replicas: 1
   selector:
