@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      # [핵심 수정] 마스터가 아닌 '데이터 전용 워커 노드'로 지정
+      nodeSelector:
+        kubernetes.io/hostname: pi-worker2
+
+      # [삭제됨] tolerations 부분 (워커 노드엔 필요 없음)
+      
+      containers:
+      - name: mariadb
+        image: mariadb:10.6
+        imagePullPolicy: IfNotPresent 
+        
+        # [설정 유지] 한글/이모지 완벽 지원
+        args:
+          - "--character-set-server=utf8mb4"
+          - "--collation-server=utf8mb4_unicode_ci"
+        
+        ports:
+        - containerPort: 3306
+        env:
+        # [설정 유지] 한국 시간(KST)
+        - name: TZ
+          value: Asia/Seoul
+          
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: root-password
+        - name: MARIADB_DATABASE
+          value: "veda_db"
+        - name: MARIADB_USER
+          value: "veda_user"
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: user-password
+        volumeMounts:
+        - name: mariadb-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mariadb-storage
+        persistentVolumeClaim:
+          claimName: mariadb-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: mariadb
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306

@@ -14,7 +14,7 @@ int main()
     CROW_ROUTE(app, "/")([](){
         return "Hello, This is Crow + MQTT Server!";
     });
-    
+
     // 3. 제어 API ( 추후변경 예정) 
     CROW_ROUTE(app, "/control/<string>")([&mqtt](std::string cmd){
         crow::json::wvalue x;

@@ -1,8 +1,36 @@
-# 1. 프로그램 배포 (Deployment)
+# -----------------------------------------------------------
+# 1. 설정 저장소 (ConfigMap) - [수정됨]
+# -----------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mediamtx-config
+data:
+  mediamtx.yml: |
+    ###############################################
+    # Global Settings (전역 설정)
+    ###############################################
+    # HLS 기능을 켭니다 (여기에 있어야 합니다!)
+    hls: yes
+    # 지연 시간 최소화 모드
+    hlsVariant: lowLatency
+
+    ###############################################
+    # Paths Settings (경로별 설정)
+    ###############################################
+    paths:
+      all:
+        # 누구나 방송 송출 가능
+        source: publisher
+
+---
+# -----------------------------------------------------------
+# 2. 배포 명세서 (Deployment) - [변경 없음]
+# -----------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mediamtx-server # Jenkinsfile과 이름 통일 추천
+  name: mediamtx
 spec:
   replicas: 1
   selector:
@@ -13,16 +41,30 @@ spec:
       labels:
         app: mediamtx
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-worker1
       containers:
       - name: mediamtx
-        image: hjuohj/mediamtx-server:latest 
-        imagePullPolicy: Always # 항상 새로운 이미지를 받도록 강제
+        image: bluenviron/mediamtx:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8554
         - containerPort: 1935
         - containerPort: 8888
+        - containerPort: 8889
+        volumeMounts:
+        - name: config-volume
+          mountPath: /mediamtx.yml
+          subPath: mediamtx.yml
+      volumes:
+      - name: config-volume
+        configMap:
+          name: mediamtx-config
 
 ---
+# -----------------------------------------------------------
+# 3. 외부 접속 연결 (Service) - [변경 없음]
+# -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -33,11 +75,18 @@ spec:
     app: mediamtx
   ports:
     - name: rtsp
+      protocol: TCP
       port: 8554
       targetPort: 8554
     - name: rtmp
+      protocol: TCP
       port: 1935
       targetPort: 1935
     - name: hls
+      protocol: TCP
       port: 8888
       targetPort: 8888
+    - name: webrtc
+      protocol: TCP
+      port: 8889
+      targetPort: 8889

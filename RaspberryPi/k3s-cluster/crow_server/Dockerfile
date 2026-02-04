@@ -1,33 +1,35 @@
-# -------------------------------------------------------
-# 1단계: 빌드 (Builder Stage)
-# -------------------------------------------------------
-FROM hjuohj/crow-base:latest AS builder
+# [Stage 1: Build]
+FROM ubuntu:22.04 AS builder
 
-WORKDIR /app
-COPY . .
-
-# 빌드 수행
-RUN mkdir build && cd build && \
-    cmake .. && \
-    make
-
-# -------------------------------------------------------
-# 2단계: 실행 (Runtime Stage)
-# -------------------------------------------------------
-FROM ubuntu:22.04
-
-# [설명] 실행할 때 필요한 라이브러리만 설치합니다.
+# 모스키토 라이브러리 설치 (libmosquitto-dev)
 RUN apt-get update && apt-get install -y \
-    libboost-system-dev \
-    libboost-thread-dev \
-    libmosquitto1 \
-    libmosquittopp1 \
+    g++ cmake make libboost-all-dev \
+    libmosquitto-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/build/crow_server /usr/local/bin/crow_server
+WORKDIR /app
 
-# 포트 개방
+# 소스 전체 복사
+COPY . .
+
+# CMake로 빌드
+RUN mkdir build && cd build && cmake .. && make
+
+# ----------------------------------------
+
+# [Stage 2: Run]
+FROM ubuntu:22.04
+
+# 실행 시 필요한 런타임 라이브러리 설치 (dev 아님)
+RUN apt-get update && apt-get install -y \
+    libmosquitto1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 빌드된 실행 파일만 가져오기
+COPY --from=builder /app/build/crow_server .
+
 EXPOSE 8080
 
-# 실행
-CMD ["/usr/local/bin/crow_server"]
+CMD ["./crow_server"]

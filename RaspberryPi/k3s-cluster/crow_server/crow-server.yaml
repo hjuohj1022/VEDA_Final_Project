@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crow-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crow-server
+  template:
+    metadata:
+      labels:
+        app: crow-server
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-worker1
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: crow-server
+        image: docker.io/hjuohj/crow-server:latest
+        
+        # 로컬 이미지 사용 시 Never 필수 (나중에 레지스트리 쓰면 Always로 변경)
+        imagePullPolicy: Never  
+        
+        ports:
+        - containerPort: 8080
+        
+        # ▼▼▼ [핵심 추가] 카메라 접속 정보 ▼▼▼
+        env:
+        - name: CAMERA_IP
+          value: "192.168.0.11"  # 아까 알려주신 카메라 IP
+        - name: CAMERA_USER
+          value: "admin"         # ⚠️ [확인 필요] 실제 카메라 ID로 수정하세요
+        - name: CAMERA_PASSWORD
+          value: "team6cam!"          # ⚠️ [확인 필요] 실제 카메라 비밀번호로 수정하세요
+        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crow-server-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: crow-server
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

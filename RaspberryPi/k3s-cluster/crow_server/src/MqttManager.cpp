@@ -2,8 +2,9 @@
 #include <cstring> // for strlen
 
 MqttManager::MqttManager(const char* id, const char* host, int port) 
-    : mosqpp::mosquittopp(id) {
-    mosqpp::lib_init(); // 라이브러리 초기화
+    : mosquittopp::mosquittopp(id) {
+   O 
+    mosquittopp::lib_init(); // 라이브러리 초기화
 
     // 비동기 연결 시작
     connect_async(host, port, 60); 
@@ -15,7 +16,7 @@ MqttManager::MqttManager(const char* id, const char* host, int port)
 
 MqttManager::~MqttManager() {
     loop_stop();           // 루프 중지
-    mosqpp::lib_cleanup(); // 라이브러리 정리
+    mosquittopp::lib_cleanup(); // 라이브러리 정리
 }
 
 bool MqttManager::publishMessage(const std::string& topic, const std::string& payload) {
@@ -30,7 +31,6 @@ bool MqttManager::publishMessage(const std::string& topic, const std::string& pa
         return false;
     }
 }
-
 
 void MqttManager::on_connect(int rc) {
     if (rc == 0) {
