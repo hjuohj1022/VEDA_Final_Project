@@ -4,6 +4,13 @@
 FROM hjuohj/crow-base:latest AS builder
 
 WORKDIR /app
+
+# 필요한 개발 라이브러리 설치 (mosquitto headers 등)
+RUN apt-get update && apt-get install -y \
+    libmosquitto-dev \
+    libmosquittopp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
 # 빌드 수행
