@@ -1,28 +1,77 @@
-# 1. 프로그램 배포 (Deployment)
+# -----------------------------------------------------------
+# 설정 저장소 (ConfigMap) - 녹화 설정 포함
+# -----------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mediamtx-config
+data:
+  mediamtx.yml: |
+    # 전역 설정
+    hls: yes
+    hlsVariant: lowLatency
+    
+    paths:
+      all:
+        # 녹화 기능 활성화
+        record: yes
+        recordPath: /recordings/%Y-%m-%d_%H-%M-%S.mp4
+        recordFormat: mp4
+        recordDeleteAfter: 24h
+
+---
+# -----------------------------------------------------------
+# 배포 명세서 (Deployment)
+# -----------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mediamtx-server # Jenkinsfile과 이름 통일 추천
+  name: mediamtx-server 
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mediamtx
+      app: mediamtx      
   template:
     metadata:
       labels:
-        app: mediamtx
+        app: mediamtx    
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-worker1
+      
       containers:
-      - name: mediamtx
-        image: hjuohj/mediamtx-server:latest 
-        imagePullPolicy: Always # 항상 새로운 이미지를 받도록 강제
+      - name: mediamtx         
+        image: hjuohj/mediamtx-server:latest         
+        imagePullPolicy: Always  
+        
         ports:
         - containerPort: 8554
         - containerPort: 1935
         - containerPort: 8888
+        - containerPort: 8889
+        
+        volumeMounts:
+        - name: config-volume
+          mountPath: /mediamtx.yml
+          subPath: mediamtx.yml
+        # 녹화 파일 저장소 연결
+        - name: recordings
+          mountPath: /recordings
+          
+      volumes:
+      - name: config-volume
+        configMap:
+          name: mediamtx-config
+      # PVC 연결
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: recording-pvc
 
 ---
+# -----------------------------------------------------------
+# 외부 접속 연결 (Service)
+# -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -30,14 +79,21 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: mediamtx
+    app: mediamtx  
   ports:
     - name: rtsp
+      protocol: TCP
       port: 8554
       targetPort: 8554
     - name: rtmp
+      protocol: TCP
       port: 1935
       targetPort: 1935
     - name: hls
+      protocol: TCP
       port: 8888
       targetPort: 8888
+    - name: webrtc
+      protocol: TCP
+      port: 8889
+      targetPort: 8889
