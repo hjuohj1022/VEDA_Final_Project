@@ -1,2 +1,0 @@
-# VEDA_Final_Project
-RasberryPi_project

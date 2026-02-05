@@ -5,7 +5,7 @@
 #include <string>
 #include <iostream>
 
-class MqttManager : public mosqpp::mosquittopp {
+class MqttManager : public mosquittopp::mosquittopp {
 public:
     MqttManager(const char* id, const char* host, int port);
     ~MqttManager();

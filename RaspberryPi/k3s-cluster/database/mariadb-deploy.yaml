@@ -12,22 +12,18 @@ spec:
       labels:
         app: mariadb
     spec:
+      # [핵심 수정] 마스터가 아닌 '데이터 전용 워커 노드'로 지정
       nodeSelector:
-        kubernetes.io/hostname: pi-master
-      tolerations:
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/master"
-        operator: "Exists"
-        effect: "NoSchedule"
+        kubernetes.io/hostname: pi-worker2
+
+      # [삭제됨] tolerations 부분 (워커 노드엔 필요 없음)
       
       containers:
       - name: mariadb
         image: mariadb:10.6
         imagePullPolicy: IfNotPresent 
         
-        # [추천 1] 한글/이모지 완벽 지원 강제 설정
+        # [설정 유지] 한글/이모지 완벽 지원
         args:
           - "--character-set-server=utf8mb4"
           - "--collation-server=utf8mb4_unicode_ci"
@@ -35,7 +31,7 @@ spec:
         ports:
         - containerPort: 3306
         env:
-        # [추천 2] DB 시간을 한국 시간(KST)으로 설정
+        # [설정 유지] 한국 시간(KST)
         - name: TZ
           value: Asia/Seoul
           
