@@ -1,7 +1,7 @@
 # -------------------------------------------------------
 # 1단계: 빌드 (Builder Stage)
 # -------------------------------------------------------
-FROM ubuntu:22.04 AS builder
+FROM hjuohj/crow-base:latest AS builder
 
 # 빌드 도구 설치
 RUN apt-get update && apt-get install -y \
