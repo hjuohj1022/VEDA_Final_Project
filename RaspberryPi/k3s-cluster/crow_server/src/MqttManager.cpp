@@ -1,12 +1,14 @@
-#include "../include/MqttManager.h"
 #include <cstring> // for strlen
+#include <iostream>
+#include "../include/MqttManager.h"
 
 MqttManager::MqttManager(const char* id, const char* host, int port) 
-    : mosqpp::mosquittopp(id) { 
+    : mosqpp::mosquittopp(id) {
+   
     mosqpp::lib_init(); // 라이브러리 초기화
 
-    // 비동기 연결 시작
-    connect_async(host, port, 60); 
+    int keepalive = 60;
+    connect(host, port, keepalive);
     
     // 백그라운드 스레드에서 MQTT 루프 실행 (중요: Crow 서버 멈춤 방지)
     loop_start(); 

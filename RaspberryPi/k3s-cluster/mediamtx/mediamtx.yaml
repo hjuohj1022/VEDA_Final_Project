@@ -7,16 +7,13 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
-    # 전역 설정
-    hls: yes
-    hlsVariant: lowLatency
-    
     paths:
       all:
-        # 녹화 기능 활성화
         record: yes
-        recordPath: /recordings/%Y-%m-%d_%H-%M-%S.mp4
-        recordFormat: mp4
+        
+        recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
+        
+        recordFormat: fmp4
         recordDeleteAfter: 24h
 
 ---
@@ -42,8 +39,7 @@ spec:
       
       containers:
       - name: mediamtx         
-        image: hjuohj/mediamtx-server:latest         
-        imagePullPolicy: Always  
+        image: bluenviron/mediamtx:latest          
         
         ports:
         - containerPort: 8554
