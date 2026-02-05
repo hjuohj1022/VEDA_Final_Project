@@ -13,7 +13,7 @@ data:
         
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         
-        recordFormat: mp4
+        recordFormat: fmp4
         recordDeleteAfter: 24h
 
 ---

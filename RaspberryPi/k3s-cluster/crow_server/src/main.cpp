@@ -134,40 +134,35 @@ int main()
         }
 
         std::string filename = std::string(file_param);
-        std::string file_path = "/recordings/" + filename;
         
-        // 경로 조작 방지
-        if (filename.find("..") != std::string::npos) {
-             res.code = 403; 
+        // [보안] 상위 폴더 접근 방지
+        if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos) {
+             res.code = 403;
              res.end();
              return;
         }
 
-        // 파일 존재 확인
-        if (!fs::exists(file_path)) {
+        std::string file_path = "/recordings/" + filename;
+        
+        // 디버깅을 위해 로그 출력 (파드 로그에서 확인 가능)
+        std::cout << "[Stream Request] Path: " << file_path << std::endl;
+
+        if (fs::exists(file_path)) {
+            // [핵심] Crow가 알아서 스트리밍(Range Request)을 처리해줍니다.
+            // 대용량 파일도 메모리를 안 먹고 아주 잘 보냅니다.
+            res.set_static_file_info(file_path);
+            
+            // 혹시 모르니 헤더 강제 설정
+            res.add_header("Content-Type", "video/mp4");
+            res.add_header("Accept-Ranges", "bytes");
+            
+            res.end();
+        } else {
+            std::cerr << "[Error] File not found: " << file_path << std::endl;
             res.code = 404;
-            res.write("File not found on Server (Check Logic)");
+            res.write("File not found on Server");
             res.end();
-            return;
         }
-
-        // 파일 직접 열기 (Crow 함수 안 쓰고 직접 읽음)
-        std::ifstream file(file_path, std::ios::binary);
-        if (!file.is_open()) {
-            res.code = 500;
-            res.write("Error: Could not open file (Permission?)");
-            res.end();
-            return;
-        }
-
-        // 내용을 읽어서 응답 본문에 담기
-        std::ostringstream ss;
-        ss << file.rdbuf();
-        std::string body = ss.str();
-
-        res.write(body);
-        res.add_header("Content-Type", "video/mp4");
-        res.end();
     });
 
     // 서버 시작 (포트 8080)
