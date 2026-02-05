@@ -3,7 +3,7 @@
 
 MqttManager::MqttManager(const char* id, const char* host, int port) 
     : mosquittopp::mosquittopp(id) {
-   O 
+
     mosquittopp::lib_init(); // 라이브러리 초기화
 
     // 비동기 연결 시작
