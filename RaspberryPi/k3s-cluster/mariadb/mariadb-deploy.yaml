@@ -18,14 +18,14 @@ spec:
       
       containers:
       - name: mariadb
-        image: hjuohj/mariadb-server:latest
-        imagePullPolicy: Always 
+        image: mariadb:10.6
+        imagePullPolicy: IfNotPresent 
         
         # 한글/이모지 완벽 지원
         args:
           - "--character-set-server=utf8mb4"
           - "--collation-server=utf8mb4_unicode_ci"
-
+        
         ports:
         - containerPort: 3306
         env:

@@ -135,7 +135,7 @@ int main()
 
         std::string filename = std::string(file_param);
         
-        // [보안] 상위 폴더 접근 방지
+        // 경로 조작 방지
         if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos) {
              res.code = 403;
              res.end();
@@ -143,24 +143,45 @@ int main()
         }
 
         std::string file_path = "/recordings/" + filename;
-        
-        // 디버깅을 위해 로그 출력 (파드 로그에서 확인 가능)
         std::cout << "[Stream Request] Path: " << file_path << std::endl;
 
-        if (fs::exists(file_path)) {
-            // [핵심] Crow가 알아서 스트리밍(Range Request)을 처리해줍니다.
-            // 대용량 파일도 메모리를 안 먹고 아주 잘 보냅니다.
-            res.set_static_file_info(file_path);
-            
-            // 혹시 모르니 헤더 강제 설정
-            res.add_header("Content-Type", "video/mp4");
-            res.add_header("Accept-Ranges", "bytes");
-            
-            res.end();
-        } else {
+        // 파일 존재 확인
+        if (!fs::exists(file_path)) {
             std::cerr << "[Error] File not found: " << file_path << std::endl;
             res.code = 404;
             res.write("File not found on Server");
+            res.end();
+            return;
+        }
+
+        // 파일 열기
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate); // 끝으로 이동해서 크기 확인
+        if (!file.is_open()) {
+            std::cerr << "[Error] Permission denied: " << file_path << std::endl;
+            res.code = 500;
+            res.write("Error: Could not open file");
+            res.end();
+            return;
+        }
+
+        // 파일 크기 구하기
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg); // 다시 처음으로
+
+        // 내용 읽기
+        std::vector<char> buffer(size);
+        if (file.read(buffer.data(), size)) {
+            // string으로 변환하여 body에 할당
+            std::string body(buffer.begin(), buffer.end());
+            res.write(body);
+            
+            // 플레이어에게 파일 정보를 정확히 알려줌
+            res.add_header("Content-Length", std::to_string(size));
+            res.add_header("Content-Type", "video/mp4");
+            
+            res.end();
+        } else {
+            res.code = 500;
             res.end();
         }
     });
