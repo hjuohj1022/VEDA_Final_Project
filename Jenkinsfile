@@ -76,5 +76,25 @@ pipeline {
                 }
             }
         }
+
+        // 🐬 4. MariaDB (폴더명: mariadb)
+        stage('MariaDB 배포') {
+            when { changeset 'RaspberryPi/k3s-cluster/mariadb/**' }
+            steps {
+                script {
+                    dir('RaspberryPi/k3s-cluster/mariadb') {
+                        echo "🐬 MariaDB 빌드 시작..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:latest --push ."
+                        }
+                    }
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mariadb"
+                    }
+                }
+            }
+        }
     }
 }
