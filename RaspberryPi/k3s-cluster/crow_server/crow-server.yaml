@@ -12,34 +12,41 @@ spec:
       labels:
         app: crow-server
     spec:
+      # 
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
-      tolerations:
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/master"
-        operator: "Exists"
-        effect: "NoSchedule"
+      
       containers:
       - name: crow-server
         image: docker.io/hjuohj/crow-server:latest
-        
-        # 로컬 이미지 사용 시 Never 필수 (나중에 레지스트리 쓰면 Always로 변경)
-        imagePullPolicy: Never  
+        imagePullPolicy: Always 
         
         ports:
         - containerPort: 8080
         
-        # 카메라 접속 정보 
+        # DB 접속 정보 
         env:
-        - name: CAMERA_IP
-          value: "192.168.0.11"  # 카메라 IP
-        - name: CAMERA_USER
-          value: "admin"         # 카메라 ID
-        - name: CAMERA_PASSWORD
-          value: "team6cam!"          # 카메라 비밀번호
-          
+        - name: DB_HOST
+          value: "mariadb-service"
+        - name: DB_USER
+          value: "veda_user"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: user-password
+
+        # MediaMTX가 녹화한 폴더를 내 폴더처럼 연결
+        volumeMounts:
+        - name: recordings
+          mountPath: /recordings  
+          readOnly: true
+
+      volumes:
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: recording-pvc
+
 ---
 apiVersion: v1
 kind: Service
