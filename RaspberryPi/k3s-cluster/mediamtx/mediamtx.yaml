@@ -7,21 +7,17 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
-    ###############################################
-    # Global Settings (전역 설정)
-    ###############################################
-    # HLS 기능을 켜기
+    # 전역 설정
     hls: yes
-    # 지연 시간 최소화 모드
     hlsVariant: lowLatency
-
-    ###############################################
-    # Paths Settings (경로별 설정)
-    ###############################################
+    
     paths:
       all:
-        # 누구나 방송 송출 가능
-        source: publisher
+        # 녹화 기능 활성화
+        record: yes
+        recordPath: /recordings/%Y-%m-%d_%H-%M-%S.mp4
+        recordFormat: mp4
+        recordDeleteAfter: 24h
 
 ---
 # -----------------------------------------------------------
@@ -30,36 +26,47 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mediamtx
+  name: mediamtx-server 
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mediamtx
+      app: mediamtx      
   template:
     metadata:
       labels:
-        app: mediamtx
+        app: mediamtx    
     spec:
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
+      
       containers:
-      - name: mediamtx
-        image: bluenviron/mediamtx:latest
-        imagePullPolicy: IfNotPresent
+      - name: mediamtx         
+        image: hjuohj/mediamtx-server:latest         
+        imagePullPolicy: Always  
+        
         ports:
         - containerPort: 8554
         - containerPort: 1935
         - containerPort: 8888
         - containerPort: 8889
+        
         volumeMounts:
         - name: config-volume
           mountPath: /mediamtx.yml
           subPath: mediamtx.yml
+        # 녹화 파일 저장소 연결
+        - name: recordings
+          mountPath: /recordings
+          
       volumes:
       - name: config-volume
         configMap:
           name: mediamtx-config
+      # PVC 연결
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: recording-pvc
 
 ---
 # -----------------------------------------------------------
@@ -72,7 +79,7 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: mediamtx
+    app: mediamtx  
   ports:
     - name: rtsp
       protocol: TCP
