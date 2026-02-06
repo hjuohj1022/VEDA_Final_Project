@@ -37,6 +37,19 @@
      <string>Play Video</string>
     </property>
    </widget>
+   <widget class="QSlider" name="horizontalSlider">
+    <property name="geometry">
+     <rect>
+      <x>180</x>
+      <y>370</y>
+      <width>421</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="orientation">
+     <enum>Qt::Orientation::Horizontal</enum>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">

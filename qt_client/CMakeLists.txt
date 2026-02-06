@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.19)
 project(Team3VideoReceiver LANGUAGES CXX)
 
-# Multimedia, MultimediaWidgets 컴포넌트 추가
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets)
+# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network)
 
 qt_standard_project_setup()
 
@@ -18,9 +18,9 @@ target_link_libraries(Team3VideoReceiver
     PRIVATE
         Qt::Core
         Qt::Widgets
-        # 라이브러리 링크 추가
         Qt::Multimedia
         Qt::MultimediaWidgets
+        Qt::Network
 )
 
 include(GNUInstallDirs)
