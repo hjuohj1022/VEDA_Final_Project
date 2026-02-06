@@ -19,7 +19,7 @@ spec:
       containers:
       - name: mariadb
         image: hjuohj/mariadb-server:latest
-        imagePullPolicy: Always  
+        imagePullPolicy: Always 
         
         # 한글/이모지 완벽 지원
         args:
