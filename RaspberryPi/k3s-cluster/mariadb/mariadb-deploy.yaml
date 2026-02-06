@@ -12,16 +12,18 @@ spec:
       labels:
         app: mariadb
     spec:
-      # 마스터가 아닌 '데이터 전용 워커 노드'로 지정
+      # [�ٽ� ����] �����Ͱ� �ƴ� '������ ���� ��Ŀ ���'�� ����
       nodeSelector:
         kubernetes.io/hostname: pi-worker2
+
+      # [������] tolerations �κ� (��Ŀ ��忣 �ʿ� ����)
       
       containers:
       - name: mariadb
         image: hjuohj/mariadb-server:latest
-        imagePullPolicy: Always 
+        imagePullPolicy: Always  
         
-        # 한글/이모지 완벽 지원
+        # [���� ����] �ѱ�/�̸��� �Ϻ� ����
         args:
           - "--character-set-server=utf8mb4"
           - "--collation-server=utf8mb4_unicode_ci"
@@ -29,7 +31,7 @@ spec:
         ports:
         - containerPort: 3306
         env:
-        # 한국 시간(KST)
+        # [���� ����] �ѱ� �ð�(KST)
         - name: TZ
           value: Asia/Seoul
           

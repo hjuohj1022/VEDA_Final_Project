@@ -1,8 +1,22 @@
-# 1. 실행 명세서 (Deployment)
+# 1. 설정 파일 정의 (ConfigMap)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mosquitto-config
+data:
+  mosquitto.conf: |
+    listener 1883
+    allow_anonymous true
+    persistence true
+    persistence_location /mosquitto/data/
+    log_dest stdout
+
+---
+# 2. 실행 명세서 (Deployment)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mqtt-broker
+  name: mqtt
 spec:
   replicas: 1
   selector:
@@ -19,14 +33,23 @@ spec:
         imagePullPolicy: Always # 항상 최신 이미지를 당겨오도록 설정
         ports:
         - containerPort: 1883
+        volumeMounts:
+        - name: config-volume
+          mountPath: /mosquitto/config/mosquitto.conf
+          subPath: mosquitto.conf
+      volumes:
+      - name: config-volume
+        configMap:
+          name: mosquitto-config
 
 ---
+# 3. 외부 접속용 (Service)
 apiVersion: v1
 kind: Service
 metadata:
   name: mqtt-service
 spec:
-  type: LoadBalancer
+  type: LoadBalancer  # 외부 IP 할당 (MetalLB)
   selector:
     app: mqtt
   ports:
