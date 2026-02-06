@@ -1,7 +1,7 @@
 # -------------------------------------------------------
 # 1단계: 빌드 (Builder Stage)
 # -------------------------------------------------------
-FROM ubuntu:22.04 AS builder
+FROM hjuohj/crow-base:latest AS builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y \
     libmosquitto1 \
     libmosquittopp1 \
     libmariadb3 \
+    libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/build/crow_server /usr/local/bin/crow_server

@@ -29,8 +29,8 @@ spec:
     spec:
       containers:
       - name: mqtt
-        image: eclipse-mosquitto:latest  # 공식 이미지 사용
-        imagePullPolicy: IfNotPresent
+        image: hjuohj/mqtt-broker:latest
+        imagePullPolicy: Always # 항상 최신 이미지를 당겨오도록 설정
         ports:
         - containerPort: 1883
         volumeMounts:
