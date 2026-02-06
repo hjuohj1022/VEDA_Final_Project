@@ -28,11 +28,13 @@ private slots:
     // API 통신 관련 슬롯
     void onLoginClicked();      // 로그인 버튼
     void onRefreshClicked();    // 목록 갱신 버튼
+    void onDeleteClicked();     // 파일 삭제 버튼
     void onFileDoubleClicked(QListWidgetItem *item); // 파일 재생
 
     // 네트워크 응답 처리
     void onLoginReply(QNetworkReply *reply);
     void onListReply(QNetworkReply *reply);
+    void onDeleteReply(QNetworkReply *reply); // 삭제 응답 처리
 
 private:
     Ui::MainWindow *ui;
@@ -55,6 +57,7 @@ private:
     QListWidget *fileListWidget;
     QPushButton *btnLogin;
     QPushButton *btnRefresh;
+    QPushButton *btnDelete;
 };
 
 #endif // MAINWINDOW_H

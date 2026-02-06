@@ -26,7 +26,7 @@ MainWindow::MainWindow(QWidget *parent)
     QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
 
     // -----------------------------------------------------------
-    // [왼쪽 패널] 로그인 + 파일 목록
+    // [왼쪽 패널] 로그인 + 파일 목록 + 삭제 버튼
     // -----------------------------------------------------------
     QVBoxLayout *controlLayout = new QVBoxLayout();
 
@@ -42,6 +42,10 @@ MainWindow::MainWindow(QWidget *parent)
     btnRefresh = new QPushButton("Refresh List", this);
     btnRefresh->setEnabled(false); // 로그인 전엔 비활성화
 
+    // 삭제 버튼 생성
+    btnDelete = new QPushButton("Delete Selected", this);
+    btnDelete->setEnabled(false); // 로그인 전엔 비활성화
+
     fileListWidget = new QListWidget(this);
 
     controlLayout->addWidget(idInput);
@@ -49,6 +53,7 @@ MainWindow::MainWindow(QWidget *parent)
     controlLayout->addWidget(btnLogin);
     controlLayout->addSpacing(10);
     controlLayout->addWidget(btnRefresh);
+    controlLayout->addWidget(btnDelete);
     controlLayout->addWidget(fileListWidget);
 
     // -----------------------------------------------------------
@@ -88,6 +93,7 @@ MainWindow::MainWindow(QWidget *parent)
     // -----------------------------------------------------------
     connect(btnLogin, &QPushButton::clicked, this, &MainWindow::onLoginClicked);
     connect(btnRefresh, &QPushButton::clicked, this, &MainWindow::onRefreshClicked);
+    connect(btnDelete, &QPushButton::clicked, this, &MainWindow::onDeleteClicked);
     connect(fileListWidget, &QListWidget::itemDoubleClicked, this, &MainWindow::onFileDoubleClicked);
 
     // 슬라이더와 플레이어 연동
@@ -145,6 +151,7 @@ void MainWindow::onLoginReply(QNetworkReply *reply)
     if (reply->error() == QNetworkReply::NoError) {
         QMessageBox::information(this, "Success", "로그인 성공!");
         btnRefresh->setEnabled(true); // 목록 버튼 활성화
+        btnDelete->setEnabled(true);  // 삭제 버튼 활성화
         onRefreshClicked();           // 자동으로 목록 불러오기
     } else {
         QMessageBox::warning(this, "Error", "로그인 실패: " + reply->errorString());
@@ -204,4 +211,53 @@ void MainWindow::onFileDoubleClicked(QListWidgetItem *item)
 
     player->setSource(streamUrl);
     player->play();
+}
+
+// ---------------------------------------------------------
+// [기능 4] 파일 삭제 요청 (DELETE /recordings?file=...)
+// ---------------------------------------------------------
+void MainWindow::onDeleteClicked()
+{
+    // 리스트에서 선택된 아이템이 있는지 확인
+    QListWidgetItem *item = fileListWidget->currentItem();
+    if (!item) {
+        QMessageBox::warning(this, "Warning", "삭제할 파일을 선택해주세요.");
+        return;
+    }
+
+    QString fileName = item->text();
+
+    // 정말 삭제할지 확인
+    if (QMessageBox::question(this, "Confirm", fileName + " 파일을 삭제하시겠습니까?",
+                              QMessageBox::Yes | QMessageBox::No) == QMessageBox::No) {
+        return;
+    }
+
+    // URL 생성 (DELETE /recordings?file=파일명)
+    QUrl url(serverUrl + "/recordings?file=" + fileName);
+    QNetworkRequest request(url);
+
+    // DELETE 요청 전송
+    QNetworkReply *reply = networkManager->deleteResource(request);
+
+    connect(reply, &QNetworkReply::finished, [this, reply](){
+        onDeleteReply(reply);
+    });
+}
+
+void MainWindow::onDeleteReply(QNetworkReply *reply)
+{
+    if (reply->error() == QNetworkReply::NoError) {
+        QMessageBox::information(this, "Deleted", "파일이 성공적으로 삭제되었습니다.");
+        // 삭제 후 목록 자동 갱신
+        onRefreshClicked();
+
+        // (선택사항) 만약 삭제한 파일이 재생 중이었다면 재생 중지
+        player->stop();
+        seekSlider->setValue(0);
+
+    } else {
+        QMessageBox::warning(this, "Error", "삭제 실패: " + reply->errorString());
+    }
+    reply->deleteLater();
 }
