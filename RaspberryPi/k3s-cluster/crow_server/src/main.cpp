@@ -206,6 +206,32 @@ int main()
         res.end();
     });
 
+    // ==========================================
+    // 파일 삭제 API (DELETE /recordings?file=...)
+    // ==========================================
+    CROW_ROUTE(app, "/recordings").methods(crow::HTTPMethod::DELETE)
+    ([](const crow::request& req){
+        char* file_param = req.url_params.get("file");
+        if (!file_param) return crow::response(400);
+
+        std::string filename = std::string(file_param);
+        // 보안 검사 (.. 포함 방지)
+        if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos) 
+            return crow::response(403);
+
+        std::string file_path = "/recordings/" + filename;
+        
+        if (fs::exists(file_path)) {
+            try {
+                fs::remove(file_path);
+                return crow::response(200, "Deleted");
+            } catch(...) {
+                return crow::response(500, "Delete failed");
+            }
+        }
+        return crow::response(404, "File not found");
+    });
+
     // 서버 시작 (포트 8080)
     app.port(8080).multithreaded().run();
 }
