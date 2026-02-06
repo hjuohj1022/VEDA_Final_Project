@@ -121,69 +121,89 @@ int main()
     });
 
     // ==========================================
-    // 영상 스트리밍 (직접 읽어서 전송) 
+    // 영상 스트리밍 (Range Request 지원) 
     // ==========================================
     CROW_ROUTE(app, "/stream")
     ([](const crow::request& req, crow::response& res){
         char* file_param = req.url_params.get("file");
         if (!file_param) {
-            res.code = 400;
-            res.write("Error: Missing 'file' parameter");
-            res.end();
-            return;
+            res.code = 400; res.end(); return;
         }
 
         std::string filename = std::string(file_param);
         
         // 경로 조작 방지
         if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos) {
-             res.code = 403;
-             res.end();
-             return;
+             res.code = 403; res.end(); return;
         }
 
         std::string file_path = "/recordings/" + filename;
-        std::cout << "[Stream Request] Path: " << file_path << std::endl;
+        std::cout << "[Stream] File: " << file_path << std::endl;
 
-        // 파일 존재 확인
         if (!fs::exists(file_path)) {
-            std::cerr << "[Error] File not found: " << file_path << std::endl;
-            res.code = 404;
-            res.write("File not found on Server");
-            res.end();
-            return;
+            res.code = 404; res.end(); return;
         }
 
-        // 파일 열기
-        std::ifstream file(file_path, std::ios::binary | std::ios::ate); // 끝으로 이동해서 크기 확인
+        // 파일 전체 크기 확인
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
         if (!file.is_open()) {
-            std::cerr << "[Error] Permission denied: " << file_path << std::endl;
-            res.code = 500;
-            res.write("Error: Could not open file");
-            res.end();
-            return;
+            res.code = 500; res.end(); return;
+        }
+        long file_size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Range 헤더 파싱 (플레이어가 "여기부터 주세요" 요청했는지 확인)
+        long start = 0;
+        long end = file_size - 1;
+        bool is_range = false;
+
+        if (req.headers.count("Range")) {
+            std::string range_header = req.get_header_value("Range");
+            // "bytes=1024-" 형식 파싱
+            size_t eq_pos = range_header.find("=");
+            size_t dash_pos = range_header.find("-");
+            if (eq_pos != std::string::npos && dash_pos != std::string::npos) {
+                try {
+                    start = std::stol(range_header.substr(eq_pos + 1, dash_pos - eq_pos - 1));
+                    if (dash_pos + 1 < range_header.length()) {
+                        end = std::stol(range_header.substr(dash_pos + 1));
+                    }
+                    is_range = true;
+                } catch (...) {
+                    // 파싱 실패 시 그냥 전체 전송
+                    start = 0; end = file_size - 1;
+                }
+            }
         }
 
-        // 파일 크기 구하기
-        std::streamsize size = file.tellg();
-        file.seekg(0, std::ios::beg); // 다시 처음으로
+        // 범위 보정
+        if (start >= file_size) start = file_size - 1;
+        if (end >= file_size) end = file_size - 1;
+        long content_length = end - start + 1;
 
-        // 내용 읽기
-        std::vector<char> buffer(size);
-        if (file.read(buffer.data(), size)) {
-            // string으로 변환하여 body에 할당
-            std::string body(buffer.begin(), buffer.end());
-            res.write(body);
-            
-            // 플레이어에게 파일 정보를 정확히 알려줌
-            res.add_header("Content-Length", std::to_string(size));
-            res.add_header("Content-Type", "video/mp4");
-            
-            res.end();
+        // 해당 부분 읽기
+        file.seekg(start, std::ios::beg);
+        std::vector<char> buffer(content_length);
+        file.read(buffer.data(), content_length);
+
+        // 응답 헤더 설정
+        std::string body(buffer.begin(), buffer.end());
+        res.write(body);
+        res.add_header("Content-Type", "video/mp4");
+        res.add_header("Accept-Ranges", "bytes");
+
+        if (is_range) {
+            // 부분 전송 (206 Partial Content)
+            res.code = 206;
+            res.add_header("Content-Range", "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size));
+            res.add_header("Content-Length", std::to_string(content_length));
         } else {
-            res.code = 500;
-            res.end();
+            // 전체 전송 (200 OK)
+            res.code = 200;
+            res.add_header("Content-Length", std::to_string(file_size));
         }
+        
+        res.end();
     });
 
     // 서버 시작 (포트 8080)
