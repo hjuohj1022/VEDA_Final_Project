@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSlider>
+#include <QTabWidget>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -31,6 +32,12 @@ private slots:
     void onDeleteClicked();     // 파일 삭제 버튼
     void onFileDoubleClicked(QListWidgetItem *item); // 파일 재생
 
+    // 녹화 영상 재생 제어
+    void onPlayPauseClicked();  // 재생/일시정지 토글
+
+    // 탭 변경 이벤트 (라이브 영상 제어용)
+    void onLiveTabChanged(int index);
+
     // 네트워크 응답 처리
     void onLoginReply(QNetworkReply *reply);
     void onListReply(QNetworkReply *reply);
@@ -39,13 +46,21 @@ private slots:
 private:
     Ui::MainWindow *ui;
 
-    // 미디어 객체
+    // -----------------------------------------------------------
+    // UI 구조 객체 (탭으로 분리)
+    // -----------------------------------------------------------
+    QTabWidget *mainTabWidget;
+    QWidget *recordTab; // [Tab 1] 녹화 목록 및 재생
+    QWidget *liveTab;   // [Tab 2] 실시간 라이브 뷰
+
+    // -----------------------------------------------------------
+    // [Tab 1] 녹화 기능 객체
+    // -----------------------------------------------------------
     QMediaPlayer *player;
     QAudioOutput *audioOutput;
     QVideoWidget *videoWidget;
-
-    // 탐색 슬라이더 객체
     QSlider *seekSlider;
+    QPushButton *btnPlayPause; // 재생/일시정지 버튼
 
     // 네트워크 객체
     QNetworkAccessManager *networkManager;
@@ -58,6 +73,14 @@ private:
     QPushButton *btnLogin;
     QPushButton *btnRefresh;
     QPushButton *btnDelete;
+
+    // -----------------------------------------------------------
+    // [Tab 2] 라이브 기능 객체 (4채널)
+    // -----------------------------------------------------------
+    // 4개의 플레이어와 비디오 화면을 리스트로 관리
+    QList<QMediaPlayer*> livePlayers;
+    QList<QAudioOutput*> liveAudios;
+    QList<QVideoWidget*> liveVideoWidgets;
 };
 
 #endif // MAINWINDOW_H

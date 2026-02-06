@@ -1,5 +1,6 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -21,9 +22,25 @@ MainWindow::MainWindow(QWidget *parent)
     // 네트워크 매니저 생성
     networkManager = new QNetworkAccessManager(this);
 
-    // UI 화면 구성 (코드로 레이아웃 생성)
+    // ==========================================
+    // 메인 UI 구성 (탭 위젯 도입)
+    // ==========================================
     QWidget *centralWidget = new QWidget(this);
-    QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+
+    // 탭 위젯 생성
+    mainTabWidget = new QTabWidget(this);
+    mainLayout->addWidget(mainTabWidget);
+    setCentralWidget(centralWidget);
+
+    // 탭 변경 시 이벤트 연결 (라이브 영상 재생/정지 제어용)
+    connect(mainTabWidget, &QTabWidget::currentChanged, this, &MainWindow::onLiveTabChanged);
+
+    // ============================================================
+    // [Tab 1] 녹화 목록 및 재생 (기존 기능)
+    // ============================================================
+    recordTab = new QWidget();
+    QHBoxLayout *recordLayout = new QHBoxLayout(recordTab);
 
     // -----------------------------------------------------------
     // [왼쪽 패널] 로그인 + 파일 목록 + 삭제 버튼
@@ -57,7 +74,7 @@ MainWindow::MainWindow(QWidget *parent)
     controlLayout->addWidget(fileListWidget);
 
     // -----------------------------------------------------------
-    // [오른쪽 패널] 비디오 화면 + 탐색 슬라이더
+    // [오른쪽 패널] 비디오 화면 + 탐색 슬라이더 + 재생 버튼
     // -----------------------------------------------------------
     QVBoxLayout *rightLayout = new QVBoxLayout();
 
@@ -70,55 +87,130 @@ MainWindow::MainWindow(QWidget *parent)
     seekSlider = new QSlider(Qt::Horizontal, this);
     seekSlider->setRange(0, 0); // 아직 영상 로드 전이므로 0
 
-    // 오른쪽 레이아웃에 순서대로 추가 (비디오 위, 슬라이더 아래)
+    // 재생/일시정지 버튼 생성
+    btnPlayPause = new QPushButton("Play", this);
+
+    // 오른쪽 레이아웃에 순서대로 추가
     rightLayout->addWidget(videoWidget, 1); // 비디오가 공간 대부분 차지(비율 1)
     rightLayout->addWidget(seekSlider);     // 슬라이더 추가
+    rightLayout->addWidget(btnPlayPause);   // 일시정지 버튼 추가
 
-    // 레이아웃 배치 (왼쪽 1 : 오른쪽 3 비율)
-    mainLayout->addLayout(controlLayout, 1);
-    mainLayout->addLayout(rightLayout, 3);
+    // 녹화 탭 레이아웃 배치 (왼쪽 1 : 오른쪽 3 비율)
+    recordLayout->addLayout(controlLayout, 1);
+    recordLayout->addLayout(rightLayout, 3);
 
-    setCentralWidget(centralWidget);
+    // 탭에 추가
+    mainTabWidget->addTab(recordTab, "Recordings");
 
-    // 미디어 플레이어 설정 (Qt6 방식)
+    // 녹화용 미디어 플레이어 설정 (Qt6 방식)
     player = new QMediaPlayer(this);
     audioOutput = new QAudioOutput(this);
-
     player->setAudioOutput(audioOutput);
     player->setVideoOutput(videoWidget);
     audioOutput->setVolume(0.5f);
 
     // -----------------------------------------------------------
-    // 이벤트 연결 (Signal & Slot)
+    // [Tab 1] 이벤트 연결 (Signal & Slot)
     // -----------------------------------------------------------
     connect(btnLogin, &QPushButton::clicked, this, &MainWindow::onLoginClicked);
     connect(btnRefresh, &QPushButton::clicked, this, &MainWindow::onRefreshClicked);
     connect(btnDelete, &QPushButton::clicked, this, &MainWindow::onDeleteClicked);
     connect(fileListWidget, &QListWidget::itemDoubleClicked, this, &MainWindow::onFileDoubleClicked);
+    connect(btnPlayPause, &QPushButton::clicked, this, &MainWindow::onPlayPauseClicked); // [추가] 재생 버튼 연결
 
     // 슬라이더와 플레이어 연동
-    // 영상 길이가 인식되면 슬라이더 범위 설정 (0 ~ 영상길이)
     connect(player, &QMediaPlayer::durationChanged, this, [&](qint64 duration) {
         seekSlider->setRange(0, duration);
     });
 
-    // 영상 재생 중 현재 위치에 맞춰 슬라이더 이동
     connect(player, &QMediaPlayer::positionChanged, this, [&](qint64 position) {
-        // 사용자가 슬라이더를 잡고 드래그 중일 땐, 코드가 강제로 옮기지 않도록 함
         if (!seekSlider->isSliderDown()) {
             seekSlider->setValue(position);
         }
     });
 
-    // 사용자가 슬라이더를 움직이면 해당 위치로 영상 점프
     connect(seekSlider, &QSlider::sliderMoved, this, [&](int position) {
         player->setPosition(position);
     });
+
+    // 플레이어 상태가 변하면 버튼 글씨 변경 (Play <-> Pause)
+    connect(player, &QMediaPlayer::playbackStateChanged, this, [&](QMediaPlayer::PlaybackState state){
+        if (state == QMediaPlayer::PlayingState)
+            btnPlayPause->setText("Pause");
+        else
+            btnPlayPause->setText("Play");
+    });
+
+    // ============================================================
+    // [Tab 2] 실시간 라이브 (4채널 Grid 구성)
+    // ============================================================
+    liveTab = new QWidget();
+    QGridLayout *liveGridLayout = new QGridLayout(liveTab);
+    liveGridLayout->setSpacing(2); // 영상 간 간격
+
+    // 4개의 플레이어를 생성하여 배치
+    for(int i = 0; i < 4; i++) {
+        QVideoWidget *vid = new QVideoWidget(this);
+        vid->setStyleSheet("border: 1px solid gray; background-color: #222;"); // 테두리 추가
+
+        QMediaPlayer *ply = new QMediaPlayer(this);
+        QAudioOutput *aud = new QAudioOutput(this);
+
+        ply->setAudioOutput(aud);
+        ply->setVideoOutput(vid);
+        aud->setVolume(0.0f); // 라이브 소리는 끔 (4개가 섞이면 시끄러움)
+
+        // 리스트에 보관 (나중에 제어하기 위해)
+        liveVideoWidgets.append(vid);
+        livePlayers.append(ply);
+        liveAudios.append(aud);
+
+        // Grid 배치 (2행 2열) -> (0,0) (0,1) (1,0) (1,1)
+        liveGridLayout->addWidget(vid, i / 2, i % 2);
+    }
+
+    // 탭에 추가
+    mainTabWidget->addTab(liveTab, "Live View (4CH)");
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+// ---------------------------------------------------------
+// 재생 / 일시정지 토글
+// ---------------------------------------------------------
+void MainWindow::onPlayPauseClicked() {
+    if (player->playbackState() == QMediaPlayer::PlayingState) {
+        player->pause();
+    } else {
+        player->play();
+    }
+}
+
+// ---------------------------------------------------------
+// 탭 변경 시 라이브 뷰 제어
+// ---------------------------------------------------------
+void MainWindow::onLiveTabChanged(int index) {
+    // index 0: Recordings, index 1: Live View
+    if (index == 1) {
+        qDebug() << "Start Live Streaming...";
+
+        // RTSP 주소 연결 (인증 정보: admin / team6cam!)
+        // 포맷: rtsp://admin:team6cam!@192.168.50.5/<채널>/H.264/media.smp
+        for(int i = 0; i < 4; i++) {
+            QString urlStr = QString("rtsp://admin:team6cam!@192.168.50.5/%1/H.264/media.smp").arg(i);
+            livePlayers[i]->setSource(QUrl(urlStr));
+            livePlayers[i]->play();
+        }
+    } else {
+        // 녹화 탭으로 돌아오면 라이브는 정지 (리소스 절약)
+        qDebug() << "Stop Live Streaming...";
+        for(auto* livePlayer : livePlayers) {
+            livePlayer->stop();
+        }
+    }
 }
 
 // ---------------------------------------------------------
