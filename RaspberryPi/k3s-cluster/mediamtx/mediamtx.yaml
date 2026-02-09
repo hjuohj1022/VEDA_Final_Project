@@ -81,7 +81,7 @@ spec:
       - name: mediamtx          
         image: bluenviron/mediamtx:latest-ffmpeg          
         
-        # 카메라 접속 정보 변수화 (여기서 통합 관리)
+        # 카메라 접속 정보 암호화 (젠킨스에서 실제 값으로 치환됨)
         env:
         - name: CAMERA_IP
           value: "__CAMERA_IP__"
