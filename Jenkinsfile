@@ -12,7 +12,7 @@ pipeline {
                 git branch: 'develop', url: GIT_URL
             }
         }
-
+        
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
             when { changeset 'RaspberryPi/k3s-cluster/crow_server/**' } // 폴더명 주의!
@@ -61,6 +61,20 @@ pipeline {
             when { changeset 'RaspberryPi/k3s-cluster/mediamtx/**' }
             steps {
                 script {
+                    // 1. YAML 파일 복사 (원본 보존용)
+                    withCredentials([
+                    string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
+                    string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
+                    string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW')
+                ]) {
+                    script {
+                        // 2. sed 명령어로 YAML 파일 내용 바꿔치기 (덮어쓰기)
+                        // 주의: 구분자로 / 대신 | 를 사용 (URL이나 특수문자 충돌 방지)
+                        sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' mediamtx.yaml"
+                        sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' mediamtx.yaml"
+                        sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' mediamtx.yaml"
+                    }
+                }
                     dir('RaspberryPi/k3s-cluster/mediamtx') {
                         echo "🎥 MediaMTX 빌드 시작..."
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -95,6 +109,24 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+    post {
+        success {
+            slackSend (
+                channel: 'C0ADS8RQAL9', 
+                color: 'good',
+                botUser: true, 
+                message: "✅ 배포 성공: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+            )
+        }
+        failure {
+            slackSend (
+                channel: 'C0ADS8RQAL9', 
+                color: 'danger', 
+                botUser: true,
+                message: "❌ 배포 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+            )
         }
     }
 }
