@@ -232,7 +232,7 @@ void MainWindow::onLiveTabChanged(int index) {
 
             // VLC OSD(Marquee) 설정 - 텍스트 오버레이 활성화
             // ---------------------------------------------------
-            // [수정] libvlc_Marquee... -> libvlc_marquee_... (Snake Case로 변경)
+            // libvlc_Marquee... -> libvlc_marquee_... (Snake Case로 변경)
             libvlc_video_set_marquee_int(liveVlcPlayers[i], libvlc_marquee_Enable, 1);       // 활성화
             libvlc_video_set_marquee_int(liveVlcPlayers[i], libvlc_marquee_Size, 24);        // 폰트 크기
             libvlc_video_set_marquee_int(liveVlcPlayers[i], libvlc_marquee_Position, 6);     // 위치 (6=TopRight)
@@ -291,7 +291,7 @@ void MainWindow::updateLiveFps() {
 
             // Marquee 텍스트 업데이트
             QByteArray ba = fpsText.toUtf8();
-            // [수정] libvlc_MarqueeText -> libvlc_marquee_Text
+            // libvlc_MarqueeText -> libvlc_marquee_Text
             libvlc_video_set_marquee_string(liveVlcPlayers[i], libvlc_marquee_Text, ba.constData());
         }
     }
