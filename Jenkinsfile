@@ -96,5 +96,21 @@ pipeline {
                 }
             }
         }
+        post {
+            success {
+                slackSend (
+                    channel: 'C0ADS8RQAL9', 
+                    color: 'good', 
+                    message: "✅ 배포 성공: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+                )
+            }
+            failure {
+                slackSend (
+                    channel: 'C0ADS8RQAL9', 
+                    color: 'danger', 
+                    message: "❌ 배포 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+                )
+            }
+        }
     }
 }
