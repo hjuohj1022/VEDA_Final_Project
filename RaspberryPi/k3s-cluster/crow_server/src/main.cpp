@@ -37,6 +37,7 @@ bool checkUserFromDB(std::string inputId, std::string inputPw) {
     }
 
     // 쿼리 실행 (보안을 위해선 PreparedStatement를 써야 하지만, 지금은 간단히 구현)
+    // 주의: 실제 상용 서비스에선 SQL Injection 방지 처리가 필요함
     std::string query = "SELECT count(*) FROM users WHERE id='" + inputId + "' AND password='" + inputPw + "'";
     
     if (mysql_query(conn, query.c_str())) {
@@ -114,7 +115,44 @@ int main()
     });
 
     // ==========================================
-    // 파일 스트리밍 (Qt 요청: /stream?file=...)
+    // 파일 삭제 API (DELETE /recordings?file=...)
+    // Qt 앱이 이 주소로 삭제 요청을 보냄
+    // ==========================================
+    CROW_ROUTE(app, "/recordings").methods(crow::HTTPMethod::DELETE)
+    ([](const crow::request& req){
+        // 쿼리 파라미터(?file=...)에서 파일명 가져오기
+        char* file_param = req.url_params.get("file");
+        
+        if (!file_param) {
+            return crow::response(400, "Missing file parameter");
+        }
+
+        std::string filename = file_param;
+        
+        // 경로 조작 방지 (../ 같은 거 막기)
+        if (filename.find("..") != std::string::npos) {
+             return crow::response(403, "Invalid filename");
+        }
+
+        // 파일 경로 설정 (/app/recordings에 마운트 됨)
+        std::string file_path = "/app/recordings/" + filename;
+
+        if (fs::exists(file_path)) {
+            try {
+                fs::remove(file_path); // 실제 파일 삭제
+                std::cout << "[Delete] Removed file: " << file_path << std::endl;
+                return crow::response(200, "File deleted");
+            } catch (const fs::filesystem_error& e) {
+                std::cerr << "[Delete Error] " << e.what() << std::endl;
+                return crow::response(500, "Failed to delete file");
+            }
+        } else {
+            return crow::response(404, "File not found");
+        }
+    });
+
+    // ==========================================
+    // 파일 다운로드/재생 (Qt 요청: /stream?file=...)
     // ==========================================
     CROW_ROUTE(app, "/stream")
     ([](const crow::request& req, crow::response& res){
@@ -142,13 +180,11 @@ int main()
 
         // 파일 존재 확인 및 전송
         if (fs::exists(file_path)) {
-            // 디버깅용 로그 출력
-            std::cout << "[Stream] Serving file: " << file_path << std::endl;
+            std::cout << "[Stream] Serving file: " << file_path << std::endl; // 로그 추가
             res.set_static_file_info(file_path);
             res.end();
         } else {
-            // 디버깅용 로그 출력
-            std::cerr << "[Error] File not found: " << file_path << std::endl;
+            std::cerr << "[Error] File not found: " << file_path << std::endl; // 에러 로그
             res.code = 404;
             res.write("File not found");
             res.end();
