@@ -12,6 +12,8 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTabWidget>
+#include <QTimer> // 타이머 헤더 포함
+#include <vlc/vlc.h> // libvlc 헤더 포함
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -38,6 +40,9 @@ private slots:
     // 탭 변경 이벤트 (라이브 영상 제어용)
     void onLiveTabChanged(int index);
 
+    // 실시간 FPS 갱신 슬롯
+    void updateLiveFps();
+
     // 네트워크 응답 처리
     void onLoginReply(QNetworkReply *reply);
     void onListReply(QNetworkReply *reply);
@@ -54,7 +59,7 @@ private:
     QWidget *liveTab;   // [Tab 2] 실시간 라이브 뷰
 
     // -----------------------------------------------------------
-    // [Tab 1] 녹화 기능 객체
+    // [Tab 1] 녹화 기능 객체 (기존 유지)
     // -----------------------------------------------------------
     QMediaPlayer *player;
     QAudioOutput *audioOutput;
@@ -74,13 +79,24 @@ private:
     QPushButton *btnRefresh;
     QPushButton *btnDelete;
 
+    // 환경 변수 관리
+    QMap<QString, QString> env;
+    void loadEnv();
+
     // -----------------------------------------------------------
-    // [Tab 2] 라이브 기능 객체 (4채널)
+    // [Tab 2] 라이브 기능 객체 (libvlc로 변경)
     // -----------------------------------------------------------
-    // 4개의 플레이어와 비디오 화면을 리스트로 관리
-    QList<QMediaPlayer*> livePlayers;
-    QList<QAudioOutput*> liveAudios;
-    QList<QVideoWidget*> liveVideoWidgets;
+    // VLC 인스턴스 (엔진)
+    libvlc_instance_t *vlcInstance;
+
+    // 4개의 VLC 플레이어 관리 리스트
+    QList<libvlc_media_player_t*> liveVlcPlayers;
+
+    // 영상을 띄울 위젯
+    QList<QWidget*> liveVideoWidgets;
+
+    // FPS 갱신용 타이머
+    QTimer *fpsTimer;
 };
 
 #endif // MAINWINDOW_H
