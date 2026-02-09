@@ -101,7 +101,8 @@ pipeline {
         success {
             slackSend (
                 channel: 'C0ADS8RQAL9', 
-                color: 'good', 
+                color: 'good',
+                botUser: true, 
                 message: "✅ 배포 성공: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
             )
         }
@@ -109,6 +110,7 @@ pipeline {
             slackSend (
                 channel: 'C0ADS8RQAL9', 
                 color: 'danger', 
+                botUser: true,
                 message: "❌ 배포 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
             )
         }
