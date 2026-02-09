@@ -1,5 +1,5 @@
 # -----------------------------------------------------------
-# 설정 저장소 (ConfigMap) - 한화비전 전용 FFmpeg 모드
+# 설정 저장소 (ConfigMap)
 # -----------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
@@ -7,70 +7,58 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
+    
     paths:
       # [채널 0]
       "0":
         source: publisher
-        runOnInit: >
-          ffmpeg -hide_banner -loglevel error
-          -rtsp_transport tcp
-          -i rtsp://admin:team6cam%21@192.168.50.5/0/H.264/media.smp
-          -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        # $CAMERA_USER, $CAMERA_PASSWORD, $CAMERA_IP 변수 사용으로 하드코딩 방지
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
-        recordFormat: fmp4
-        recordPartDuration: 10s
-        recordDeleteAfter: 25s
+        recordFormat: fmp4        
+        # 10초마다 파일 생성, 10분 뒤 녹화된 파일 삭제
+        recordSegmentDuration: 10s
+        recordDeleteAfter: 10m
 
       # [채널 1]
       "1":
         source: publisher
-        runOnInit: >
-          ffmpeg -hide_banner -loglevel error
-          -rtsp_transport tcp
-          -i rtsp://admin:team6cam%21@192.168.50.5/1/H.264/media.smp
-          -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        # 
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordPartDuration: 10s
-        recordDeleteAfter: 25s
+        recordSegmentDuration: 10s
+        recordDeleteAfter: 10m
 
       # [채널 2]
       "2":
         source: publisher
-        runOnInit: >
-          ffmpeg -hide_banner -loglevel error
-          -rtsp_transport tcp
-          -i rtsp://admin:team6cam%21@192.168.50.5/2/H.264/media.smp
-          -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordPartDuration: 10s
-        recordDeleteAfter: 25s
+        recordSegmentDuration: 10s
+        recordDeleteAfter: 10m
 
       # [채널 3]
       "3":
         source: publisher
-        runOnInit: >
-          ffmpeg -hide_banner -loglevel error
-          -rtsp_transport tcp
-          -i rtsp://admin:team6cam%21@192.168.50.5/3/H.264/media.smp
-          -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordPartDuration: 10s
-        recordDeleteAfter: 25s
+        recordSegmentDuration: 10s
+        recordDeleteAfter: 10m
 
 ---
 # -----------------------------------------------------------
-# 배포 명세서 (Deployment) - FFmpeg 이미지 필수
+# 배포 명세서 (Deployment)
 # -----------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
@@ -86,20 +74,31 @@ spec:
       labels:
         app: mediamtx    
     spec:
-      hostNetwork: true
-      
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
       
       containers:
       - name: mediamtx          
-        image: bluenviron/mediamtx:latest-ffmpeg         
+        image: bluenviron/mediamtx:latest-ffmpeg          
+        
+        # 카메라 접속 정보 암호화 (젠킨스에서 실제 값으로 치환됨)
+        env:
+        - name: CAMERA_IP
+          value: "__CAMERA_IP__"
+        - name: CAMERA_USER
+          value: "__CAMERA_USER__"
+        - name: CAMERA_PASSWORD
+          value: "__CAMERA_PASSWORD__"
         
         ports:
         - containerPort: 8554
         - containerPort: 1935
         - containerPort: 8888
         - containerPort: 8889
+        - containerPort: 8000
+          protocol: UDP
+        - containerPort: 8001
+          protocol: UDP
         
         volumeMounts:
         - name: config-volume
@@ -115,12 +114,14 @@ spec:
           name: mediamtx-config
           
       - name: recordings
-        persistentVolumeClaim:
-          claimName: recording-pvc
+        # PVC 대신 호스트 경로 직접 사용
+        hostPath:
+          path: /home/pi/cctv-recordings
+          type: DirectoryOrCreate
 
 ---
 # -----------------------------------------------------------
-# 외부 접속 연결 (Service)
+# 서비스 (Service) - MetalLB LoadBalancer
 # -----------------------------------------------------------
 apiVersion: v1
 kind: Service
@@ -128,10 +129,7 @@ metadata:
   name: mediamtx-service
 spec:
   type: LoadBalancer
-  
-  # RTSP 스트리밍 성능 최적화 (불필요한 네트워크 점프 방지)
   externalTrafficPolicy: Cluster
-  
   selector:
     app: mediamtx  
   ports:
