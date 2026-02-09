@@ -9,6 +9,12 @@ pipeline {
     stages {
         stage('소스 가져오기') {
             steps {
+                slackSend (
+                    channel: 'C0ADS8RQAL9', 
+                    color: '#439FE0', // 파란색 (시작 알림용)
+                    botUser: true, 
+                    message: "🚀 배포 시작: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+                )
                 git branch: 'develop', url: GIT_URL
             }
         }
