@@ -70,9 +70,9 @@ pipeline {
                     script {
                         // 2. sed 명령어로 YAML 파일 내용 바꿔치기 (덮어쓰기)
                         // 주의: 구분자로 / 대신 | 를 사용 (URL이나 특수문자 충돌 방지)
-                        sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' mediamtx.yaml"
+                        sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
                     }
                 }
                     dir('RaspberryPi/k3s-cluster/mediamtx') {
