@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstdlib> // getenv 사용
 #include <mysql/mysql.h> // MariaDB C Connector
+#include <fstream> // 파일 읽기용
+#include <sstream> // 버퍼용
 
 namespace fs = std::filesystem;
 
@@ -153,6 +155,7 @@ int main()
 
     // ==========================================
     // 파일 다운로드/재생 (Qt 요청: /stream?file=...)
+    // 수동으로 파일 읽어서 전송 (404 해결)
     // ==========================================
     CROW_ROUTE(app, "/stream")
     ([](const crow::request& req, crow::response& res){
@@ -178,15 +181,23 @@ int main()
         // 파일 경로 설정 (/app/recordings에 마운트 됨)
         std::string file_path = "/app/recordings/" + filename;
 
-        // 파일 존재 확인 및 전송
-        if (fs::exists(file_path)) {
-            std::cout << "[Stream] Serving file: " << file_path << std::endl; // 로그 추가
-            res.set_static_file_info(file_path);
+        // set_static_file_info 대신 직접 읽기
+        std::ifstream ifs(file_path, std::ios::binary);
+
+        if (ifs.is_open()) {
+            std::cout << "[Stream] Reading file manually: " << file_path << std::endl; // 로그 추가
+            
+            std::ostringstream oss;
+            oss << ifs.rdbuf();
+            
+            res.body = oss.str();
+            res.add_header("Content-Type", "video/mp4");
+            res.code = 200;
             res.end();
         } else {
-            std::cerr << "[Error] File not found: " << file_path << std::endl; // 에러 로그
+            std::cerr << "[Error] Cannot open file: " << file_path << std::endl; // 에러 로그
             res.code = 404;
-            res.write("File not found");
+            res.write("File not found or cannot open");
             res.end();
         }
     });

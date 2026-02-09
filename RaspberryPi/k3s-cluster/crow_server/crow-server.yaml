@@ -1,3 +1,6 @@
+# -----------------------------------------------------------
+# Crow 웹 서버 배포 (Deployment)
+# -----------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,7 +15,7 @@ spec:
       labels:
         app: crow-server
     spec:
-      # 
+      # 파일이 있는 노드(pi-worker1)에 고정
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
       
@@ -24,7 +27,7 @@ spec:
         ports:
         - containerPort: 8080
         
-        # DB 접속 정보 
+        # DB 접속 정보
         env:
         - name: DB_HOST
           value: "mariadb-service"
@@ -36,22 +39,28 @@ spec:
               name: mariadb-secret
               key: user-password
 
-        # MediaMTX가 녹화한 폴더를 내 폴더처럼 연결
+        # 마운트
         volumeMounts:
         - name: recordings
-          mountPath: /recordings  
+          mountPath: /app/recordings
 
       volumes:
       - name: recordings
-        persistentVolumeClaim:
-          claimName: recording-pvc
+        # PVC 대신 호스트 경로 직접 사용 (MediaMTX와 공유)
+        hostPath:
+          path: /home/pi/cctv-recordings
+          type: DirectoryOrCreate
 
 ---
+# -----------------------------------------------------------
+# 외부 접속용 서비스 (Service)
+# -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: crow-server-service
 spec:
+  # MetalLB를 통해 외부 IP 할당 (예: 192.168.55.203)
   type: LoadBalancer
   selector:
     app: crow-server
