@@ -182,7 +182,7 @@ int main()
         // 파일 경로 설정 (/app/recordings에 마운트 됨)
         std::string file_path = "/app/recordings/" + filename;
 
-        // [핵심 변경] set_static_file_info 대신 직접 읽기
+        // set_static_file_info 대신 직접 읽기
         std::ifstream ifs(file_path, std::ios::binary);
 
         if (ifs.is_open()) {
