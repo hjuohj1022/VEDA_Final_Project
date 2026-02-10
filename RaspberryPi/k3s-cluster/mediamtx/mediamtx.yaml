@@ -18,7 +18,7 @@ data:
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4        
-        # 10초마다 파일 생성, 10분 뒤 녹화된 파일 삭제
+        # 1분마다 파일 생성, 10분 뒤 녹화된 파일 삭제
         recordSegmentDuration: 10s
         recordDeleteAfter: 10m
 
