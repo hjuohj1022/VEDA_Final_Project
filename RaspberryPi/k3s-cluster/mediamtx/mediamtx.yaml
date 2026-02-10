@@ -18,8 +18,8 @@ data:
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4        
-        # 1분마다 파일 생성, 10분 뒤 녹화된 파일 삭제
-        recordSegmentDuration: 1m
+        # 5분마다 파일 생성, 10분 뒤 녹화된 파일 삭제
+        recordSegmentDuration: 5m
         recordDeleteAfter: 10m
 
       # [채널 1]
@@ -31,7 +31,7 @@ data:
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordSegmentDuration: 1m
+        recordSegmentDuration: 5m
         recordDeleteAfter: 10m
 
       # [채널 2]
@@ -42,7 +42,7 @@ data:
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordSegmentDuration: 1m
+        recordSegmentDuration: 5m
         recordDeleteAfter: 10m
 
       # [채널 3]
@@ -53,7 +53,7 @@ data:
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
-        recordSegmentDuration: 1m
+        recordSegmentDuration: 5m
         recordDeleteAfter: 10m
 
 ---
