@@ -6,6 +6,7 @@
 #include <mysql/mysql.h> // MariaDB C Connector
 #include <fstream> // 파일 읽기용
 #include <sstream> // 버퍼용
+#include <sys/statvfs.h> // 리눅스 파일시스템 통계용
 
 namespace fs = std::filesystem;
 
@@ -48,7 +49,7 @@ bool checkUserFromDB(std::string inputId, std::string inputPw) {
         return false;
     }
 
-    // 4. 결과 확인
+    // 결과 확인
     res = mysql_use_result(conn);
     bool loginSuccess = false;
     if ((row = mysql_fetch_row(res)) != NULL) {
@@ -200,6 +201,31 @@ int main()
             res.write("File not found or cannot open");
             res.end();
         }
+    });
+    
+    // ==========================================
+    // 시스템 저장소 용량 조회 (Qt 앱 요청)
+    // ==========================================
+    CROW_ROUTE(app, "/system/storage")
+    ([](){
+        struct statvfs stat;
+        std::string path = "/app/recordings"; // 마운트된 경로 확인 필요
+        crow::json::wvalue result;
+        
+        if (statvfs(path.c_str(), &stat) != 0) {
+            // 실패 시 (경로가 없거나 권한 문제 등)
+            result["error"] = "Failed to get storage info";
+            return crow::response(500, result);
+        }
+        // f_bsize: 블록 크기, f_blocks: 전체 블록 수, f_bavail: 일반 유저가 사용 가능한 블록 수
+        unsigned long long total = (unsigned long long)stat.f_blocks * stat.f_frsize;
+        unsigned long long available = (unsigned long long)stat.f_bavail * stat.f_frsize;
+        unsigned long long used = total - available;
+        result["total_bytes"] = total;
+        result["used_bytes"] = used;
+        result["available_bytes"] = available;
+        
+        return crow::response(result);
     });
 
     app.port(8080).multithreaded().run();
