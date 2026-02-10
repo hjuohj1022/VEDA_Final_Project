@@ -49,7 +49,7 @@ bool checkUserFromDB(std::string inputId, std::string inputPw) {
         return false;
     }
 
-    // 결과 확인
+    // 4. 결과 확인
     res = mysql_use_result(conn);
     bool loginSuccess = false;
     if ((row = mysql_fetch_row(res)) != NULL) {
@@ -182,7 +182,7 @@ int main()
         // 파일 경로 설정 (/app/recordings에 마운트 됨)
         std::string file_path = "/app/recordings/" + filename;
 
-        // set_static_file_info 대신 직접 읽기
+        // [핵심 변경] set_static_file_info 대신 직접 읽기
         std::ifstream ifs(file_path, std::ios::binary);
 
         if (ifs.is_open()) {
@@ -226,6 +226,71 @@ int main()
         result["available_bytes"] = available;
         
         return crow::response(result);
+    });
+    
+    // ==========================================
+    // 파일 스트리밍 (Range Support)
+    // ==========================================
+    CROW_ROUTE(app, "/stream")
+    ([](const crow::request& req, crow::response& res){
+        char* file_param = req.url_params.get("file");
+        if (!file_param) { res.code = 400; res.end(); return; }
+        std::string filename = file_param;
+        if (filename.find("..") != std::string::npos) { res.code = 403; res.end(); return; }
+        std::string file_path = "/app/recordings/" + filename;
+        
+        // 파일 크기 확인
+        std::ifstream ifs(file_path, std::ios::binary | std::ios::ate);
+        if (!ifs.is_open()) { res.code = 404; res.end(); return; }
+        
+        long long file_size = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+        // Range 헤더 파싱
+        long long start = 0;
+        long long end = file_size - 1;
+        bool is_range = false;
+        std::string range_header = req.get_header_value("Range");
+        if (!range_header.empty()) {
+            is_range = true;
+            if (range_header.find("bytes=") == 0) {
+                std::string range_val = range_header.substr(6);
+                size_t dash_pos = range_val.find('-');
+                if (dash_pos != std::string::npos) {
+                    std::string start_str = range_val.substr(0, dash_pos);
+                    std::string end_str = range_val.substr(dash_pos + 1);
+                    
+                    if (!start_str.empty()) start = std::stoll(start_str);
+                    if (!end_str.empty()) end = std::stoll(end_str);
+                }
+            }
+        }
+        // 범위 보정
+        if (start > end || start >= file_size) {
+            res.code = 416; // Range Not Satisfiable
+            res.end();
+            return;
+        }
+        long long content_length = end - start + 1;
+        // 응답 헤더 설정
+        res.add_header("Accept-Ranges", "bytes");
+        res.add_header("Content-Type", "video/mp4");
+        
+        if (is_range) {
+            res.code = 206; // Partial Content
+            std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
+            res.add_header("Content-Range", content_range);
+        } else {
+            res.code = 200; // OK
+        }
+        
+        // 본문 길이 설정 (Crow가 자동으로 설정하지만 명시적으로 함)
+        // res.add_header("Content-Length", std::to_string(content_length));
+        // 4파일 데이터 읽기
+        std::vector<char> buffer(content_length);
+        ifs.seekg(start);
+        ifs.read(buffer.data(), content_length);
+        res.body = std::string(buffer.begin(), buffer.end());
+        res.end();
     });
 
     app.port(8080).multithreaded().run();
