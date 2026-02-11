@@ -3,17 +3,23 @@
 
 #include <QMainWindow>
 #include <QMediaPlayer>
-#include <QAudioOutput>
 #include <QVideoWidget>
+#include <QAudioOutput>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QListWidget>
-#include <QLineEdit>
 #include <QPushButton>
+#include <QLineEdit>
 #include <QSlider>
-#include <QTabWidget>
-#include <QTimer> // 타이머 헤더 포함
-#include <vlc/vlc.h> // libvlc 헤더 포함
+#include <QStackedWidget>
+#include <QTimer>
+#include <QMap>
+#include <QProgressDialog>
+#include <vlc/vlc.h>
+
+#include "SidebarWidget.h"
+#include "HeaderWidget.h"
+#include "VideoContainerWidget.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -28,75 +34,75 @@ public:
     ~MainWindow();
 
 private slots:
-    // API 통신 관련 슬롯
-    void onLoginClicked();      // 로그인 버튼
-    void onRefreshClicked();    // 목록 갱신 버튼
-    void onDeleteClicked();     // 파일 삭제 버튼
-    void onFileDoubleClicked(QListWidgetItem *item); // 파일 재생
+    // Page Navigation
+    void onPageChanged(int index);
 
-    // 녹화 영상 재생 제어
-    void onPlayPauseClicked();  // 재생/일시정지 토글
+    // Tab 1 (recordings) logic
+    void onLoginClicked();
+    void onRefreshClicked();
+    void onLinkActivated(const QString &link); // Not used currently but standard
+    void onFileDoubleClicked(QListWidgetItem *item);
+    void onPlayPauseClicked();
+    void onDeleteClicked();
 
-    // 탭 변경 이벤트 (라이브 영상 제어용)
-    void onLiveTabChanged(int index);
-
-    // 실시간 FPS 갱신 슬롯
-    void updateLiveFps();
-
-    // 네트워크 응답 처리
+    // Network replies
     void onLoginReply(QNetworkReply *reply);
     void onListReply(QNetworkReply *reply);
-    void onDeleteReply(QNetworkReply *reply); // 삭제 응답 처리
+    void onDeleteReply(QNetworkReply *reply);
+    void onStorageReply(QNetworkReply *reply);
+    void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
+
+    // Tab 2 (live) logic
+    void updateLiveFps();
+    void updateServerStorage();
+    void toggleTheme();
 
 private:
     Ui::MainWindow *ui;
+    
+    // Core Layout Widgets
+    SidebarWidget *sidebar;
+    HeaderWidget *header;
+    QStackedWidget *mainStackedWidget;
 
-    // -----------------------------------------------------------
-    // UI 구조 객체 (탭으로 분리)
-    // -----------------------------------------------------------
-    QTabWidget *mainTabWidget;
-    QWidget *recordTab; // [Tab 1] 녹화 목록 및 재생
-    QWidget *liveTab;   // [Tab 2] 실시간 라이브 뷰
+    // Data
+    QMap<QString, QString> env;
+    void loadEnv();
+    QString serverUrl;
 
-    // -----------------------------------------------------------
-    // [Tab 1] 녹화 기능 객체 (기존 유지)
-    // -----------------------------------------------------------
-    QMediaPlayer *player;
-    QAudioOutput *audioOutput;
-    QVideoWidget *videoWidget;
-    QSlider *seekSlider;
-    QPushButton *btnPlayPause; // 재생/일시정지 버튼
+    // VLC
+    libvlc_instance_t *vlcInstance;
+    // We now use VideoContainerWidget to hold the player, but we still need to track the players
+    QList<libvlc_media_player_t*> liveVlcPlayers;
+    QList<VideoContainerWidget*> videoContainers; // 4 containers
+    QTimer *fpsTimer;
 
-    // 네트워크 객체
-    QNetworkAccessManager *networkManager;
-    QString serverUrl; // 백엔드 주소 저장
+    // Widgets (Live Page)
+    QWidget *livePage;
 
-    // UI 객체 (코드로 생성)
+    // Widgets (Recordings Page - repurposed from Tab 1)
+    QWidget *recordPage;
     QLineEdit *idInput;
     QLineEdit *pwInput;
-    QListWidget *fileListWidget;
     QPushButton *btnLogin;
     QPushButton *btnRefresh;
     QPushButton *btnDelete;
+    QListWidget *fileListWidget;
+    QVideoWidget *videoWidget;
+    QSlider *seekSlider;
+    QPushButton *btnPlayPause;
+    QLabel *timeLabel;
+    
+    QString formatTime(qint64 ms);
 
-    // 환경 변수 관리
-    QMap<QString, QString> env;
-    void loadEnv();
-
-    // -----------------------------------------------------------
-    // [Tab 2] 라이브 기능 객체 (libvlc로 변경)
-    // -----------------------------------------------------------
-    // VLC 인스턴스 (엔진)
-    libvlc_instance_t *vlcInstance;
-
-    // 4개의 VLC 플레이어 관리 리스트
-    QList<libvlc_media_player_t*> liveVlcPlayers;
-
-    // 영상을 띄울 위젯
-    QList<QWidget*> liveVideoWidgets;
-
-    // FPS 갱신용 타이머
-    QTimer *fpsTimer;
+    QMediaPlayer *player;
+    QAudioOutput *audioOutput;
+    QNetworkAccessManager *networkManager;
+    QNetworkReply *currentDownload = nullptr;
+    QString currentTempFile;
+    QProgressDialog *progressDialog = nullptr;
+    
+    void updateWindowStyle();
 };
 
 #endif // MAINWINDOW_H

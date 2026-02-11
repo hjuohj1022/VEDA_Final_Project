@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 project(Team3VideoReceiver LANGUAGES CXX)
+set(CMAKE_UNITY_BUILD OFF)
 
 # =========================================================================
 # VLC SDK 경로 설정
@@ -17,6 +18,14 @@ qt_add_executable(Team3VideoReceiver
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    SidebarWidget.cpp
+    SidebarWidget.h
+    HeaderWidget.cpp
+    HeaderWidget.h
+    VideoContainerWidget.cpp
+    VideoContainerWidget.h
+    StyleHelper.cpp
+    StyleHelper.h
     .env
 )
 
@@ -37,6 +46,7 @@ target_link_libraries(Team3VideoReceiver
         Qt::Network
         ${VLC_PATH}/sdk/lib/libvlc.lib
         ${VLC_PATH}/sdk/lib/libvlccore.lib
+        dwmapi
 )
 
 include(GNUInstallDirs)
