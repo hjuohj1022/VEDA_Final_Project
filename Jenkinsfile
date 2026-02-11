@@ -117,33 +117,29 @@ pipeline {
             }
         }
 
-        stage('Qt Client 배포(Windows MinGW)') {
+        stage('Qt Client (Windows CMake)') {
             agent { label 'windows-qt' } 
             
-            // Qt_Client 폴더 내 변경이 있거나 수동 실행 시 작동
             when { changeset 'Qt_Client/**' }
 
             environment {
-                // 1. 본인의 실제 설치 경로에 맞게 절대 경로 확인 필수!
+                // 1. 실제 설치된 경로로 확인 필수!
                 QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
-                // MinGW 컴파일러 도구 경로
                 MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
+                // CMake가 Qt 설치 시 같이 설치되었다면 해당 경로 추가 (보통 아래와 같음)
+                CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
                 
-                // qmake, mingw32-make, windeployqt를 모두 사용하기 위한 PATH
-                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};C:\\Windows\\System32;${PATH}"
+                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
                 
-                BUILD_DIR = "build_mingw"
+                BUILD_DIR = "build_cmake"
                 OUTPUT_DIR = "deploy_output"
             }
 
             steps {
-                // 윈도우 에이전트에서 코드 체크아웃
+                echo "🔨 CMake 기반 MinGW 빌드 시작..."
                 git branch: 'develop', url: GIT_URL
 
                 dir('Qt_Client') {
-                    echo "🔨 MinGW 빌드 및 패키징 시작..."
-                    
-                    // 1. 기존 빌드 정리
                     bat """
                         if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}
                         if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}
@@ -151,34 +147,33 @@ pipeline {
                         mkdir ${OUTPUT_DIR}
                     """
 
-                    // 2. QMake & 빌드 (nmake 대신 mingw32-make 사용)
                     dir(BUILD_DIR) {
-                        // 만약 .pro 파일이 아니라 CMake를 쓴다면 "cmake .."으로 바꿔야 합니다.
-                        // 여기서는 .pro 파일 기준입니다. 파일명을 실제 이름으로 수정하세요.
-                        bat "qmake ..\\Team3VideoReceiver.pro -config release" 
-                        bat "mingw32-make -j4"
+                        // 2. CMake 설정: MinGW 전용 메이크파일 생성 및 Qt 경로 지정
+                        // -DCMAKE_PREFIX_PATH는 CMake가 Qt 라이브러리를 찾게 해줍니다.
+                        bat """
+                            cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${QT_ROOT}" ..
+                        """
+                        
+                        // 3. 실제 빌드 실행
+                        bat "cmake --build . --parallel 4"
                     }
 
-                    // 3. 배포 (windeployqt)
                     script {
-                        // MinGW는 보통 빌드 폴더 바로 아래에 exe가 생성됩니다. (release 폴더 안이 아님)
-                        // 파일명을 실제 생성된 이름으로 수정하세요.
+                        echo "📦 배포 파일 준비 중..."
+                        // CMake 빌드는 exe 파일이 보통 build 폴더 바로 아래에 생깁니다.
+                        // 'YourAppName.exe'를 실제 프로젝트 결과물 이름으로 바꾸세요!
                         bat "copy ${BUILD_DIR}\\Team3VideoReceiver.exe ${OUTPUT_DIR}\\"
                         
                         dir(OUTPUT_DIR) {
-                            echo "📦 DLL 의존성 수집 중..."
                             bat "windeployqt --release Team3VideoReceiver.exe"
                         }
                     }
 
-                    // 4. 압축 (Powershell)
                     dir(OUTPUT_DIR) {
-                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_MinGW.zip -Force"
+                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_CMake.zip -Force"
                     }
                 }
-                
-                // 5. 결과물 저장
-                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_MinGW.zip', fingerprint: true
+                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_CMake.zip', fingerprint: true
             }
         }
     }
