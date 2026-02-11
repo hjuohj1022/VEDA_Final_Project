@@ -123,7 +123,7 @@ spec:
               # 현재 /recordings 경로의 사용량(%) 추출
               USAGE=$(df -P /recordings | awk 'NR==2 {print $5}' | tr -d '%')
               
-              # 70로 기준 (K8s Eviction 방지용 안전마진)
+              # 70%로 기준 (컨테이너 Eviction 방지용 안전마진)
               if [ "$USAGE" -gt 70 ]; then
                 echo "Warning: Disk usage is ${USAGE}%. Cleaning up..."
                 
