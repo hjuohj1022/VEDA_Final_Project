@@ -1,0 +1,22 @@
+FROM ubuntu:22.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies (Heavy operation)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    qt6-base-dev \
+    qt6-multimedia-dev \
+    libvlc-dev \
+    libvlccore-dev \
+    pkg-config \
+    libgl1-mesa-dev \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+ENV QT_SELECT=qt6

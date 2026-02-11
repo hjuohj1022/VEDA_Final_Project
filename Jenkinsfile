@@ -117,27 +117,61 @@ pipeline {
             }
         }
 
+        // 🖥️ 4.9. Qt Base Image (환경 설정 변경 시에만 실행)
+        stage('Qt Base Build') {
+            when { changeset 'Qt_Client/Dockerfile.base' }
+            steps {
+                script {
+                    dir('Qt_Client') {
+                        echo "🛠️ Qt 빌드 환경(Base Image) 업데이트 중..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            // Dockerfile.base를 사용하여 빌드
+                            sh "docker build -f Dockerfile.base -t hjuohj/qt-client-base:latest --push ."
+                        }
+                    }
+                }
+            }
+        }
+
         // 🖥️ 5. Qt Client (폴더명: Qt_Client)
         stage('Qt Client 빌드') {
-            when { changeset 'Qt_Client/**' }
+            // 소스 코드 변경 OR Base Image 변경 시 실행
+            when { anyOf { changeset 'Qt_Client/**'; changeset 'Qt_Client/Dockerfile.base' } }
             steps {
                 script {
                     dir('Qt_Client') {
                         echo "🖥️ Qt Client 빌드 시작..."
-                        // 1. Docker Build Image 생성 (캐시 활용)
-                        sh "docker build -t qt-client-builder ."
                         
-                        // 2. Docker Container 내부에서 빌드 실행
-                        // -v $(pwd):/app : 현재 소스 코드를 컨테이너에 마운트
-                        // cmake . && make : 빌드 수행
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            // Base Image가 없을 수 있으므로 로그인 (private repo일 경우 대비)
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            
+                            // 1. Docker Build (Base Image 활용)
+                            // Dockerfile의 FROM hjuohj/qt-client-base:latest 가 사용됨
+                            // --pull 옵션으로 최신 Base Image 확인
+                            sh "docker build --pull -t qt-client-builder ."
+                        }
+
+                        // 2. 컨테이너 생성 및 빌드 실행 (볼륨 마운트 제거)
+                        sh "docker rm -f qt-build-temp || true"
+                        
                         try {
-                            sh "docker run --rm -v \$(pwd):/app qt-client-builder /bin/bash -c 'cmake . && make -j\$(nproc)'"
+                            // 컨테이너 실행 (빌드 및 압축)
+                            sh "docker run --name qt-build-temp qt-client-builder /bin/bash -c 'cmake . && make -j\$(nproc) && zip QtClient_Build.zip Team3VideoReceiver .env'"
+                            
+                            // 3. 결과물(zip)을 컨테이너에서 호스트로 복사
+                            sh "docker cp qt-build-temp:/app/QtClient_Build.zip ."
+                            
                         } catch (Exception e) {
                             error "Qt Client Build Failed"
+                        } finally {
+                            // 4. 컨테이너 정리
+                            sh "docker rm -f qt-build-temp || true"
                         }
                     }
-                    // 3. 빌드 결과물 저장 (Jenkins Artifact)
-                    archiveArtifacts artifacts: 'Qt_Client/Team3VideoReceiver', allowEmptyArchive: true
+                    // 5. 빌드 결과물 저장 (Jenkins Artifact)
+                    archiveArtifacts artifacts: 'Qt_Client/QtClient_Build.zip', allowEmptyArchive: true
                 }
             }
         }
