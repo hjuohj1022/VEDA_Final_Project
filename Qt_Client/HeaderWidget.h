@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPushButton>
 
+
 class HeaderWidget : public QWidget {
     Q_OBJECT
 public:
@@ -21,3 +22,4 @@ private:
 };
 
 #endif // HEADERWIDGET_H
+// hi
