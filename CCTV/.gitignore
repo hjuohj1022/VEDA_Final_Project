@@ -1,0 +1,45 @@
+# Ignore build artifacts
+build/
+*.exe
+*.obj
+*.lib
+*.dll
+*.pdb
+*.ilk
+*.tlog
+*.log
+
+# Ignore VS/Code settings
+.vscode/
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.user
+
+# Ignore Local Configs (Secrets)
+local_paths.cmake
+app_config.h
+
+# Large libraries and SDKs
+opencv/
+TensorRT-10.15.1.29/
+Depth-Anything-V2/TensorRT-*/
+Depth-Anything-V2/checkpoints/
+
+# Old and Legacy files
+old/
+
+# Large Model Files
+*.onnx
+*.engine
+*.pth
+*.weights
+
+# Python
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+
+# Backups
+*.bak
