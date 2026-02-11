@@ -117,62 +117,68 @@ pipeline {
             }
         }
 
-        // 🖥️ 4.9. Qt Base Image (환경 설정 변경 시에만 실행)
-        stage('Qt Base Build') {
-            when { changeset 'Qt_Client/Dockerfile.base' }
-            steps {
-                script {
-                    dir('Qt_Client') {
-                        echo "🛠️ Qt 빌드 환경(Base Image) 업데이트 중..."
-                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            sh "echo $PASS | docker login -u $USER --password-stdin"
-                            // Dockerfile.base를 사용하여 빌드
-                            sh "docker build -f Dockerfile.base -t hjuohj/qt-client-base:latest --push ."
-                        }
-                    }
-                }
+        stage('Qt Client 배포(Windows MinGW)') {
+            agent { label 'windows-qt' } 
+            
+            // Qt_Client 폴더 내 변경이 있거나 수동 실행 시 작동
+            when { changeset 'Qt_Client/**' }
+
+            environment {
+                // 1. 본인의 실제 설치 경로에 맞게 절대 경로 확인 필수!
+                QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
+                // MinGW 컴파일러 도구 경로
+                MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
+                
+                // qmake, mingw32-make, windeployqt를 모두 사용하기 위한 PATH
+                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};C:\\Windows\\System32;${PATH}"
+                
+                BUILD_DIR = "build_mingw"
+                OUTPUT_DIR = "deploy_output"
             }
-        }
 
-        // 🖥️ 5. Qt Client (폴더명: Qt_Client)
-        stage('Qt Client 빌드') {
-            // 소스 코드 변경 OR Base Image 변경 시 실행
-            when { anyOf { changeset 'Qt_Client/**'; changeset 'Qt_Client/Dockerfile.base' } }
             steps {
-                script {
-                    dir('Qt_Client') {
-                        echo "🖥️ Qt Client 빌드 시작..."
-                        
-                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            // Base Image가 없을 수 있으므로 로그인 (private repo일 경우 대비)
-                            sh "echo $PASS | docker login -u $USER --password-stdin"
-                            
-                            // 1. Docker Build (Base Image 활용)
-                            // Dockerfile의 FROM hjuohj/qt-client-base:latest 가 사용됨
-                            // --pull 옵션으로 최신 Base Image 확인
-                            sh "docker build --pull -t qt-client-builder ."
-                        }
+                // 윈도우 에이전트에서 코드 체크아웃
+                git branch: 'develop', url: GIT_URL
 
-                        // 2. 컨테이너 생성 및 빌드 실행 (볼륨 마운트 제거)
-                        sh "docker rm -f qt-build-temp || true"
+                dir('Qt_Client') {
+                    echo "🔨 MinGW 빌드 및 패키징 시작..."
+                    
+                    // 1. 기존 빌드 정리
+                    bat """
+                        if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}
+                        if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}
+                        mkdir ${BUILD_DIR}
+                        mkdir ${OUTPUT_DIR}
+                    """
+
+                    // 2. QMake & 빌드 (nmake 대신 mingw32-make 사용)
+                    dir(BUILD_DIR) {
+                        // 만약 .pro 파일이 아니라 CMake를 쓴다면 "cmake .."으로 바꿔야 합니다.
+                        // 여기서는 .pro 파일 기준입니다. 파일명을 실제 이름으로 수정하세요.
+                        bat "qmake ..\\Team3VideoReceiver.pro -config release" 
+                        bat "mingw32-make -j4"
+                    }
+
+                    // 3. 배포 (windeployqt)
+                    script {
+                        // MinGW는 보통 빌드 폴더 바로 아래에 exe가 생성됩니다. (release 폴더 안이 아님)
+                        // 파일명을 실제 생성된 이름으로 수정하세요.
+                        bat "copy ${BUILD_DIR}\\Team3VideoReceiver.exe ${OUTPUT_DIR}\\"
                         
-                        try {
-                            // 컨테이너 실행 (빌드 및 압축)
-                            sh "docker run --name qt-build-temp qt-client-builder /bin/bash -c 'cmake . && make -j\$(nproc) && zip QtClient_Build.zip Team3VideoReceiver .env'"
-                            
-                            // 3. 결과물(zip)을 컨테이너에서 호스트로 복사
-                            sh "docker cp qt-build-temp:/app/QtClient_Build.zip ."
-                            
-                        } catch (Exception e) {
-                            error "Qt Client Build Failed"
-                        } finally {
-                            // 4. 컨테이너 정리
-                            sh "docker rm -f qt-build-temp || true"
+                        dir(OUTPUT_DIR) {
+                            echo "📦 DLL 의존성 수집 중..."
+                            bat "windeployqt --release Team3VideoReceiver.exe"
                         }
                     }
-                    // 5. 빌드 결과물 저장 (Jenkins Artifact)
-                    archiveArtifacts artifacts: 'Qt_Client/QtClient_Build.zip', allowEmptyArchive: true
+
+                    // 4. 압축 (Powershell)
+                    dir(OUTPUT_DIR) {
+                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_MinGW.zip -Force"
+                    }
                 }
+                
+                // 5. 결과물 저장
+                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_MinGW.zip', fingerprint: true
             }
         }
     }
