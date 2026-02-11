@@ -1,0 +1,13 @@
+# =========================================================
+# [깃허브 업로드용 예시 파일]
+# 이 파일의 이름을 'local_paths.cmake'로 변경하고 경로를 수정해서 사용하세요.
+# =========================================================
+
+# TensorRT 경로
+set(TRT_PATH "C:/path/to/TensorRT-10.x.x.x")
+
+# OpenCV 경로
+set(OPENCV_PATH "C:/path/to/opencv/build")
+
+# CUDA 경로
+set(CUDA_PATH "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.x")
