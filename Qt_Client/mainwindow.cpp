@@ -16,11 +16,13 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "StyleHelper.h"
+#ifdef Q_OS_WIN
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
 #endif
 
 MainWindow::MainWindow(QWidget *parent)
@@ -230,9 +232,11 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 void MainWindow::updateWindowStyle() {
+#ifdef Q_OS_WIN
     // Windows 11/10 Dark Mode Title Bar
     BOOL dark = StyleHelper::isDarkMode;
     DwmSetWindowAttribute(reinterpret_cast<HWND>(winId()), DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+#endif
 }
 
 void MainWindow::toggleTheme() {

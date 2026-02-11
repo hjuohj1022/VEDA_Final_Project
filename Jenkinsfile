@@ -116,6 +116,31 @@ pipeline {
                 }
             }
         }
+
+        // 🖥️ 5. Qt Client (폴더명: Qt_Client)
+        stage('Qt Client 빌드') {
+            when { changeset 'Qt_Client/**' }
+            steps {
+                script {
+                    dir('Qt_Client') {
+                        echo "🖥️ Qt Client 빌드 시작..."
+                        // 1. Docker Build Image 생성 (캐시 활용)
+                        sh "docker build -t qt-client-builder ."
+                        
+                        // 2. Docker Container 내부에서 빌드 실행
+                        // -v $(pwd):/app : 현재 소스 코드를 컨테이너에 마운트
+                        // cmake . && make : 빌드 수행
+                        try {
+                            sh "docker run --rm -v \$(pwd):/app qt-client-builder /bin/bash -c 'cmake . && make -j\$(nproc)'"
+                        } catch (Exception e) {
+                            error "Qt Client Build Failed"
+                        }
+                    }
+                    // 3. 빌드 결과물 저장 (Jenkins Artifact)
+                    archiveArtifacts artifacts: 'Qt_Client/Team3VideoReceiver', allowEmptyArchive: true
+                }
+            }
+        }
     }
     post {
         success {
