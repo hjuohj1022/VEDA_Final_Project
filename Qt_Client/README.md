@@ -110,5 +110,4 @@ MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소
 ---
 
 ## License
-
 This project is for educational purposes.
