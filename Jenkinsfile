@@ -126,9 +126,7 @@ pipeline {
                 // 1. 실제 설치된 경로로 확인 필수!
                 QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
                 MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
-                // CMake가 Qt 설치 시 같이 설치되었다면 해당 경로 추가 (보통 아래와 같음)
                 CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
-                
                 PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
                 
                 BUILD_DIR = "build_cmake"
@@ -146,6 +144,18 @@ pipeline {
                         mkdir ${BUILD_DIR}
                         mkdir ${OUTPUT_DIR}
                     """
+
+                    // ✨ 2. Jenkins에 저장된 Secret File(.env)을 꺼내오기
+                    withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
+                        script {
+                            // Windows에서는 copy 명령어로 복사 (Jenkins가 임시로 만든 파일을 실제 위치로 복사)
+                            // 1) 빌드에 필요하다면 소스 폴더로 복사
+                            bat "copy /Y \"%SECRET_ENV%\" .env"
+                            
+                            // 2) 실행 시 필요하므로 배포 폴더(OUTPUT_DIR)에도 미리 복사
+                            bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
+                        }
+                    }
 
                     dir(BUILD_DIR) {
                         // 2. CMake 설정: MinGW 전용 메이크파일 생성 및 Qt 경로 지정
