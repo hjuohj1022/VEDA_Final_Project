@@ -158,16 +158,22 @@ pipeline {
                     }
 
                     dir(BUILD_DIR) {
-                        // 2. CMake 설정: MinGW 전용 메이크파일 생성 및 Qt 경로 지정
-                        // -DCMAKE_PREFIX_PATH는 CMake가 Qt 라이브러리를 찾게 해줍니다.
+                        // 수정된 CMake 명령어
+                        // 1. make 프로그램 위치 지정 (mingw32-make.exe)
+                        // 2. C/C++ 컴파일러 위치 지정 (gcc.exe, g++.exe)
                         bat """
-                            cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${QT_ROOT}" ..
+                            cmake -G "MinGW Makefiles" ^
+                            -DCMAKE_BUILD_TYPE=Release ^
+                            -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
+                            -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
+                            -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
+                            -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
+                            ..
                         """
                         
-                        // 3. 실제 빌드 실행
                         bat "cmake --build . --parallel 4"
                     }
-
+                    
                     script {
                         echo "📦 배포 파일 준비 중..."
                         // CMake 빌드는 exe 파일이 보통 build 폴더 바로 아래에 생깁니다.
