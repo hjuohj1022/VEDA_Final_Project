@@ -26,7 +26,6 @@ qt_add_executable(Team3VideoReceiver
     VideoContainerWidget.h
     StyleHelper.cpp
     StyleHelper.h
-    .env
 )
 
 # =========================================================================
