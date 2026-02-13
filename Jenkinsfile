@@ -149,7 +149,7 @@ pipeline {
                 PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
                 
                 BUILD_DIR = "build_cmake"
-                OUTPUT_DIR = "deploy_output"
+                OUTPUT_DIR = "deploy_output_new"
             }
 
             steps {
@@ -161,26 +161,21 @@ pipeline {
                         bat "taskkill /F /IM Team3VideoReceiver.exe /T || exit 0"
                         bat "taskkill /F /IM ld.exe /T || exit 0"
                         bat "taskkill /F /IM g++.exe /T || exit 0"
+                        bat "taskkill /F /IM cmake.exe /T || exit 0"
                         
                         sleep 3
                         
                         // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
-
-                        bat "if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}"
-                        bat "mkdir ${BUILD_DIR}"
                         bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
                         bat "mkdir ${OUTPUT_DIR}"
-                        
                         bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
 
                         // 2. 필수 의존성 파일(VLC, .env)을 '미리' 배포 폴더로 복사
                         echo "🚚 라이브러리 및 설정 파일 복사..."
                         
-                        // (Git 레포지토리에 libvlc.dll 등이 포함되어 있다고 가정)
                         bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
                         bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
-                        // Plugins 폴더가 있다면 주석 해제
-                        // bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
+                        bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
 
                         // Jenkins Secret File(.env) 처리
                         withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
@@ -188,7 +183,7 @@ pipeline {
                             bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
                         }
 
-                        // 3. CMake 설정 및 빌드 (결과물이 deploy_output으로 직행)
+                        // 3. CMake 설정 및 빌드 (결과물이 deploy_output_new로 직행)
                         dir(BUILD_DIR) {
                             bat """
                                 cmake -G "MinGW Makefiles" ^
@@ -209,18 +204,17 @@ pipeline {
                         // 이미 EXE와 DLL이 OUTPUT_DIR에 다 모여 있으므로 바로 실행
                         dir(OUTPUT_DIR) {
                             echo "📦 Qt 의존성 주입 (windeployqt)..."
-                            bat "windeployqt --release --no-translations Team3VideoReceiver.exe"
+                            bat "windeployqt --release --no-translations --verbose 2 --qmldir .. Team3VideoReceiver.exe"
                         }
 
-                        // 5. 압축 (deploy_output 전체를 압축)
+                        // 5. 압축 (deploy_output_new 전체를 압축)
                         echo "🗜️ 압축 중..."
-                        // 압축 파일은 Qt_Client 폴더 안에 생성
-                        powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_CMake.zip -Force"
+                        powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_VMS.zip -Force"
                     }
                 }
                 
                 // 6. Jenkins에 산출물 보관
-                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_CMake.zip', fingerprint: true
+                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_VMS.zip', fingerprint: true
             }
         }
     }
