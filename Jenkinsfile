@@ -22,7 +22,7 @@ pipeline {
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
             when { 
-                anyof {
+                anyOf {
                     changeset 'RaspberryPi/k3s-cluster/crow_server/**'
                     triggeredBy 'UserIdCause'
                 }
@@ -47,7 +47,7 @@ pipeline {
         // 📡 2. Mosquitto (폴더명: mosquitto)
         stage('MQTT 배포') {
             when { 
-                anyof {
+                anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
                     triggeredBy 'UserIdCause'
                 }
@@ -72,7 +72,7 @@ pipeline {
         // 🎥 3. MediaMTX (폴더명: mediamtx)
         stage('MediaMTX 배포') {
             when { 
-                anyof {
+                anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mediamtx/**'
                     triggeredBy 'UserIdCause'
                 }
@@ -108,7 +108,7 @@ pipeline {
         // 🐬 4. MariaDB (폴더명: mariadb)
         stage('MariaDB 배포') {
             when { 
-                anyof {
+                anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mariadb/**'
                     triggeredBy 'UserIdCause'
                 }
@@ -136,7 +136,7 @@ pipeline {
             
             // Qt 폴더 내 변경사항이 있을 때
             when { 
-                anyof {
+                anyOf {
                     changeset 'Qt_Client/**'
                     triggeredBy 'UserIdCause'
                 }
