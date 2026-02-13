@@ -158,7 +158,16 @@ pipeline {
 
                 dir('Qt_Client') {
                     script {
+                        bat "taskkill /F /IM Team3VideoReceiver.exe /T || exit 0"
+                        bat "taskkill /F /IM ld.exe /T || exit 0"
+                        bat "taskkill /F /IM g++.exe /T || exit 0"
+                        
+                        sleep 3
+                        
                         // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
+
+                        bat "if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}"
+                        bat "mkdir ${BUILD_DIR}"
                         bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
                         bat "mkdir ${OUTPUT_DIR}"
                         
