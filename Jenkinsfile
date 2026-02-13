@@ -21,19 +21,17 @@ pipeline {
         
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/crow_server/**' } // 폴더명 주의!
+            when { changeset 'RaspberryPi/k3s-cluster/crow_server/**' } 
             steps {
                 script {
-                    dir('RaspberryPi/k3s-cluster/crow_server') { // 이 폴더로 들어가서 빌드해라
+                    dir('RaspberryPi/k3s-cluster/crow_server') { 
                         echo "🦅 Crow Server 빌드 시작..."
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/crow-server:latest --push ."
                         }
                     }
-                    // 배포 명령 (yaml 파일도 각 폴더 안에 있다고 가정하면 경로 수정 필요)
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일이 crow_server 폴더 안에 있다면 경로를 명시
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/crow-server"
                     }
@@ -54,7 +52,6 @@ pipeline {
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일 경로 주의: mosquitto/mqtt.yaml
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
@@ -67,20 +64,17 @@ pipeline {
             when { changeset 'RaspberryPi/k3s-cluster/mediamtx/**' }
             steps {
                 script {
-                    // 1. YAML 파일 복사 (원본 보존용)
                     withCredentials([
-                    string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
-                    string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
-                    string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW')
-                ]) {
-                    script {
-                        // 2. sed 명령어로 YAML 파일 내용 바꿔치기 (덮어쓰기)
-                        // 주의: 구분자로 / 대신 | 를 사용 (URL이나 특수문자 충돌 방지)
-                        sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
+                        string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
+                        string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW')
+                    ]) {
+                        script {
+                            sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                            sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                            sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        }
                     }
-                }
                     dir('RaspberryPi/k3s-cluster/mediamtx') {
                         echo "🎥 MediaMTX 빌드 시작..."
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -89,7 +83,6 @@ pipeline {
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일 경로 주의: mediamtx/mediamtx.yaml
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server"
                     }
@@ -117,14 +110,15 @@ pipeline {
             }
         }
 
+        // 🖥️ 5. Qt Client (Windows)
         stage('Qt Client (Windows CMake)') {
             agent { label 'windows-qt' } 
             
+            // Qt 폴더 내 변경사항이 있을 때
             when { changeset 'Qt_Client/**' }
 
             environment {
-                // 1. 실제 설치된 경로로 확인 필수!
-                QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
+                QT_ROOT = "C:\\Qt\\6.10.2\\mingw_64"
                 MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
                 CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
                 PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
@@ -138,57 +132,60 @@ pipeline {
                 git branch: 'develop', url: GIT_URL
 
                 dir('Qt_Client') {
-                    bat """
-                        if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}
-                        if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}
-                        mkdir ${BUILD_DIR}
-                        mkdir ${OUTPUT_DIR}
-                    """
+                    script {
+                        // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
+                        bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
+                        bat "mkdir ${OUTPUT_DIR}"
+                        
+                        bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
 
-                    // ✨ 2. Jenkins에 저장된 Secret File(.env)을 꺼내오기
-                    withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
-                        script {
-                            // Windows에서는 copy 명령어로 복사 (Jenkins가 임시로 만든 파일을 실제 위치로 복사)
-                            // 1) 빌드에 필요하다면 소스 폴더로 복사
-                            bat "copy /Y \"%SECRET_ENV%\" .env"
-                            
-                            // 2) 실행 시 필요하므로 배포 폴더(OUTPUT_DIR)에도 미리 복사
+                        // 2. 필수 의존성 파일(VLC, .env)을 '미리' 배포 폴더로 복사
+                        echo "🚚 라이브러리 및 설정 파일 복사..."
+                        
+                        // (Git 레포지토리에 libvlc.dll 등이 포함되어 있다고 가정)
+                        bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
+                        bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
+                        // Plugins 폴더가 있다면 주석 해제
+                        // bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
+
+                        // Jenkins Secret File(.env) 처리
+                        withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
+                             // 실행 시 필요하므로 배포 폴더에 바로 복사
                             bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
                         }
-                    }
 
-                    dir(BUILD_DIR) {
-                        // 수정된 CMake 명령어
-                        // 1. make 프로그램 위치 지정 (mingw32-make.exe)
-                        // 2. C/C++ 컴파일러 위치 지정 (gcc.exe, g++.exe)
-                        bat """
-                            cmake -G "MinGW Makefiles" ^
-                            -DCMAKE_BUILD_TYPE=Release ^
-                            -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
-                            -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
-                            -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
-                            -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
-                            ..
-                        """
-                        
-                        bat "cmake --build . --parallel 4"
-                    }
-                    
-                    script {
-                        echo "📦 배포 파일 준비 중..."
-                        // CMake 빌드는 exe 파일이 보통 build 폴더 바로 아래에 생깁니다.
-                        // 'YourAppName.exe'를 실제 프로젝트 결과물 이름으로 바꾸세요!
-                        bat "copy ${BUILD_DIR}\\Team3VideoReceiver.exe ${OUTPUT_DIR}\\"
-                        
-                        dir(OUTPUT_DIR) {
-                            bat "windeployqt --release Team3VideoReceiver.exe"
+                        // 3. CMake 설정 및 빌드 (결과물이 deploy_output으로 직행)
+                        dir(BUILD_DIR) {
+                            bat """
+                                cmake -G "MinGW Makefiles" ^
+                                -DCMAKE_BUILD_TYPE=Release ^
+                                -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
+                                -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
+                                -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
+                                -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
+                                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="../${OUTPUT_DIR}" ^
+                                ..
+                            """
+                            
+                            // 병렬 빌드
+                            bat "cmake --build . --parallel 4"
                         }
-                    }
+                        
+                        // 4. 패키징 (windeployqt)
+                        // 이미 EXE와 DLL이 OUTPUT_DIR에 다 모여 있으므로 바로 실행
+                        dir(OUTPUT_DIR) {
+                            echo "📦 Qt 의존성 주입 (windeployqt)..."
+                            bat "windeployqt --release --no-translations Team3VideoReceiver.exe"
+                        }
 
-                    dir(OUTPUT_DIR) {
-                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_CMake.zip -Force"
+                        // 5. 압축 (deploy_output 전체를 압축)
+                        echo "🗜️ 압축 중..."
+                        // 압축 파일은 Qt_Client 폴더 안에 생성
+                        powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_CMake.zip -Force"
                     }
                 }
+                
+                // 6. Jenkins에 산출물 보관
                 archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_CMake.zip', fingerprint: true
             }
         }
