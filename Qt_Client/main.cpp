@@ -6,12 +6,8 @@
 #include "VlcPlayer.h"
 #include <QQuickStyle>
 
-
-
 int main(int argc, char *argv[])
 {
-    // Force rebuild for QML resources
-    // ...
     // 고해상도 DPI 스케일링 설정
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);

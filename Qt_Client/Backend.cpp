@@ -9,12 +9,39 @@
 #include <QElapsedTimer>
 #include <QStandardPaths>
 #include <QNetworkCookieJar>
+#include <QSettings>
 
 Backend::Backend(QObject *parent) : QObject(parent)
 {
     m_manager = new QNetworkAccessManager(this);
     m_manager->setCookieJar(new QNetworkCookieJar(this)); // 쿠키 저장소 추가 (세션 유지)
+    setActiveCameras(4);
     loadEnv();
+    QSettings settings;
+    m_useCustomRtspConfig = settings.value("network/use_custom_rtsp", false).toBool();
+
+    const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
+    const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
+
+    if (m_useCustomRtspConfig) {
+        m_rtspIp = settings.value("network/rtsp_ip", envIp).toString().trimmed();
+        m_rtspPort = settings.value("network/rtsp_port", envPort).toString().trimmed();
+    } else {
+        // 초기에는 .env 값을 우선 사용
+        m_rtspIp = envIp;
+        m_rtspPort = envPort;
+    }
+
+    if (m_rtspIp.isEmpty()) {
+        m_rtspIp = envIp;
+    }
+    if (m_rtspPort.isEmpty()) {
+        m_rtspPort = envPort;
+    }
+
+    m_sessionTimer = new QTimer(this);
+    m_sessionTimer->setInterval(1000);
+    connect(m_sessionTimer, &QTimer::timeout, this, &Backend::onSessionTick);
     
     m_storageTimer = new QTimer(this);
     connect(m_storageTimer, &QTimer::timeout, this, &Backend::checkStorage);
@@ -82,8 +109,34 @@ void Backend::loadEnv() {
 
 bool Backend::isLoggedIn() const { return m_isLoggedIn; }
 QString Backend::serverUrl() const { return m_env.value("API_URL", "http://localhost:8080"); }
-QString Backend::rtspIp() const { return m_env.value("RTSP_IP", "127.0.0.1"); }
-QString Backend::rtspPort() const { return m_env.value("RTSP_PORT", "8554"); }
+QString Backend::rtspIp() const { return m_rtspIp; }
+QString Backend::rtspPort() const { return m_rtspPort; }
+
+void Backend::setRtspIp(const QString &ip) {
+    QString trimmed = ip.trimmed();
+    if (trimmed.isEmpty()) return;
+    if (m_rtspIp == trimmed) return;
+
+    m_rtspIp = trimmed;
+    QSettings settings;
+    settings.setValue("network/use_custom_rtsp", true);
+    settings.setValue("network/rtsp_ip", m_rtspIp);
+    m_useCustomRtspConfig = true;
+    emit rtspIpChanged();
+}
+
+void Backend::setRtspPort(const QString &port) {
+    QString trimmed = port.trimmed();
+    if (trimmed.isEmpty()) return;
+    if (m_rtspPort == trimmed) return;
+
+    m_rtspPort = trimmed;
+    QSettings settings;
+    settings.setValue("network/use_custom_rtsp", true);
+    settings.setValue("network/rtsp_port", m_rtspPort);
+    m_useCustomRtspConfig = true;
+    emit rtspPortChanged();
+}
 
 void Backend::setActiveCameras(int count) {
     if (m_activeCameras != count) {
@@ -107,6 +160,11 @@ void Backend::setLatency(int ms) {
 }
 
 void Backend::login(QString id, QString pw) {
+    if (m_loginLocked) {
+        emit loginFailed("로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+        return;
+    }
+
     QUrl url(serverUrl() + "/login");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -121,14 +179,107 @@ void Backend::login(QString id, QString pw) {
         if (reply->error() == QNetworkReply::NoError) {
             m_isLoggedIn = true;
             m_userId = id;
+            m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
+            m_sessionTimer->start();
+            if (m_loginFailedAttempts != 0 || m_loginLocked) {
+                m_loginFailedAttempts = 0;
+                m_loginLocked = false;
+                emit loginLockChanged();
+            }
             emit isLoggedInChanged();
             emit userIdChanged();
+            emit sessionRemainingSecondsChanged();
             emit loginSuccess();
         } else {
-            emit loginFailed(reply->errorString());
+            if (!m_loginLocked) {
+                m_loginFailedAttempts++;
+                if (m_loginFailedAttempts >= m_loginMaxAttempts) {
+                    m_loginLocked = true;
+                }
+                emit loginLockChanged();
+            }
+
+            if (m_loginLocked) {
+                emit loginFailed("비밀번호를 여러 번 틀려 로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+            } else {
+                int remaining = m_loginMaxAttempts - m_loginFailedAttempts;
+                emit loginFailed(QString("비밀번호가 잘못 되었습니다. (%1회 남음)").arg(remaining));
+            }
         }
         reply->deleteLater();
     });
+}
+
+void Backend::logout() {
+    if (!m_isLoggedIn) return;
+
+    m_isLoggedIn = false;
+    m_userId.clear();
+    m_sessionTimer->stop();
+    m_sessionRemainingSeconds = 0;
+
+    emit isLoggedInChanged();
+    emit userIdChanged();
+    emit sessionRemainingSecondsChanged();
+}
+
+void Backend::resetSessionTimer() {
+    if (!m_isLoggedIn) return;
+
+    if (m_sessionRemainingSeconds != m_sessionTimeoutSeconds) {
+        m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
+        emit sessionRemainingSecondsChanged();
+    }
+
+    if (!m_sessionTimer->isActive()) {
+        m_sessionTimer->start();
+    }
+}
+
+bool Backend::adminUnlock(QString adminCode) {
+    QString expected = m_env.value("ADMIN_UNLOCK_KEY").trimmed();
+    if (expected.isEmpty()) {
+        emit loginFailed("관리자 해제 키가 설정되지 않았습니다.");
+        return false;
+    }
+
+    if (adminCode.trimmed() != expected) {
+        emit loginFailed("관리자 해제 키가 올바르지 않습니다.");
+        return false;
+    }
+
+    m_loginLocked = false;
+    m_loginFailedAttempts = 0;
+    emit loginLockChanged();
+    return true;
+}
+
+bool Backend::updateRtspIp(QString ip) {
+    QString trimmed = ip.trimmed();
+    if (trimmed.isEmpty()) {
+        return false;
+    }
+
+    setRtspIp(trimmed);
+    return true;
+}
+
+bool Backend::updateRtspConfig(QString ip, QString port) {
+    QString ipTrimmed = ip.trimmed();
+    QString portTrimmed = port.trimmed();
+    if (ipTrimmed.isEmpty() || portTrimmed.isEmpty()) {
+        return false;
+    }
+
+    bool ok = false;
+    int portNum = portTrimmed.toInt(&ok);
+    if (!ok || portNum < 1 || portNum > 65535) {
+        return false;
+    }
+
+    setRtspIp(ipTrimmed);
+    setRtspPort(QString::number(portNum));
+    return true;
 }
 
 void Backend::refreshRecordings() {
@@ -346,4 +497,21 @@ void Backend::onStorageReply(QNetworkReply *reply) {
         }
     }
     reply->deleteLater();
+}
+
+void Backend::onSessionTick() {
+    if (!m_isLoggedIn) {
+        m_sessionTimer->stop();
+        return;
+    }
+
+    if (m_sessionRemainingSeconds > 0) {
+        m_sessionRemainingSeconds--;
+        emit sessionRemainingSecondsChanged();
+    }
+
+    if (m_sessionRemainingSeconds <= 0) {
+        logout();
+        emit sessionExpired();
+    }
 }

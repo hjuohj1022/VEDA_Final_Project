@@ -100,7 +100,6 @@ MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소
 
 ---
 
-
 ## Troubleshooting (트러블슈팅)
 
 **Q. "VLC 인스턴스 생성 실패! DLL 파일을 확인하세요." 메시지가 뜹니다.**
@@ -115,4 +114,5 @@ MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소
 ---
 
 ## License
+
 This project is for educational purposes.
