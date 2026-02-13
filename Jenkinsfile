@@ -21,7 +21,12 @@ pipeline {
         
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/crow_server/**' } 
+            when { 
+                anyof {
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/crow_server') { 
@@ -41,7 +46,12 @@ pipeline {
 
         // 📡 2. Mosquitto (폴더명: mosquitto)
         stage('MQTT 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mosquitto/**' }
+            when { 
+                anyof {
+                    changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mosquitto') {
@@ -61,7 +71,12 @@ pipeline {
 
         // 🎥 3. MediaMTX (폴더명: mediamtx)
         stage('MediaMTX 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mediamtx/**' }
+            when { 
+                anyof {
+                    changeset 'RaspberryPi/k3s-cluster/mediamtx/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     withCredentials([
@@ -92,7 +107,12 @@ pipeline {
 
         // 🐬 4. MariaDB (폴더명: mariadb)
         stage('MariaDB 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mariadb/**' }
+            when { 
+                anyof {
+                    changeset 'RaspberryPi/k3s-cluster/mariadb/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mariadb') {
@@ -115,7 +135,12 @@ pipeline {
             agent { label 'windows-qt' } 
             
             // Qt 폴더 내 변경사항이 있을 때
-            when { changeset 'Qt_Client/**' }
+            when { 
+                anyof {
+                    changeset 'Qt_Client/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
 
             environment {
                 QT_ROOT = "C:\\Qt\\6.10.2\\mingw_64"
