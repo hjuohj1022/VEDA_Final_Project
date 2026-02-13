@@ -5,14 +5,16 @@ import QtMultimedia
 import QtQuick.Dialogs
 
 Item {
-    // 강제 재빌드 2026-02-11
+    // 로그인/녹화 목록/재생 화면 루트
     id: root
     property var theme
+    property string pendingDeleteFileName: ""
+    property string adminUnlockCode: ""
+    property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     
-    // 로그인 상태
     property bool isLoggedIn: backend.isLoggedIn
     
-    // 로그인 화면
+    // 로그인 전 화면
     Rectangle {
         anchors.fill: parent
         color: theme ? theme.bgSecondary : "#09090b"
@@ -24,7 +26,6 @@ Item {
             width: 320
             spacing: 24
             
-            // 로고 / 헤더
             ColumnLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 8
@@ -34,7 +35,13 @@ Item {
                     width: 48; height: 48
                     color: theme ? theme.accent : "#f97316"
                     radius: 12
-                    Text { anchors.centerIn: parent; text: "🛡️"; font.pixelSize: 24 }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\uE72E"
+                        color: "white"
+                        font.family: "Segoe MDL2 Assets"
+                        font.pixelSize: 20
+                    }
                 }
                 
                 Text {
@@ -53,7 +60,6 @@ Item {
                 }
             }
             
-            // 양식
             ColumnLayout {
                 spacing: 16
                 Layout.fillWidth: true
@@ -89,9 +95,14 @@ Item {
                     text: "Sign In"
                     Layout.fillWidth: true
                     height: 40
+                    enabled: !backend.loginLocked
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     
                     background: Rectangle {
-                        color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
+                        color: !parent.enabled
+                               ? (theme ? theme.border : "#3f3f46")
+                               : (parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316"))
                         radius: 6
                     }
                     
@@ -107,14 +118,79 @@ Item {
                         backend.login(idField.text, pwField.text)
                     }
                 }
+
+                Text {
+                    Layout.fillWidth: true
+                    color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    text: backend.loginLocked
+                          ? "Account locked after " + backend.loginMaxAttempts + " failed attempts."
+                          : ("Failed attempts: " + backend.loginFailedAttempts + " / " + backend.loginMaxAttempts)
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: backend.loginLocked
+
+                    TextField {
+                        id: adminUnlockField
+                        placeholderText: "Admin unlock key"
+                        echoMode: TextInput.Password
+                        Layout.fillWidth: true
+                        height: 40
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: adminUnlockField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onTextChanged: root.adminUnlockCode = text
+                        onAccepted: {
+                            if (backend.adminUnlock(text)) {
+                                text = ""
+                                root.adminUnlockCode = ""
+                            }
+                        }
+                    }
+
+                Button {
+                    text: "Admin Unlock"
+                    Layout.fillWidth: true
+                    height: 38
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: {
+                            if (backend.adminUnlock(adminUnlockField.text)) {
+                                adminUnlockField.text = ""
+                                root.adminUnlockCode = ""
+                            }
+                        }
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : (theme ? theme.bgComponent : "#18181b")
+                        border.color: theme ? theme.border : "#27272a"
+                        radius: 6
+                    }
+                        contentItem: Text {
+                            text: parent.text
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
                 
                 Button {
-                    text: "Cancel"
+                    text: "Clear"
                     Layout.fillWidth: true
                     height: 40
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     
                     background: Rectangle {
-                        color: "transparent"
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
                         border.color: theme ? theme.border : "#27272a"
                         radius: 6
                     }
@@ -126,19 +202,21 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     
-                    onClicked: stackLayout.currentIndex = 0 // 라이브로 돌아가기
+                    onClicked: {
+                        idField.text = ""
+                        pwField.text = ""
+                    }
                 }
             }
         }
     }
     
-    // 녹화 목록 보기 (로그인 시 표시)
+    // 로그인 후 화면 (좌: 녹화 목록, 우: 플레이어)
     RowLayout {
         anchors.fill: parent
         visible: root.isLoggedIn
         spacing: 16
         
-        // 목록 사이드
         Rectangle {
             Layout.preferredWidth: 300
             Layout.fillHeight: true
@@ -165,20 +243,27 @@ Item {
                     Item { Layout.fillWidth: true }
                     
                     Button {
-                        text: "🔄"
-                        background: Rectangle { color: "transparent"; radius: 4; border.color: theme ? theme.border : "#27272a" }
+                        text: "Refresh"
+                        scale: down ? 0.97 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                        background: Rectangle {
+                            color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                            radius: 4
+                            border.color: theme ? theme.border : "#27272a"
+                        }
                         contentItem: Text { text: parent.text; color: theme ? theme.textSecondary : "#a1a1aa"; anchors.centerIn: parent }
                         onClicked: backend.refreshRecordings()
                         ToolTip.visible: hovered
-                        ToolTip.text: "목록 새로고침"
+                        ToolTip.text: "Refresh recordings"
                     }
                 }
                 
-                // 라이브 뷰 버튼 (상단에 눈에 띄게)
                 Button {
                     Layout.fillWidth: true
                     height: 36
-                    text: "📺 Return to Live View"
+                    text: "Return to Live View"
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     
                     background: Rectangle {
                         color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
@@ -196,6 +281,7 @@ Item {
                     onClicked: stackLayout.currentIndex = 0
                 }
 
+                // 녹화 파일 목록
                 ListView {
                     id: recordList
                     Layout.fillWidth: true
@@ -207,8 +293,18 @@ Item {
                     delegate: Rectangle {
                         width: recordList.width
                         height: 40
-                        color: itemMouseArea.pressed ? (theme ? theme.accent : "#f97316") : (index % 2 == 0 ? "transparent" : (theme ? theme.bgComponent : "#18181b"))
+                        color: itemMouseArea.pressed
+                               ? (recordList.currentIndex === index
+                                  ? "#ea580c"
+                                  : (darkTheme ? "#3f3f46" : "#e2e8f0"))
+                               : (recordList.currentIndex === index
+                                  ? (theme ? theme.accent : "#f97316")
+                                  : (itemMouseArea.containsMouse
+                                     ? (darkTheme ? "#27272a" : "#f1f5f9")
+                                     : (index % 2 == 0 ? "transparent" : (theme ? theme.bgComponent : "#18181b"))))
                         radius: 4
+                        scale: itemMouseArea.pressed ? 0.985 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                         
                             MouseArea {
                                 id: itemMouseArea
@@ -216,10 +312,6 @@ Item {
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 
-                                // 더블 클릭 우선 처리를 위해 onClicked 로직 조정 필요할 수 있음
-                                // 하지만 여기서는 우클릭 메뉴와 좌클릭 선택이 필요함.
-                                // 가장 빠른 반응을 위해 onPress 시점에 인덱스 변경을 고려할 수도 있으나, 드래그 등과 충돌 가능.
-                                // 더블 클릭 시 즉시 로그 출력
                                 
                                 onPressed: (mouse) => {
                                     if (mouse.button === Qt.LeftButton) {
@@ -237,6 +329,7 @@ Item {
                                     root.playVideo(model.fileName)
                                 }
                                 
+                                // 항목 우클릭 메뉴
                                 Menu {
                                     id: contextMenu
                                     MenuItem {
@@ -254,6 +347,13 @@ Item {
                                             fileDialog.open()
                                         }
                                     }
+                                    MenuItem {
+                                        text: "Delete"
+                                        onTriggered: {
+                                            root.pendingDeleteFileName = model.fileName
+                                            deleteDialog.open()
+                                        }
+                                    }
                                 }
                             }
                         
@@ -263,12 +363,12 @@ Item {
                             anchors.rightMargin: 8
                             
                             Text {
-                                text: "🎬"
+                                text: "F"
                                 font.pixelSize: 14
                             }
                             Text {
                                 text: model.fileName
-                                color: itemMouseArea.containsMouse || recordList.currentIndex === index ? "white" : (theme ? theme.textPrimary : "white")
+                                color: recordList.currentIndex === index ? "white" : (theme ? theme.textPrimary : "white")
                                 font.bold: recordList.currentIndex === index
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
@@ -276,7 +376,7 @@ Item {
                             
                             Text {
                                 text: model.fileSize > 0 ? formatBytes(model.fileSize) : ""
-                                color: itemMouseArea.containsMouse || recordList.currentIndex === index ? "#e4e4e7" : (theme ? theme.textSecondary : "#a1a1aa")
+                                color: recordList.currentIndex === index ? "#fff7ed" : (theme ? theme.textSecondary : "#a1a1aa")
                                 font.pixelSize: 12
                                 visible: model.fileSize > 0
                             }
@@ -285,23 +385,20 @@ Item {
                         }
                     }
 
-                    // 빈 상태
                     Text {
                         anchors.centerIn: parent
                         text: "No recordings found"
                         visible: recordList.count === 0 && backend.isLoggedIn
                         color: theme ? theme.textSecondary : "#71717a"
                     }
-                    
-                    // 모델 업데이트를 위한 연결
+
                     Connections {
                         target: backend
                         function onRecordingsLoaded(files) {
                             filesModel.clear()
                             for(var i=0; i<files.length; i++) {
                                 var file = files[i]
-                                // Backend에서 QVariantMap으로 전달됨 (name, size 등)
-                                var name = file.name || file // 호환성 (문자열만 올 경우)
+                                var name = file.name || file
                                 var size = file.size || 0
                                 filesModel.append({
                                     fileName: name,
@@ -314,7 +411,6 @@ Item {
             }
         }
         
-        // 오른쪽 패널: 플레이어
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -329,24 +425,21 @@ Item {
             MediaPlayer {
                 id: player
                 videoOutput: recordVideoOut
-                // audioOutput: AudioOutput { volume: 0.5 } // 제거됨
             }
             
-            // 플레이어 컨트롤 오버레이
             Rectangle {
                 width: parent.width
                 height: 80
                 anchors.bottom: parent.bottom
                 color: "#18181b"
                 border.color: "#27272a"
-                border.width: 1 // Top border mainly
+                border.width: 1
                 
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 20
                     spacing: 16
                     
-                    // 재생/일시정지
                     Rectangle {
                         width: 40; height: 40
                         radius: 20
@@ -356,7 +449,7 @@ Item {
                         
                         Text {
                             anchors.centerIn: parent
-                            text: player.playbackState === MediaPlayer.PlayingState ? "⏸" : "▶"
+                            text: player.playbackState === MediaPlayer.PlayingState ? "II" : ">"
                             color: "white"
                             font.pixelSize: 18
                         }
@@ -367,7 +460,6 @@ Item {
                         }
                     }
                     
-                    // 시간 및 슬라이더
                     Text {
                         text: formatTime(player.position)
                         color: "#a1a1aa"
@@ -396,23 +488,13 @@ Item {
                         color: "#a1a1aa"
                         font.family: "monospace"
                     }
-                    
-                    // 볼륨 제거됨 - 오디오 없음
-                    
-                    /*
-                    Text { text: "🔊"; font.pixelSize: 16 }
-                    Slider {
-                        Layout.preferredWidth: 100
-                        from: 0; to: 1.0; value: 0.5
-                        onMoved: player.audioOutput.volume = value
-                    }
-                    */
+
                 }
             }
         }
     }
     
-    // 백엔드 신호 연결
+    // 백엔드 시그널 연결
     Connections {
         target: backend
         
@@ -437,10 +519,9 @@ Item {
             if (total > 0) {
                 downloadBar.value = received / total
                 
-                // ETA 계산 (단순 평균 속도 기반)
                 var currentTime = new Date().getTime()
-                var elapsed = (currentTime - downloadStartTime) / 1000 // 초 단위 경과 시간
-                var speed = elapsed > 0 ? received / elapsed : 0 // bytes/sec
+                var elapsed = (currentTime - downloadStartTime) / 1000
+                var speed = elapsed > 0 ? received / elapsed : 0
                 
                 var etaText = ""
                 if (speed > 0) {
@@ -465,30 +546,93 @@ Item {
                 errorDialog.open()
             }
         }
-        
+
         function onDownloadError(error) {
             downloadPopup.close()
             errorDialog.title = "Download Error"
             errorDialog.text = error
             errorDialog.open()
         }
+
+        function onDeleteFailed(error) {
+            errorDialog.title = "Delete Failed"
+            errorDialog.text = error
+            errorDialog.open()
+        }
     }
 
-    // 오류 대화상자
+    // 공통 에러 다이얼로그
     Dialog {
         id: errorDialog
         anchors.centerIn: parent
         title: "Error"
         property string text: ""
         modal: true
-        standardButtons: Dialog.Ok
-        
-        contentItem: Text {
-            text: errorDialog.text
-            color: theme ? theme.textPrimary : "white"
-            wrapMode: Text.WordWrap
+        width: 360
+        closePolicy: Popup.NoAutoClose
+
+        header: Rectangle {
+            implicitHeight: 44
+            color: theme ? theme.bgSecondary : "#0f172a"
+            border.color: theme ? theme.border : "#27272a"
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 14
+                text: errorDialog.title
+                color: theme ? theme.textPrimary : "white"
+                font.bold: true
+                font.pixelSize: 14
+            }
         }
-        
+
+        contentItem: Rectangle {
+            implicitHeight: 86
+            color: "transparent"
+
+            Text {
+                anchors.fill: parent
+                anchors.margins: 14
+                text: errorDialog.text
+                color: theme ? theme.textPrimary : "white"
+                wrapMode: Text.WordWrap
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        footer: Rectangle {
+            implicitHeight: 58
+            color: "transparent"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "확인"
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: errorDialog.close()
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#374151") : (theme ? theme.bgSecondary : "#1f2937")
+                        border.color: theme ? theme.border : "#374151"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+
         background: Rectangle {
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
@@ -541,7 +685,7 @@ Item {
                 background: Rectangle {
                     implicitWidth: 200
                     implicitHeight: 6
-                    color: "#27272a"
+                    color: theme ? theme.border : "#27272a"
                     radius: 3
                 }
                 
@@ -561,21 +705,28 @@ Item {
             Button {
                 text: "Cancel"
                 Layout.alignment: Qt.AlignHCenter
+                scale: down ? 0.97 : 1.0
+                Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                 onClicked: {
                     backend.cancelDownload()
                     downloadPopup.close()
                 }
                 
                 background: Rectangle {
-                    color: "transparent"
-                    border.color: "#52525b"
+                    color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                    border.color: theme ? theme.border : "#52525b"
                     radius: 4
                 }
-                contentItem: Text { text: parent.text; color: "#a1a1aa"; anchors.centerIn: parent }
+                contentItem: Text {
+                    text: parent.text
+                    color: theme ? theme.textSecondary : "#a1a1aa"
+                    anchors.centerIn: parent
+                }
             }
         }
     }
     
+    // 파일 내보내기 경로 선택
     FileDialog {
         id: fileDialog
         title: "Export Recording"
@@ -584,57 +735,319 @@ Item {
         property string selectedFileName
         
         onAccepted: {
-            // 선택된 경로에서 파일명 추출 또는 그대로 사용?
-            // FileDialog는 selectedFile (url)을 반환함.
-            // backend.exportRecording expects: fileName (server), savePath (local)
             var path = selectedFile.toString()
-            // Remove file:/// prefix if present (Windows specific handling might be needed in C++, but verify)
-            if (path.startsWith("file:///")) path = path.slice(8) // file:/// -> /... (On Windows 8 chars?) 
-            // Actually QUrl.toLocalFile() logic is better handled in C++? 
-            // Let's pass the raw string and let C++ handle or simpler: Backend.exportRecording should take the path.
-            // Backend takes QString savePath. If passed "file:///C:/...", QFile might handle it or need stripping.
-            // Let's strip "file:///" manually to be safe for QFile.
+            if (path.startsWith("file:///")) path = path.slice(8)
             
             backend.exportRecording(selectedFileName, path)
         }
     }
-
     function playVideo(fileName) {
         console.log("Requesting download and play:", fileName)
         backend.downloadAndPlay(fileName)
     }
 
-    Dialog {
+    // 파일명 변경 팝업 (다크 테마 + 드래그 이동)
+    Popup {
         id: renameDialog
-        title: "Rename Recording"
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        property string currentFileName
-        
-        ColumnLayout {
-            spacing: 10
-            Label { text: "Enter new name:" }
-            TextField {
-                id: renameField
-                text: renameDialog.currentFileName
-                selectByMouse: true
-                onAccepted: renameDialog.accept()
-            }
-        }
-        
+        width: 420
+        height: 210
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        property string currentFileName: ""
+
         onOpened: {
+            x = (root.width - width) / 2
+            y = (root.height - height) / 2
             renameField.text = currentFileName
             renameField.forceActiveFocus()
+            renameField.selectAll()
         }
-        
-        onAccepted: {
-            if (renameField.text !== currentFileName && renameField.text.length > 0) {
-                // 확장자 유지 로직이 필요할 수 있음
-                // 여기서는 입력된 텍스트 그대로 서버에 요청
-                backend.renameRecording(currentFileName, renameField.text)
+
+        background: Rectangle {
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            radius: 10
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 42
+                color: "transparent"
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    text: "Rename Recording"
+                    color: theme ? theme.textPrimary : "white"
+                    font.bold: true
+                    font.pixelSize: 15
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeAllCursor
+                    property real pressRootX: 0
+                    property real pressRootY: 0
+                    property real startPopupX: 0
+                    property real startPopupY: 0
+                    onPressed: (mouse) => {
+                        var p = mapToItem(root, mouse.x, mouse.y)
+                        pressRootX = p.x
+                        pressRootY = p.y
+                        startPopupX = renameDialog.x
+                        startPopupY = renameDialog.y
+                    }
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) return
+                        var p = mapToItem(root, mouse.x, mouse.y)
+                        var nx = startPopupX + (p.x - pressRootX)
+                        var ny = startPopupY + (p.y - pressRootY)
+                        renameDialog.x = Math.max(0, Math.min(root.width - renameDialog.width, nx))
+                        renameDialog.y = Math.max(0, Math.min(root.height - renameDialog.height, ny))
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "transparent"
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 10
+
+                    Label {
+                        text: "Enter new name:"
+                        color: theme ? theme.textPrimary : "white"
+                    }
+
+                    TextField {
+                        id: renameField
+                        Layout.fillWidth: true
+                        selectByMouse: true
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#0f172a"
+                            border.color: theme ? theme.border : "#374151"
+                            radius: 6
+                        }
+                        onAccepted: {
+                            if (text !== renameDialog.currentFileName && text.length > 0) {
+                                backend.renameRecording(renameDialog.currentFileName, text)
+                            }
+                            renameDialog.close()
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 54
+                spacing: 10
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "Cancel"
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: renameDialog.close()
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                        border.color: theme ? theme.border : "#52525b"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "Rename"
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: {
+                        if (renameField.text !== renameDialog.currentFileName && renameField.text.length > 0) {
+                            backend.renameRecording(renameDialog.currentFileName, renameField.text)
+                        }
+                        renameDialog.close()
+                    }
+                    background: Rectangle {
+                        color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "white"
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Item { Layout.preferredWidth: 12 }
             }
         }
     }
-    
+
+    // 파일 삭제 확인 팝업 (다크 테마 + 드래그 이동)
+    Popup {
+        id: deleteDialog
+        width: 360
+        height: 190
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+
+        onOpened: {
+            x = (root.width - width) / 2
+            y = (root.height - height) / 2
+        }
+
+        background: Rectangle {
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            radius: 10
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 42
+                color: "transparent"
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    text: "Delete Recording"
+                    color: theme ? theme.textPrimary : "white"
+                    font.bold: true
+                    font.pixelSize: 15
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeAllCursor
+                    property real pressRootX: 0
+                    property real pressRootY: 0
+                    property real startPopupX: 0
+                    property real startPopupY: 0
+                    onPressed: (mouse) => {
+                        var p = mapToItem(root, mouse.x, mouse.y)
+                        pressRootX = p.x
+                        pressRootY = p.y
+                        startPopupX = deleteDialog.x
+                        startPopupY = deleteDialog.y
+                    }
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) return
+                        var p = mapToItem(root, mouse.x, mouse.y)
+                        var nx = startPopupX + (p.x - pressRootX)
+                        var ny = startPopupY + (p.y - pressRootY)
+                        deleteDialog.x = Math.max(0, Math.min(root.width - deleteDialog.width, nx))
+                        deleteDialog.y = Math.max(0, Math.min(root.height - deleteDialog.height, ny))
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "transparent"
+
+                Text {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    text: root.pendingDeleteFileName.length > 0
+                          ? "Delete this file?\n" + root.pendingDeleteFileName
+                          : "Delete this file?"
+                    color: theme ? theme.textPrimary : "white"
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignLeft
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 54
+                spacing: 10
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "Cancel"
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: {
+                        root.pendingDeleteFileName = ""
+                        deleteDialog.close()
+                    }
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                        border.color: theme ? theme.border : "#52525b"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "Delete"
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    onClicked: {
+                        if (root.pendingDeleteFileName.length > 0) {
+                            backend.deleteRecording(root.pendingDeleteFileName)
+                        }
+                        root.pendingDeleteFileName = ""
+                        deleteDialog.close()
+                    }
+                    background: Rectangle {
+                        color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "white"
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Item { Layout.preferredWidth: 12 }
+            }
+        }
+    }
     function formatTime(ms) {
         var seconds = Math.floor((ms / 1000) % 60);
         var minutes = Math.floor((ms / 60000) % 60);
@@ -653,3 +1066,13 @@ Item {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
     }
 }
+
+
+
+
+
+
+
+
+
+

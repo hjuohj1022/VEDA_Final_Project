@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
@@ -7,7 +7,7 @@ Rectangle {
     property var theme
     color: theme ? theme.bgSecondary : "#09090b"
     
-    // 왼쪽 테두리
+    // ?쇱そ ?뚮몢由?
     Rectangle {
         anchors.left: parent.left
         width: 1
@@ -20,7 +20,7 @@ Rectangle {
         anchors.margins: 8 // p-2
         spacing: 8 // space-y-2
 
-        // 시스템 메트릭 제목
+        // ?쒖뒪??硫뷀듃由??쒕ぉ
         Text {
             text: "System Metrics"
             color: theme ? theme.textPrimary : "white"
@@ -28,11 +28,11 @@ Rectangle {
             font.pixelSize: 14 // text-sm
         }
 
-        // 차트 영역
+        // 李⑦듃 ?곸뿭
         ColumnLayout {
             spacing: 8
             
-            // 재사용 가능한 차트 구성 요소 (인라인)
+            // ?ъ궗??媛?ν븳 李⑦듃 援ъ꽦 ?붿냼 (?몃씪??
             component SystemChart : Rectangle {
                 id: chartRoot
                 property string title: "Metric"
@@ -62,7 +62,7 @@ Rectangle {
                         if(v > max) max = v
                         sum += v
                     }
-                    chartRoot.calculatedMax = max > 0 ? max : 100 // 0 스케일 방지
+                    chartRoot.calculatedMax = max > 0 ? max : 100 // 0 ?ㅼ???諛⑹?
                     chartRoot.calculatedAvg = Math.round(sum / len)
                 }
 
@@ -74,7 +74,7 @@ Rectangle {
                         if (arr.length > 20) arr.shift()
                         arr.push(newVal)
                         
-                        // 최대값 및 평균값 계산
+                        // 理쒕?媛?諛??됯퇏媛?怨꾩궛
                         var max = 0
                         var sum = 0
                         for(var i=0; i<arr.length; i++) {
@@ -113,7 +113,7 @@ Rectangle {
                             var data = chartRoot.dataHistory
                             if (data.length < 2) return
                             
-                            var maxVal = chartRoot.calculatedMax * 1.2 // 약간의 여백
+                            var maxVal = chartRoot.calculatedMax * 1.2 // ?쎄컙???щ갚
                             
                             ctx.beginPath()
                             ctx.lineWidth = 1.5
@@ -122,7 +122,7 @@ Rectangle {
                             
                             var stepX = width / (data.length - 1)
                             
-                            // 선 그리기
+                            // ??洹몃━湲?
                             ctx.moveTo(0, height - (data[0] / maxVal) * height)
                             for (var i = 1; i < data.length; i++) {
                                 ctx.lineTo(i * stepX, height - (data[i] / maxVal) * height)
@@ -147,7 +147,7 @@ Rectangle {
                 }
             }
             
-            // FPS 차트 인스턴스
+            // FPS 李⑦듃 ?몄뒪?댁뒪
             SystemChart {
                 title: "FPS"
                 unit: "FPS"
@@ -157,7 +157,7 @@ Rectangle {
                 dataHistory: [30, 29, 30, 31, 30, 28, 29, 30, 30, 29, 30, 31, 29, 30, 30]
             }
             
-            // 지연 시간 차트 인스턴스
+            // 吏???쒓컙 李⑦듃 ?몄뒪?댁뒪
             SystemChart {
                 title: "LATENCY"
                 unit: "ms"
@@ -168,7 +168,7 @@ Rectangle {
             }
         }
 
-        // 통계 그리드
+        // ?듦퀎 洹몃━??
         GridLayout {
             columns: 2
             columnSpacing: 8
@@ -176,10 +176,10 @@ Rectangle {
             
             Repeater {
                 model: [
-                    { label: "Active Cameras", value: "4", sub: "of 4 total", icon: "📊", color: theme ? theme.accent : "#f97316" },
-                    { label: "Detected Objects", value: "-", sub: "Connection Needed", icon: "👥", color: theme ? theme.textSecondary : "#71717a" },
-                    { label: "Storage Used", value: backend.storagePercent + "%", sub: backend.storageUsed + " / " + backend.storageTotal, icon: "💾", color: theme ? theme.textSecondary : "#71717a" },
-                    { label: "Network Status", value: "-", sub: "Connection Needed", icon: "📶", color: theme ? theme.textSecondary : "#71717a" }
+                    { label: "Active Cameras", value: backend.activeCameras + "", sub: "of 4 total", icon: "\uD83C\uDFA5", color: theme ? theme.accent : "#f97316" },
+                    { label: "Detected Objects", value: "-", sub: "Connection Needed", icon: "\uD83E\uDDE0", color: theme ? theme.textSecondary : "#71717a" },
+                    { label: "Storage Used", value: backend.storagePercent + "%", sub: backend.storageUsed + " / " + backend.storageTotal, icon: "\uD83D\uDCBE", color: theme ? theme.textSecondary : "#71717a" },
+                    { label: "Network Status", value: "-", sub: "Connection Needed", icon: "\uD83D\uDCE1", color: theme ? theme.textSecondary : "#71717a" }
                 ]
                 
                 delegate: Rectangle {
@@ -229,15 +229,15 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillHeight: true } // 스페이서
+        Item { Layout.fillHeight: true } // ?ㅽ럹?댁꽌
 
-            // AI 상태 카드
+            // AI ?곹깭 移대뱶
         Rectangle {
             Layout.fillWidth: true
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
             radius: 8
-            border.color: "#4e2c0e" // 상태에 주황색 틴트 유지? 아니면 theme.accent 사용? 로직을 위해 고정 유지
+            border.color: "#4e2c0e" // ?곹깭??二쇳솴???댄듃 ?좎?? ?꾨땲硫?theme.accent ?ъ슜? 濡쒖쭅???꾪빐 怨좎젙 ?좎?
             border.width: 1
             
             ColumnLayout {
@@ -266,3 +266,4 @@ Rectangle {
         }
     }
 }
+
