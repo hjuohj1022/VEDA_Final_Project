@@ -109,34 +109,6 @@ spec:
           
         - name: recordings
           mountPath: /recordings
-
-      # [컨테이너 2] Disk Cleaner (70% 초과 시 강력 삭제)
-      - name: disk-cleaner
-        image: alpine:latest
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "Disk Cleaner started with AGGRESSIVE mode..."
-            # 10초마다 체크
-            while true; do
-              
-              # 현재 /recordings 경로의 사용량(%) 추출
-              USAGE=$(df -P /recordings | awk 'NR==2 {print $5}' | tr -d '%')
-              
-              # 70%로 기준 (컨테이너 Eviction 방지용 안전마진)
-              if [ "$USAGE" -gt 70 ]; then
-                echo "Warning: Disk usage is ${USAGE}%. Cleaning up..."
-                
-                # 한 번에 30개씩 삭제
-                find /recordings -type f -name "*.mp4" -printf '%T+ %p\n' | sort | head -n 30 | awk '{print $2}' | xargs -r rm
-                
-              fi
-              
-              sleep 10
-            done
-        volumeMounts:
-        - name: recordings
-          mountPath: /recordings
           
       volumes:
       - name: config-volume
