@@ -79,7 +79,7 @@ spec:
         kubernetes.io/hostname: pi-worker1
       
       containers:
-      # [컨테이너 1] 기존 MediaMTX 서버
+      # [컨테이너 1] MediaMTX 서버
       - name: mediamtx          
         image: bluenviron/mediamtx:latest-ffmpeg          
         
@@ -107,29 +107,6 @@ spec:
           mountPath: /mediamtx.yml
           subPath: mediamtx.yml
           
-        - name: recordings
-          mountPath: /recordings
-
-      # [컨테이너 2] Disk Cleaner (용량 80% 초과 시 삭제)
-      - name: disk-cleaner
-        image: alpine:latest
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            # 60초마다 디스크 용량 체크 루프
-            while true; do
-              # 현재 /recordings 경로의 사용량(%) 추출
-              USAGE=$(df -P /recordings | awk 'NR==2 {print $5}' | tr -d '%')
-              
-              # 사용량이 80%를 넘는지 확인
-              if [ "$USAGE" -gt 80 ]; then
-                echo "Warning: Disk usage is ${USAGE}%. Deleting old files..."
-                # 가장 오래된 mp4 파일 5개를 찾아서 삭제함
-                find /recordings -type f -name "*.mp4" -printf '%T+ %p\n' | sort | head -n 5 | awk '{print $2}' | xargs -r rm
-              fi
-              sleep 60
-            done
-        volumeMounts:
         - name: recordings
           mountPath: /recordings
           

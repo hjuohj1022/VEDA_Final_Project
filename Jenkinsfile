@@ -116,6 +116,82 @@ pipeline {
                 }
             }
         }
+
+        stage('Qt Client (Windows CMake)') {
+            agent { label 'windows-qt' } 
+            
+            when { changeset 'Qt_Client/**' }
+
+            environment {
+                // 1. 실제 설치된 경로로 확인 필수!
+                QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
+                MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
+                CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
+                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
+                
+                BUILD_DIR = "build_cmake"
+                OUTPUT_DIR = "deploy_output"
+            }
+
+            steps {
+                echo "🔨 CMake 기반 MinGW 빌드 시작..."
+                git branch: 'develop', url: GIT_URL
+
+                dir('Qt_Client') {
+                    bat """
+                        if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}
+                        if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}
+                        mkdir ${BUILD_DIR}
+                        mkdir ${OUTPUT_DIR}
+                    """
+
+                    // ✨ 2. Jenkins에 저장된 Secret File(.env)을 꺼내오기
+                    withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
+                        script {
+                            // Windows에서는 copy 명령어로 복사 (Jenkins가 임시로 만든 파일을 실제 위치로 복사)
+                            // 1) 빌드에 필요하다면 소스 폴더로 복사
+                            bat "copy /Y \"%SECRET_ENV%\" .env"
+                            
+                            // 2) 실행 시 필요하므로 배포 폴더(OUTPUT_DIR)에도 미리 복사
+                            bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
+                        }
+                    }
+
+                    dir(BUILD_DIR) {
+                        // 수정된 CMake 명령어
+                        // 1. make 프로그램 위치 지정 (mingw32-make.exe)
+                        // 2. C/C++ 컴파일러 위치 지정 (gcc.exe, g++.exe)
+                        bat """
+                            cmake -G "MinGW Makefiles" ^
+                            -DCMAKE_BUILD_TYPE=Release ^
+                            -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
+                            -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
+                            -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
+                            -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
+                            ..
+                        """
+                        
+                        bat "cmake --build . --parallel 4"
+                    }
+                    
+                    script {
+                        echo "📦 배포 파일 준비 중..."
+                        // CMake 빌드는 exe 파일이 보통 build 폴더 바로 아래에 생깁니다.
+                        // 'YourAppName.exe'를 실제 프로젝트 결과물 이름으로 바꾸세요!
+                        bat "copy ${BUILD_DIR}\\Team3VideoReceiver.exe ${OUTPUT_DIR}\\"
+                        
+                        dir(OUTPUT_DIR) {
+                            bat "windeployqt --release Team3VideoReceiver.exe"
+                        }
+                    }
+
+                    dir(OUTPUT_DIR) {
+                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_CMake.zip -Force"
+                    }
+                }
+                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_CMake.zip', fingerprint: true
+            }
+        }
     }
     post {
         success {
