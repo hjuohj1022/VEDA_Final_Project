@@ -123,15 +123,14 @@ spec:
 
 ---
 # -----------------------------------------------------------
-# 서비스 (Service) - MetalLB LoadBalancer
+# 서비스 (Service) - 내부 전용 (ClusterIP)
 # -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: mediamtx-service
 spec:
-  type: LoadBalancer
-  externalTrafficPolicy: Cluster
+  type: ClusterIP
   selector:
     app: mediamtx  
   ports:

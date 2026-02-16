@@ -60,8 +60,8 @@ kind: Service
 metadata:
   name: crow-server-service
 spec:
-  # MetalLB를 통해 외부 IP 할당 (예: 192.168.55.203)
-  type: LoadBalancer
+  # 내부 전용 IP 할당 (Nginx Gateway를 통해서만 접근 가능)
+  type: ClusterIP
   selector:
     app: crow-server
   ports:
