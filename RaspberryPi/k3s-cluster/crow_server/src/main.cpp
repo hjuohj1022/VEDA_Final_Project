@@ -79,7 +79,15 @@ int main()
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
 
-        std::cout << "[Login Attempt] ID: " << id << std::endl;
+        // mTLS를 통해 Nginx가 전달한 기기 정보 확인
+        std::string device_id = req.get_header_value("X-Device-ID");
+        std::string device_verify = req.get_header_value("X-Device-Verify");
+
+        if (!device_id.empty() && device_verify == "SUCCESS") {
+            std::cout << "[mTLS Verified Device] " << device_id << std::endl;
+        } else {
+            std::cout << "[Public Client] ID: " << id << std::endl;
+        }
 
         // DB 확인 함수 호출
         if (checkUserFromDB(id, pw)) {
