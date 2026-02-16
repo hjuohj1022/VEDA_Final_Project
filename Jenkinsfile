@@ -130,7 +130,32 @@ pipeline {
             }
         }
 
-        // 🖥️ 5. Qt Client (Windows)
+        // 🛡️ 5. Nginx Gateway (폴더명: nginx)
+        stage('Nginx Gateway 배포') {
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    dir('RaspberryPi/k3s-cluster/nginx') {
+                        echo "🛡️ Nginx Gateway 빌드 시작..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
+                        }
+                    }
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
+                    }
+                }
+            }
+        }
+
+        // 🖥️ 6. Qt Client (Windows)
         stage('Qt Client (Windows CMake)') {
             agent { label 'windows-qt' } 
             
