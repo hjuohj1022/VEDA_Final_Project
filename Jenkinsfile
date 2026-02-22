@@ -135,11 +135,24 @@ pipeline {
             when { 
                 anyOf {
                     changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
                     triggeredBy 'UserIdCause'
                 }
             }
             steps {
                 script {
+                    // 1. 인증서 생성 실행
+                    dir('RaspberryPi/k3s-cluster/security') {
+                        echo "🔐 인증서 생성 중..."
+                        sh "chmod +x generate_certs.sh"
+                        sh "./generate_certs.sh"
+                        
+                        // 생성된 인증서를 nginx 빌드 폴더로 복사
+                        sh "mkdir -p ../nginx/certs"
+                        sh "cp certs/server.crt certs/server.key certs/rootCA.crt ../nginx/certs/"
+                    }
+
+                    // 2. Nginx 이미지 빌드 및 푸시
                     dir('RaspberryPi/k3s-cluster/nginx') {
                         echo "🛡️ Nginx Gateway 빌드 시작..."
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -147,10 +160,15 @@ pipeline {
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
                         }
                     }
+
+                    // 3. K8s 배포 (Secret 마운트 없이 이미지 내부 파일 사용하도록 YAML 수정 필요 시 대응)
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
                     }
+
+                    // 4. 클라이언트용 인증서 산출물 보관
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/stm32.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }

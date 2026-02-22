@@ -22,15 +22,6 @@ spec:
         - containerPort: 443
         - containerPort: 8554
         - containerPort: 8883
-        volumeMounts:
-        - name: certs
-          mountPath: /etc/nginx/certs
-          readOnly: true
-      volumes:
-      - name: certs
-        secret:
-          secretName: nginx-certs
-          optional: true
 ---
 apiVersion: v1
 kind: Service
