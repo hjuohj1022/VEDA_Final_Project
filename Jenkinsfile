@@ -61,10 +61,33 @@ pipeline {
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:latest --push ."
                         }
                     }
+
+                    // 1. MQTT 전용 인증서 생성
+                    dir('RaspberryPi/k3s-cluster/mosquitto/certs') {
+                        echo "🔐 MQTT 인증서 생성 중..."
+                        sh "chmod +x generate_certs.sh"
+                        sh "./generate_certs.sh"
+                    }
+
+                    // 2. K8s Secret 업데이트 (mqtt-certs)
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        echo "🔑 MQTT K8s Secret 업데이트 중..."
+                        // 기존 시크릿 삭제 후 재생성 (갱신)
+                        sh "kubectl --kubeconfig=$KUBECONFIG delete secret mqtt-certs --ignore-not-found"
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mqtt-certs \
+                                --from-file=ca.crt=RaspberryPi/k3s-cluster/mosquitto/certs/ca.crt \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/mosquitto/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/mosquitto/certs/server.key
+                        """
+                        
+                        // 3. 배포 적용
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
+
+                    // 4. 클라이언트용 인증서 보관 (Qt, CCTV용)
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/mosquitto/certs/client-qt.*, RaspberryPi/k3s-cluster/mosquitto/certs/client-cctv.*, RaspberryPi/k3s-cluster/mosquitto/certs/ca.crt', fingerprint: true
                 }
             }
         }
