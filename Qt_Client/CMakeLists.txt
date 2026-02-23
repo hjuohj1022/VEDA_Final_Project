@@ -7,8 +7,8 @@ set(CMAKE_UNITY_BUILD OFF)
 # =========================================================================
 set(VLC_PATH "C:/vlc-3.0.23")
 
-# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
+# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt)
 
 qt_standard_project_setup()
 
@@ -57,6 +57,7 @@ target_link_libraries(Team3VideoReceiver
         Qt::Quick
         Qt::Qml
         Qt::QuickControls2
+        Qt::Mqtt
         ${VLC_PATH}/sdk/lib/libvlc.lib
         ${VLC_PATH}/sdk/lib/libvlccore.lib
         dwmapi

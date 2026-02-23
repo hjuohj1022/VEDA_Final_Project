@@ -10,6 +10,10 @@
 #include <QStandardPaths>
 #include <QNetworkCookieJar>
 #include <QSettings>
+#include <QSslConfiguration>
+#include <QSslCertificate>
+#include <QSslKey>
+#include <QMqttTopicFilter>
 
 Backend::Backend(QObject *parent) : QObject(parent)
 {
@@ -38,6 +42,8 @@ Backend::Backend(QObject *parent) : QObject(parent)
     if (m_rtspPort.isEmpty()) {
         m_rtspPort = envPort;
     }
+
+    setupMqtt(); // MQTT 초기화 및 연결 시도
 
     m_sessionTimer = new QTimer(this);
     m_sessionTimer->setInterval(1000);
@@ -105,6 +111,83 @@ void Backend::loadEnv() {
         if (parts.length() == 2) m_env.insert(parts[0].trimmed(), parts[1].trimmed());
     }
     file.close();
+}
+
+void Backend::setupMqtt() {
+    m_mqttClient = new QMqttClient(this);
+
+    // 1. 호스트 & 포트 설정 (.env 또는 기본값)
+    QString host = m_env.value("MQTT_HOST", "localhost");
+    int port = m_env.value("MQTT_PORT", "8883").toInt();
+    
+    m_mqttClient->setHostname(host);
+    m_mqttClient->setPort(port);
+    
+    // 2. SSL/TLS (mTLS) 설정
+    // 파일 경로는 실행 파일 기준 'certs/' 폴더 또는 리소스 경로 사용
+    QString caPath = "certs/ca.crt";
+    QString certPath = "certs/client-qt.crt";
+    QString keyPath = "certs/client-qt.key";
+
+    QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
+    
+    // CA 인증서 로드
+    QFile caFile(caPath);
+    if (caFile.open(QIODevice::ReadOnly)) {
+        QSslCertificate caCert(&caFile, QSsl::Pem);
+        sslConfig.setCaCertificates({caCert});
+        caFile.close();
+        qDebug() << "Loaded CA Cert from" << caPath;
+    } else {
+        qDebug() << "Failed to load CA Cert:" << caPath;
+    }
+
+    // 클라이언트 인증서 로드
+    QFile certFile(certPath);
+    if (certFile.open(QIODevice::ReadOnly)) {
+        QSslCertificate clientCert(&certFile, QSsl::Pem);
+        sslConfig.setLocalCertificate(clientCert);
+        certFile.close();
+        qDebug() << "Loaded Client Cert from" << certPath;
+    } else {
+         qDebug() << "Failed to load Client Cert:" << certPath;
+    }
+
+    // 클라이언트 개인키 로드
+    QFile keyFile(keyPath);
+    if (keyFile.open(QIODevice::ReadOnly)) {
+        QSslKey clientKey(&keyFile, QSsl::Rsa, QSsl::Pem);
+        sslConfig.setPrivateKey(clientKey);
+        keyFile.close();
+        qDebug() << "Loaded Client Key from" << keyPath;
+    } else {
+         qDebug() << "Failed to load Client Key:" << keyPath;
+    }
+
+    m_mqttClient->setSslConfiguration(sslConfig);
+
+    // 3. 연결 이벤트 처리
+    connect(m_mqttClient, &QMqttClient::connected, this, [=](){
+        qDebug() << "MQTT Connected to" << host << ":" << port;
+        m_networkStatus = "Connected (Secure)";
+        emit networkStatusChanged();
+        
+        // 예시 구독
+        m_mqttClient->subscribe(QMqttTopicFilter("system/status"));
+    });
+    
+    connect(m_mqttClient, &QMqttClient::disconnected, this, [=](){
+        qDebug() << "MQTT Disconnected";
+        m_networkStatus = "Disconnected";
+        emit networkStatusChanged();
+    });
+    
+    connect(m_mqttClient, &QMqttClient::errorChanged, this, [=](QMqttClient::ClientError error){
+         qDebug() << "MQTT Error:" << error;
+    });
+
+    // 4. 보안 연결 시도
+    m_mqttClient->connectToHostEncrypted();
 }
 
 bool Backend::isLoggedIn() const { return m_isLoggedIn; }

@@ -7,6 +7,7 @@
 #include <QVariant>
 #include <QTimer>
 #include <QMap>
+#include <QMqttClient>
 
 class Backend : public QObject
 {
@@ -32,9 +33,16 @@ class Backend : public QObject
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
 
+    // MQTT 수신 데이터 (Detected Objects, Network Status)
+    Q_PROPERTY(int detectedObjects READ detectedObjects NOTIFY detectedObjectsChanged)
+    Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
+
 public:
     explicit Backend(QObject *parent = nullptr);
     ~Backend();
+
+    int detectedObjects() const { return m_detectedObjects; }
+    QString networkStatus() const { return m_networkStatus; }
 
     bool isLoggedIn() const;
     QString userId() const { return m_userId; }
@@ -87,6 +95,8 @@ signals:
     void currentFpsChanged();
     void latencyChanged();
     void storageChanged();
+    void detectedObjectsChanged();
+    void networkStatusChanged();
     
     void loginSuccess();
     void loginFailed(QString error);
@@ -140,6 +150,12 @@ private:
     QString m_storageTotal = "0 GB";
     int m_storagePercent = 0;
     
+    // MQTT 관리
+    QMqttClient *m_mqttClient;
+    int m_detectedObjects = 0;
+    QString m_networkStatus = "Disconnected";
+    void setupMqtt(); // 초기화 함수
+
     // 다운로드 관리
     QNetworkReply *m_downloadReply = nullptr;
     QString m_tempFilePath;
