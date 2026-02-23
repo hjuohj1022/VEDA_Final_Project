@@ -20,7 +20,7 @@ openssl x509 -req -in $CERT_DIR/server.csr -CA $CERT_DIR/rootCA.crt -CAkey $CERT
 
 echo "📱 [3/3] 기기별 클라이언트 인증서 생성 중..."
 
-# 1. CCTV 기기용
+# 1. CCTV 기기용 (MQTT 및 mTLS용)
 openssl genrsa -out $CERT_DIR/cctv.key 2048
 openssl req -new -key $CERT_DIR/cctv.key -out $CERT_DIR/cctv.csr -subj "/C=KR/CN=CCTV-01"
 openssl x509 -req -in $CERT_DIR/cctv.csr -CA $CERT_DIR/rootCA.crt -CAkey $CERT_DIR/rootCA.key \
@@ -31,6 +31,12 @@ openssl genrsa -out $CERT_DIR/stm32.key 2048
 openssl req -new -key $CERT_DIR/stm32.key -out $CERT_DIR/stm32.csr -subj "/C=KR/CN=STM32-01"
 openssl x509 -req -in $CERT_DIR/stm32.csr -CA $CERT_DIR/rootCA.crt -CAkey $CERT_DIR/rootCA.key \
     -CAcreateserial -out $CERT_DIR/stm32.crt -days $DAYS -sha256
+
+# 3. Qt 클라이언트용 (MQTT 접속용)
+openssl genrsa -out $CERT_DIR/client-qt.key 2048
+openssl req -new -key $CERT_DIR/client-qt.key -out $CERT_DIR/client-qt.csr -subj "/C=KR/CN=Admin-Qt"
+openssl x509 -req -in $CERT_DIR/client-qt.csr -CA $CERT_DIR/rootCA.crt -CAkey $CERT_DIR/rootCA.key \
+    -CAcreateserial -out $CERT_DIR/client-qt.crt -days $DAYS -sha256
 
 # 권한 설정
 chmod 600 $CERT_DIR/*.key

@@ -32,8 +32,16 @@ spec:
           sources:
           - secret:
               name: nginx-certs
+              items:
+                - key: server.crt
+                  path: server.crt
+                - key: server.key
+                  path: server.key
           - secret:
               name: mtls-ca
+              items:
+                - key: rootCA.crt
+                  path: rootCA.crt
 ---
 apiVersion: v1
 kind: Service

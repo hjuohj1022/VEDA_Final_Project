@@ -49,6 +49,7 @@ pipeline {
             when { 
                 anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
                     triggeredBy 'UserIdCause'
                 }
             }
@@ -62,23 +63,22 @@ pipeline {
                         }
                     }
 
-                    // 1. MQTT 전용 인증서 생성
-                    dir('RaspberryPi/k3s-cluster/mosquitto/certs') {
-                        echo "🔐 MQTT 인증서 생성 중..."
+                    // 1. 공통 인증서 생성 (이미 되어 있을 수도 있지만 안전을 위해 호출)
+                    dir('RaspberryPi/k3s-cluster/security') {
+                        echo "🔐 통합 인증서 확인 및 생성 중..."
                         sh "chmod +x generate_certs.sh"
                         sh "./generate_certs.sh"
                     }
 
-                    // 2. K8s Secret 업데이트 (mqtt-certs)
+                    // 2. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        echo "🔑 MQTT K8s Secret 업데이트 중..."
-                        // 기존 시크릿 삭제 후 재생성 (갱신)
-                        sh "kubectl --kubeconfig=$KUBECONFIG delete secret mqtt-certs --ignore-not-found"
+                        echo "🔑 MQTT K8s Secret 업데이트 중 (통합 인증서 사용)..."
                         sh """
                             kubectl --kubeconfig=$KUBECONFIG create secret generic mqtt-certs \
-                                --from-file=ca.crt=RaspberryPi/k3s-cluster/mosquitto/certs/ca.crt \
-                                --from-file=server.crt=RaspberryPi/k3s-cluster/mosquitto/certs/server.crt \
-                                --from-file=server.key=RaspberryPi/k3s-cluster/mosquitto/certs/server.key
+                                --from-file=ca.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                         """
                         
                         // 3. 배포 적용
@@ -86,8 +86,8 @@ pipeline {
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
 
-                    // 4. 클라이언트용 인증서 보관 (Qt, CCTV용)
-                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/mosquitto/certs/client-qt.*, RaspberryPi/k3s-cluster/mosquitto/certs/client-cctv.*, RaspberryPi/k3s-cluster/mosquitto/certs/ca.crt', fingerprint: true
+                    // 4. 클라이언트용 인증서 보관 (통합된 위치에서 가져옴)
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }
@@ -175,9 +175,9 @@ pipeline {
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         echo "🔑 K8s Secret 업데이트 중..."
                         sh """
-                            kubectl --kubeconfig=$KUBECONFIG create secret tls nginx-certs \
-                                --cert=RaspberryPi/k3s-cluster/security/certs/server.crt \
-                                --key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic nginx-certs \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
                                 --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                             
                             kubectl --kubeconfig=$KUBECONFIG create secret generic mtls-ca \
