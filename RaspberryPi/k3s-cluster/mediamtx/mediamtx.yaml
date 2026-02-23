@@ -12,7 +12,10 @@ data:
       # [채널 0]
       "0":
         source: publisher
-        # $CAMERA_USER, $CAMERA_PASSWORD, $CAMERA_IP 변수 사용으로 하드코딩 방지
+        publishUser: veda_cctv
+        publishPass: cctv_pass_123!
+        readUser: veda_qt
+        readPass: qt_pass_456!
         runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
@@ -20,42 +23,48 @@ data:
         recordFormat: fmp4        
         # 5분마다 파일 생성
         recordSegmentDuration: 5m
-        # [수정됨] 용량 기반 삭제를 위해 시간 기반 삭제는 비활성화 (Disk Cleaner 컨테이너가 담당)
-        # recordDeleteAfter: 10m
 
       # [채널 1]
       "1":
         source: publisher
-        # 
+        publishUser: veda_cctv
+        publishPass: cctv_pass_123!
+        readUser: veda_qt
+        readPass: qt_pass_456!
         runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
 
       # [채널 2]
       "2":
         source: publisher
+        publishUser: veda_cctv
+        publishPass: cctv_pass_123!
+        readUser: veda_qt
+        readPass: qt_pass_456!
         runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
 
       # [채널 3]
       "3":
         source: publisher
+        publishUser: veda_cctv
+        publishPass: cctv_pass_123!
+        readUser: veda_qt
+        readPass: qt_pass_456!
         runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
 
 ---
 # -----------------------------------------------------------
@@ -123,15 +132,14 @@ spec:
 
 ---
 # -----------------------------------------------------------
-# 서비스 (Service) - MetalLB LoadBalancer
+# 서비스 (Service) - 내부 전용 (ClusterIP)
 # -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: mediamtx-service
 spec:
-  type: LoadBalancer
-  externalTrafficPolicy: Cluster
+  type: ClusterIP
   selector:
     app: mediamtx  
   ports:

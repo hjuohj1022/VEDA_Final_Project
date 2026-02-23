@@ -130,7 +130,61 @@ pipeline {
             }
         }
 
-        // 🖥️ 5. Qt Client (Windows)
+        // 🛡️ 5. Nginx Gateway (폴더명: nginx)
+        stage('Nginx Gateway 배포') {
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    // 1. 인증서 생성 실행
+                    dir('RaspberryPi/k3s-cluster/security') {
+                        echo "🔐 인증서 생성 중..."
+                        sh "chmod +x generate_certs.sh"
+                        sh "./generate_certs.sh"
+                    }
+
+                    // 2. K8s Secret 업데이트 (이미지에 넣지 않고 클러스터에 직접 등록)
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        echo "🔑 K8s Secret 업데이트 중..."
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret tls nginx-certs \
+                                --cert=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                            
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mtls-ca \
+                                --from-file=rootCA.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                        """
+                    }
+
+                    // 3. Nginx 이미지 빌드 및 푸시 (인증서 없이 설정파일만 포함)
+                    dir('RaspberryPi/k3s-cluster/nginx') {
+                        echo "🛡️ Nginx Gateway 빌드 시작..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
+                        }
+                    }
+
+                    // 4. K8s 배포 적용
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
+                    }
+
+                    // 5. 클라이언트용 인증서 산출물 보관
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/stm32.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
+                }
+            }
+        }
+
+        // 🖥️ 6. Qt Client (Windows)
         stage('Qt Client (Windows CMake)') {
             agent { label 'windows-qt' } 
             
