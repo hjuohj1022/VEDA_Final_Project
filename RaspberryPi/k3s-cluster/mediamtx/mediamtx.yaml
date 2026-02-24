@@ -6,7 +6,7 @@ kind: ConfigMap
 metadata:
   name: mediamtx-config
 data:
-  mediamtx.yaml: |
+  mediamtx.yml: |
 
     paths:
       # [채널 0 - Main]
@@ -129,8 +129,8 @@ spec:
 
         volumeMounts:
         - name: config-volume
-          mountPath: /mediamtx.yaml
-          subPath: mediamtx.yaml
+          mountPath: /mediamtx.yml
+          subPath: mediamtx.yml
 
         - name: recordings
           mountPath: /recordings
