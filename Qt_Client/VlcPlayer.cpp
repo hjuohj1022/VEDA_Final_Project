@@ -37,11 +37,21 @@ VlcPlayer::VlcPlayer(QQuickItem *parent)
         "--rtsp-tcp",
         "--no-audio",
         "--aout=dummy",
+<<<<<<< HEAD
         "--quiet",
         "--verbose=-1",
         "--network-caching=450",
         "--live-caching=450",
         "--avcodec-threads=1",
+=======
+        "--clock-jitter=0",
+        "--clock-synchro=0",
+        "--quiet",
+        "--verbose=-1",
+        "--network-caching=80",
+        "--live-caching=80",
+        "--avcodec-threads=2",
+>>>>>>> 0b743cb... Update Qt_Client Optimization v2
         "--drop-late-frames",
         "--skip-frames"
     };
@@ -173,9 +183,17 @@ void VlcPlayer::play()
     m_mediaPlayer = libvlc_media_player_new(m_vlcInstance);
     libvlc_media_t *media = libvlc_media_new_location(m_vlcInstance, m_url.toUtf8().constData());
     libvlc_media_add_option(media, ":rtsp-tcp");
+<<<<<<< HEAD
     libvlc_media_add_option(media, ":network-caching=450");
     libvlc_media_add_option(media, ":live-caching=450");
     libvlc_media_add_option(media, ":avcodec-threads=1");
+=======
+    libvlc_media_add_option(media, ":network-caching=80");
+    libvlc_media_add_option(media, ":live-caching=80");
+    libvlc_media_add_option(media, ":clock-jitter=0");
+    libvlc_media_add_option(media, ":clock-synchro=0");
+    libvlc_media_add_option(media, ":avcodec-threads=2");
+>>>>>>> 0b743cb... Update Qt_Client Optimization v2
     libvlc_media_add_option(media, ":drop-late-frames");
     libvlc_media_add_option(media, ":skip-frames");
     libvlc_media_add_option(media, ":no-audio");

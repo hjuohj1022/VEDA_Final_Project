@@ -1,15 +1,15 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 
 Item {
     id: root
     property int gridColumns: 2
-    property int maximizedIndex: -1
     property var theme
     property bool isActive: true
     property var cameraStates: [false, false, false, false]
     property var cameraFpsValues: [0, 0, 0, 0]
+    signal openMainViewRequested(int cameraIndex)
 
     function recountActiveCameras() {
         var count = 0
@@ -42,7 +42,6 @@ Item {
 
     onIsActiveChanged: {
         if (!isActive) {
-            maximizedIndex = -1
             resetCameraStates()
         }
     }
@@ -50,7 +49,7 @@ Item {
     GridLayout {
         anchors.fill: parent
         anchors.margins: 10
-        columns: root.maximizedIndex !== -1 ? 1 : root.gridColumns
+        columns: root.gridColumns
         rowSpacing: 10
         columnSpacing: 10
 
@@ -59,16 +58,21 @@ Item {
             delegate: VideoPlayer {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: root.maximizedIndex === -1 || root.maximizedIndex === index
+                visible: true
                 theme: root.theme
-                dptzEnabled: root.maximizedIndex === index
+                dptzEnabled: false
                 tileIndex: index
                 cameraIndex: index
                 startDelayMs: 0
                 locationName: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"][index]
 
+<<<<<<< HEAD
                 source: (root.isActive && (root.maximizedIndex === -1 || root.maximizedIndex === index))
                         ? backend.buildRtspUrl(index, root.maximizedIndex === -1)
+=======
+                source: root.isActive
+                        ? backend.buildRtspUrl(index, true)
+>>>>>>> 0b743cb... Update Qt_Client Optimization v2
                         : ""
 
                 onCameraStateChanged: function(cameraIndex, isLive) {
@@ -98,11 +102,7 @@ Item {
                 }
 
                 onDoubleClicked: {
-                    if (root.maximizedIndex === cameraIndex) {
-                        root.maximizedIndex = -1
-                    } else {
-                        root.maximizedIndex = cameraIndex
-                    }
+                    root.openMainViewRequested(cameraIndex)
                 }
             }
         }
