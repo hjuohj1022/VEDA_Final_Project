@@ -61,7 +61,8 @@ kind: Service
 metadata:
   name: mariadb-service
 spec:
-  type: LoadBalancer
+  # 내부 전용 IP (보안 강화)
+  type: ClusterIP
   selector:
     app: mariadb
   ports:

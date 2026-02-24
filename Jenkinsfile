@@ -18,6 +18,33 @@ pipeline {
                 git branch: 'develop', url: GIT_URL
             }
         }
+
+        // 🔐 0. 인증서 및 공통 설정 준비
+        stage('인증서 준비') {
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    changeset 'Qt_Client/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    dir('RaspberryPi/k3s-cluster/security') {
+                        echo "🔐 통합 인증서 생성 및 준비 중..."
+                        sh "chmod +x generate_certs.sh"
+                        sh "./generate_certs.sh"
+                    }
+                    // 다른 스테이지(Windows 등)에서 사용할 수 있도록 인증서 보관
+                    stash name: 'certs-stash', includes: 'RaspberryPi/k3s-cluster/security/certs/**'
+                    
+                    // 산출물 보관 (Nginx, MQTT 단계에서 하던 것을 여기서 통합 관리)
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/**', fingerprint: true
+                }
+            }
+        }
         
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
@@ -49,6 +76,7 @@ pipeline {
             when { 
                 anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
                     triggeredBy 'UserIdCause'
                 }
             }
@@ -61,10 +89,32 @@ pipeline {
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:latest --push ."
                         }
                     }
+
+                    // 1. 공통 인증서 생성 (이미 되어 있을 수도 있지만 안전을 위해 호출)
+                    dir('RaspberryPi/k3s-cluster/security') {
+                        echo "🔐 통합 인증서 확인 및 생성 중..."
+                        sh "chmod +x generate_certs.sh"
+                        sh "./generate_certs.sh"
+                    }
+
+                    // 2. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        echo "🔑 MQTT K8s Secret 업데이트 중 (통합 인증서 사용)..."
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mqtt-certs \
+                                --from-file=ca.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                        """
+                        
+                        // 3. 배포 적용
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
+
+                    // 4. 클라이언트용 인증서 보관 (통합된 위치에서 가져옴)
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }
@@ -130,7 +180,53 @@ pipeline {
             }
         }
 
-        // 🖥️ 5. Qt Client (Windows)
+        // 🛡️ 5. Nginx Gateway (폴더명: nginx)
+        stage('Nginx Gateway 배포') {
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    unstash 'certs-stash' // 보관된 인증서 가져오기
+
+                    // 2. K8s Secret 업데이트 (이미지에 넣지 않고 클러스터에 직접 등록)
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        echo "🔑 K8s Secret 업데이트 중..."
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic nginx-certs \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                            
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mtls-ca \
+                                --from-file=rootCA.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                        """
+                    }
+
+                    // 3. Nginx 이미지 빌드 및 푸시 (인증서 없이 설정파일만 포함)
+                    dir('RaspberryPi/k3s-cluster/nginx') {
+                        echo "🛡️ Nginx Gateway 빌드 시작..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
+                        }
+                    }
+
+                    // 4. K8s 배포 적용
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
+                    }
+                }
+            }
+        }
+
+        // 🖥️ 6. Qt Client (Windows)
         stage('Qt Client (Windows CMake)') {
             agent { label 'windows-qt' } 
             
@@ -170,8 +266,11 @@ pipeline {
                         bat "mkdir ${OUTPUT_DIR}"
                         bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
 
-                        // 2. 필수 의존성 파일(VLC, .env)을 '미리' 배포 폴더로 복사
+                        // 2. 필수 의존성 파일(VLC, .env, 인증서)을 '미리' 배포 폴더로 복사
                         echo "🚚 라이브러리 및 설정 파일 복사..."
+                        
+                        unstash 'certs-stash' // 보관된 인증서 가져오기
+                        bat "copy RaspberryPi\\k3s-cluster\\security\\certs\\rootCA.crt ${OUTPUT_DIR}\\"
                         
                         bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
                         bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
