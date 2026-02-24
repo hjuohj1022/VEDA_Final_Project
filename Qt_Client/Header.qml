@@ -35,17 +35,21 @@ Rectangle {
         id: iconBtn
         property string label: ""
         property color fg: theme ? theme.textSecondary : "#a1a1aa"
+        property bool enabled: true
         signal clicked()
 
         width: 32
         height: 32
         radius: 9
-        color: mouse.pressed
+        color: !iconBtn.enabled
+               ? "transparent"
+               : mouse.pressed
                ? (theme ? theme.border : "#27272a")
                : (mouse.containsMouse ? (theme ? theme.bgComponent : "#18181b") : "transparent")
-        border.color: mouse.containsMouse ? (theme ? theme.border : "#27272a") : "transparent"
+        border.color: (iconBtn.enabled && mouse.containsMouse) ? (theme ? theme.border : "#27272a") : "transparent"
         border.width: 1
-        scale: mouse.pressed ? 0.96 : 1.0
+        opacity: iconBtn.enabled ? 1.0 : 0.35
+        scale: (iconBtn.enabled && mouse.pressed) ? 0.96 : 1.0
         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
 
         Text {
@@ -60,7 +64,8 @@ Rectangle {
             id: mouse
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            enabled: iconBtn.enabled
+            cursorShape: iconBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: {
                 backend.resetSessionTimer()
                 iconBtn.clicked()
@@ -170,7 +175,7 @@ Rectangle {
                 height: 6
                 radius: 3
                 color: theme ? theme.accent : "#f97316"
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.alignment: Qt.AlignVCenter
                 Layout.leftMargin: -10
                 Layout.rightMargin: 6
             }
@@ -178,6 +183,7 @@ Rectangle {
             IconButton {
                 label: "\uE713"
                 fg: theme ? theme.textSecondary : "#a1a1aa"
+                enabled: root.isLoggedIn
                 onClicked: root.requestRtspSettings()
             }
 

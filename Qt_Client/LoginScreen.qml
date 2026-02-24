@@ -119,6 +119,26 @@ Item {
                     }
                 }
 
+                Button {
+                    text: "Skip (Temporary)"
+                    Layout.fillWidth: true
+                    height: 36
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                        border.color: theme ? theme.border : "#52525b"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    onClicked: backend.skipLoginTemporarily()
+                }
+
                 Text {
                     Layout.fillWidth: true
                     color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
@@ -497,6 +517,15 @@ Item {
     // 백엔드 시그널 연결
     Connections {
         target: backend
+
+        function onIsLoggedInChanged() {
+            if (!backend.isLoggedIn) {
+                idField.text = ""
+                pwField.text = ""
+                adminUnlockField.text = ""
+                root.adminUnlockCode = ""
+            }
+        }
         
         function onLoginFailed(error) {
             errorDialog.title = "Login Failed"

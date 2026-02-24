@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 #include <QFile>
 #include <QTextStream>
 #include <QJsonDocument>
@@ -10,27 +10,30 @@
 #include <QStandardPaths>
 #include <QNetworkCookieJar>
 #include <QSettings>
+#include <QMqttTopicFilter>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QDir>
+#include <QSslConfiguration>
+#include <QSslCertificate>
+#include <QSslKey>
+#include <QSslError>
 
 Backend::Backend(QObject *parent) : QObject(parent)
 {
     m_manager = new QNetworkAccessManager(this);
-    m_manager->setCookieJar(new QNetworkCookieJar(this)); // 쿠키 저장소 추가 (세션 유지)
-    setActiveCameras(4);
+    m_manager->setCookieJar(new QNetworkCookieJar(this));
+    setActiveCameras(0);
     loadEnv();
-    QSettings settings;
-    m_useCustomRtspConfig = settings.value("network/use_custom_rtsp", false).toBool();
+    setupMqtt();
 
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
     const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
 
-    if (m_useCustomRtspConfig) {
-        m_rtspIp = settings.value("network/rtsp_ip", envIp).toString().trimmed();
-        m_rtspPort = settings.value("network/rtsp_port", envPort).toString().trimmed();
-    } else {
-        // 초기에는 .env 값을 우선 사용
-        m_rtspIp = envIp;
-        m_rtspPort = envPort;
-    }
+    // Always prefer .env values on app startup.
+    m_useCustomRtspConfig = false;
+    m_rtspIp = envIp;
+    m_rtspPort = envPort;
 
     if (m_rtspIp.isEmpty()) {
         m_rtspIp = envIp;
@@ -45,22 +48,10 @@ Backend::Backend(QObject *parent) : QObject(parent)
     
     m_storageTimer = new QTimer(this);
     connect(m_storageTimer, &QTimer::timeout, this, &Backend::checkStorage);
-    m_storageTimer->start(5000); // 5초마다 확인
-    
-    // 초기 확인
+    m_storageTimer->start(5000);
     checkStorage();
-
-    // 데이터 시뮬레이션 타이머 (데모용 -> 일부 실제 데이터로 교체)
     QTimer *simTimer = new QTimer(this);
     connect(simTimer, &QTimer::timeout, this, [=](){
-        // FPS: 25~30 (여전히 시뮬레이션, VLC에서 집계하려면 구조 변경 필요)
-        int fps = 25 + (rand() % 6);
-        setCurrentFps(fps);
-        
-        // 활성 카메라: 가끔 변동
-        if (rand() % 10 == 0) setActiveCameras(3 + (rand() % 2));
-        
-        // 지연 시간 측정 (RTSP 서버로 TCP 핑)
         QTcpSocket *socket = new QTcpSocket(this);
         QElapsedTimer *timer = new QElapsedTimer();
         timer->start();
@@ -68,12 +59,9 @@ Backend::Backend(QObject *parent) : QObject(parent)
         QString ip = rtspIp();
         int port = rtspPort().toInt();
         if(port == 0) port = 8554;
-
-        // qDebug() << "Pinging" << ip << ":" << port;
         
         connect(socket, &QTcpSocket::connected, this, [=](){
             int elapsed = timer->elapsed();
-            // qDebug() << "Ping Success:" << elapsed << "ms";
             setLatency(elapsed);
             socket->disconnectFromHost();
             socket->deleteLater();
@@ -81,30 +69,64 @@ Backend::Backend(QObject *parent) : QObject(parent)
         });
         
         connect(socket, &QTcpSocket::errorOccurred, this, [=](QAbstractSocket::SocketError socketError){
-            // qDebug() << "Ping Error:" << socket->errorString();
-            setLatency(999); // 높은 지연 시간으로 오류 표시
+            Q_UNUSED(socketError);
+            setLatency(999);
             socket->deleteLater();
             delete timer;
         });
         
         socket->connectToHost(ip, port);
     });
-    simTimer->start(2000); // 2초마다 측정
+    simTimer->start(2000);
 }
 
 Backend::~Backend() {}
 
 void Backend::loadEnv() {
-    QFile file(".env");
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
-    QTextStream in(&file);
-    while (!in.atEnd()) {
-        QString line = in.readLine();
-        if (line.isEmpty() || line.startsWith("#")) continue;
-        QStringList parts = line.split("=");
-        if (parts.length() == 2) m_env.insert(parts[0].trimmed(), parts[1].trimmed());
+    m_env.clear();
+
+    QStringList candidates;
+    const QString appDir = QCoreApplication::applicationDirPath();
+    candidates << (appDir + "/.env")
+               << (appDir + "/../.env")
+               << (appDir + "/../../.env")
+               << (appDir + "/../../../.env")
+               << (QDir::currentPath() + "/.env")
+               << ".env";
+
+    QString loadedPath;
+    for (const QString &path : candidates) {
+        QFileInfo fi(path);
+        if (!fi.exists() || !fi.isFile()) {
+            continue;
+        }
+
+        QFile file(fi.absoluteFilePath());
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            continue;
+        }
+
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            const QString line = in.readLine();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            const int eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            const QString key = line.left(eq).trimmed();
+            const QString val = line.mid(eq + 1).trimmed();
+            if (!key.isEmpty()) m_env.insert(key, val);
+        }
+        file.close();
+        loadedPath = fi.absoluteFilePath();
+        break;
     }
-    file.close();
+
+    if (loadedPath.isEmpty()) {
+        qWarning() << "[ENV] .env file not found. using defaults.";
+    } else {
+        qInfo() << "[ENV] loaded from:" << loadedPath
+                << "API_URL=" << m_env.value("API_URL", "http://localhost:8080");
+    }
 }
 
 bool Backend::isLoggedIn() const { return m_isLoggedIn; }
@@ -123,6 +145,222 @@ void Backend::setRtspIp(const QString &ip) {
     settings.setValue("network/rtsp_ip", m_rtspIp);
     m_useCustomRtspConfig = true;
     emit rtspIpChanged();
+}
+
+void Backend::setupMqtt() {
+    const bool mqttEnabled = (m_env.value("MQTT_ENABLED", "1").trimmed() == "1");
+    if (!mqttEnabled) {
+        if (m_networkStatus != "Disabled") {
+            m_networkStatus = "Disabled";
+            emit networkStatusChanged();
+        }
+        qInfo() << "[MQTT] disabled by MQTT_ENABLED=0";
+        return;
+    }
+
+    if (m_mqttClient) {
+        return;
+    }
+
+    m_mqttClient = new QMqttClient(this);
+    const QString host = m_env.value("MQTT_HOST", "localhost").trimmed();
+    const int port = m_env.value("MQTT_PORT", "1883").toInt();
+    const QString user = m_env.value("MQTT_USERNAME").trimmed();
+    const QString pass = m_env.value("MQTT_PASSWORD").trimmed();
+    const QString statusTopic = m_env.value("MQTT_STATUS_TOPIC", "system/status").trimmed();
+    const QString detectTopic = m_env.value("MQTT_DETECTED_TOPIC", "system/detected").trimmed();
+    const bool useTls = (m_env.value("MQTT_USE_TLS", "1").trimmed() == "1");
+    const QString caPathRaw = m_env.value("MQTT_CA_CERT", "certs/rootCA.crt").trimmed();
+    const QString certPathRaw = m_env.value("MQTT_CLIENT_CERT", "certs/client-qt.crt").trimmed();
+    const QString keyPathRaw = m_env.value("MQTT_CLIENT_KEY", "certs/client-qt.key").trimmed();
+
+    m_mqttClient->setHostname(host.isEmpty() ? QString("localhost") : host);
+    m_mqttClient->setPort(port > 0 ? port : (useTls ? 8883 : 1883));
+    if (!user.isEmpty()) m_mqttClient->setUsername(user);
+    if (!pass.isEmpty()) m_mqttClient->setPassword(pass);
+    qInfo() << "[MQTT] setup:"
+            << "host=" << (host.isEmpty() ? QString("localhost") : host)
+            << "port=" << (port > 0 ? port : (useTls ? 8883 : 1883))
+            << "tls=" << useTls;
+
+    auto resolvePath = [](const QString &rawPath) {
+        QFileInfo info(rawPath);
+        if (info.isAbsolute()) return rawPath;
+
+        const QString appSide = QCoreApplication::applicationDirPath() + "/" + rawPath;
+        if (QFileInfo::exists(appSide)) {
+            return appSide;
+        }
+        return rawPath;
+    };
+
+    if (useTls) {
+        const QString caPath = resolvePath(caPathRaw);
+        const QString certPath = resolvePath(certPathRaw);
+        const QString keyPath = resolvePath(keyPathRaw);
+
+        QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
+        bool tlsReady = true;
+
+        QFile caFile(caPath);
+        if (caFile.open(QIODevice::ReadOnly)) {
+            const QList<QSslCertificate> certs = QSslCertificate::fromData(caFile.readAll(), QSsl::Pem);
+            if (!certs.isEmpty()) {
+                sslConfig.setCaCertificates(certs);
+                qInfo() << "[MQTT][TLS] CA loaded:" << caPath;
+            } else {
+                tlsReady = false;
+                qWarning() << "MQTT CA certificate is invalid:" << caPath;
+            }
+        } else {
+            tlsReady = false;
+            qWarning() << "MQTT CA certificate not found:" << caPath;
+        }
+
+        QFile certFile(certPath);
+        if (certFile.open(QIODevice::ReadOnly)) {
+            const QList<QSslCertificate> certs = QSslCertificate::fromData(certFile.readAll(), QSsl::Pem);
+            if (!certs.isEmpty()) {
+                sslConfig.setLocalCertificate(certs.first());
+                qInfo() << "[MQTT][TLS] client cert loaded:" << certPath;
+            } else {
+                tlsReady = false;
+                qWarning() << "MQTT client certificate is invalid:" << certPath;
+            }
+        } else {
+            tlsReady = false;
+            qWarning() << "MQTT client certificate not found:" << certPath;
+        }
+
+        QFile keyFile(keyPath);
+        if (keyFile.open(QIODevice::ReadOnly)) {
+            QSslKey clientKey(&keyFile, QSsl::Rsa, QSsl::Pem);
+            if (!clientKey.isNull()) {
+                sslConfig.setPrivateKey(clientKey);
+                qInfo() << "[MQTT][TLS] client key loaded:" << keyPath;
+            } else {
+                tlsReady = false;
+                qWarning() << "MQTT client key is invalid:" << keyPath;
+            }
+        } else {
+            tlsReady = false;
+            qWarning() << "MQTT client key not found:" << keyPath;
+        }
+
+        if (!tlsReady) {
+            qWarning() << "[MQTT][TLS] config not ready. connection skipped.";
+            if (m_networkStatus != "TLS Config Error") {
+                m_networkStatus = "TLS Config Error";
+                emit networkStatusChanged();
+            }
+            return;
+        }
+
+        connect(m_mqttClient, &QMqttClient::connected, this, [=]() {
+            qInfo() << "[MQTT][TLS] connected";
+            if (m_networkStatus != "Connected") {
+                m_networkStatus = "Connected";
+                emit networkStatusChanged();
+            }
+            m_mqttClient->subscribe(QMqttTopicFilter(statusTopic), 0);
+            m_mqttClient->subscribe(QMqttTopicFilter(detectTopic), 0);
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic;
+        });
+
+        connect(m_mqttClient, &QMqttClient::disconnected, this, [=]() {
+            qWarning() << "[MQTT][TLS] disconnected";
+            if (m_networkStatus != "Disconnected") {
+                m_networkStatus = "Disconnected";
+                emit networkStatusChanged();
+            }
+        });
+
+        connect(m_mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
+            const QString topicName = topic.name();
+            const QString payload = QString::fromUtf8(message).trimmed();
+
+            if (topicName == statusTopic) {
+                if (!payload.isEmpty() && m_networkStatus != payload) {
+                    m_networkStatus = payload;
+                    emit networkStatusChanged();
+                }
+                return;
+            }
+
+            if (topicName == detectTopic) {
+                bool ok = false;
+                const int detected = payload.toInt(&ok);
+                if (ok && m_detectedObjects != detected) {
+                    m_detectedObjects = detected;
+                    emit detectedObjectsChanged();
+                }
+            }
+        });
+
+        connect(m_mqttClient, &QMqttClient::errorChanged, this, [=](QMqttClient::ClientError error) {
+            qWarning() << "[MQTT][TLS] errorChanged:" << static_cast<int>(error);
+            if (m_networkStatus != "Error") {
+                m_networkStatus = "Error";
+                emit networkStatusChanged();
+            }
+        });
+
+        qInfo() << "[MQTT][TLS] connectToHostEncrypted()";
+        m_mqttClient->connectToHostEncrypted(sslConfig);
+        return;
+    }
+
+    connect(m_mqttClient, &QMqttClient::connected, this, [=]() {
+        qInfo() << "[MQTT][TCP] connected";
+        if (m_networkStatus != "Connected") {
+            m_networkStatus = "Connected";
+            emit networkStatusChanged();
+        }
+        m_mqttClient->subscribe(QMqttTopicFilter(statusTopic), 0);
+        m_mqttClient->subscribe(QMqttTopicFilter(detectTopic), 0);
+        qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic;
+    });
+
+    connect(m_mqttClient, &QMqttClient::disconnected, this, [=]() {
+        qWarning() << "[MQTT][TCP] disconnected";
+        if (m_networkStatus != "Disconnected") {
+            m_networkStatus = "Disconnected";
+            emit networkStatusChanged();
+        }
+    });
+
+    connect(m_mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
+        const QString topicName = topic.name();
+        const QString payload = QString::fromUtf8(message).trimmed();
+
+        if (topicName == statusTopic) {
+            if (!payload.isEmpty() && m_networkStatus != payload) {
+                m_networkStatus = payload;
+                emit networkStatusChanged();
+            }
+            return;
+        }
+
+        if (topicName == detectTopic) {
+            bool ok = false;
+            const int detected = payload.toInt(&ok);
+            if (ok && m_detectedObjects != detected) {
+                m_detectedObjects = detected;
+                emit detectedObjectsChanged();
+            }
+        }
+    });
+
+    connect(m_mqttClient, &QMqttClient::errorChanged, this, [=](QMqttClient::ClientError error) {
+        qWarning() << "[MQTT][TCP] errorChanged:" << static_cast<int>(error);
+        if (m_networkStatus != "Error") {
+            m_networkStatus = "Error";
+            emit networkStatusChanged();
+        }
+    });
+
+    qInfo() << "[MQTT][TCP] connectToHost()";
+    m_mqttClient->connectToHost();
 }
 
 void Backend::setRtspPort(const QString &port) {
@@ -165,9 +403,42 @@ void Backend::login(QString id, QString pw) {
         return;
     }
 
-    QUrl url(serverUrl() + "/login");
+    const QString loginUrl = serverUrl() + "/login";
+    qInfo() << "[LOGIN] request URL:" << loginUrl;
+    QUrl url(loginUrl);
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    // Apply custom CA trust for HTTPS login request.
+    if (url.scheme().compare("https", Qt::CaseInsensitive) == 0) {
+        const QString caPathRaw = m_env.value("MQTT_CA_CERT", "certs/rootCA.crt").trimmed();
+        auto resolvePath = [](const QString &rawPath) {
+            QFileInfo info(rawPath);
+            if (info.isAbsolute()) return rawPath;
+
+            const QString appSide = QCoreApplication::applicationDirPath() + "/" + rawPath;
+            if (QFileInfo::exists(appSide)) {
+                return appSide;
+            }
+            return rawPath;
+        };
+
+        const QString caPath = resolvePath(caPathRaw);
+        QFile caFile(caPath);
+        if (caFile.open(QIODevice::ReadOnly)) {
+            const QList<QSslCertificate> certs = QSslCertificate::fromData(caFile.readAll(), QSsl::Pem);
+            if (!certs.isEmpty()) {
+                QSslConfiguration sslConfig = request.sslConfiguration();
+                sslConfig.setCaCertificates(certs);
+                request.setSslConfiguration(sslConfig);
+                qInfo() << "[LOGIN][SSL] custom CA loaded:" << caPath;
+            } else {
+                qWarning() << "[LOGIN][SSL] invalid CA cert data:" << caPath;
+            }
+        } else {
+            qWarning() << "[LOGIN][SSL] CA file not found:" << caPath;
+        }
+    }
     
     QJsonObject json;
     json["id"] = id;
@@ -175,7 +446,31 @@ void Backend::login(QString id, QString pw) {
     QJsonDocument doc(json);
 
     QNetworkReply *reply = m_manager->post(request, doc.toJson());
+    connect(reply, &QNetworkReply::sslErrors, this, [=](const QList<QSslError> &errors) {
+        for (const QSslError &e : errors) {
+            qWarning() << "[LOGIN][SSL]" << e.errorString();
+        }
+    });
+
+    QTimer *loginTimeout = new QTimer(reply);
+    loginTimeout->setSingleShot(true);
+    loginTimeout->setInterval(5000);
+    connect(loginTimeout, &QTimer::timeout, this, [reply]() {
+        if (reply->isRunning()) {
+            reply->setProperty("timedOut", true);
+            reply->abort();
+        }
+    });
+    loginTimeout->start();
+
     connect(reply, &QNetworkReply::finished, this, [=](){
+        const bool timedOut = reply->property("timedOut").toBool();
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        qWarning() << "[LOGIN] status=" << statusCode
+                   << "netError=" << static_cast<int>(netError)
+                   << "errorString=" << reply->errorString();
+
         if (reply->error() == QNetworkReply::NoError) {
             m_isLoggedIn = true;
             m_userId = id;
@@ -191,23 +486,77 @@ void Backend::login(QString id, QString pw) {
             emit sessionRemainingSecondsChanged();
             emit loginSuccess();
         } else {
-            if (!m_loginLocked) {
-                m_loginFailedAttempts++;
-                if (m_loginFailedAttempts >= m_loginMaxAttempts) {
-                    m_loginLocked = true;
-                }
-                emit loginLockChanged();
+            if (timedOut) {
+                emit loginFailed("서버 응답 시간이 초과되었습니다. 서버 상태를 확인해 주세요.");
+                reply->deleteLater();
+                return;
             }
 
-            if (m_loginLocked) {
-                emit loginFailed("비밀번호를 여러 번 틀려 로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+            const bool isAuthFailure = (statusCode == 401 || statusCode == 403
+                                     || netError == QNetworkReply::AuthenticationRequiredError
+                                     || netError == QNetworkReply::ContentAccessDenied);
+
+            const bool isServerUnavailable =
+                    (netError == QNetworkReply::ConnectionRefusedError
+                  || netError == QNetworkReply::RemoteHostClosedError
+                  || netError == QNetworkReply::HostNotFoundError
+                  || netError == QNetworkReply::TimeoutError
+                  || netError == QNetworkReply::TemporaryNetworkFailureError
+                  || netError == QNetworkReply::NetworkSessionFailedError
+                  || netError == QNetworkReply::ServiceUnavailableError
+                  || statusCode >= 500);
+
+            const bool isSslFailure =
+                    (netError == QNetworkReply::SslHandshakeFailedError
+                  || netError == QNetworkReply::UnknownNetworkError);
+
+            if (isSslFailure) {
+                emit loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN) 또는 API_URL(HTTP/HTTPS)을 확인해 주세요.");
+            } else if (isServerUnavailable) {
+                emit loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
+            } else if (isAuthFailure) {
+                if (!m_loginLocked) {
+                    m_loginFailedAttempts++;
+                    if (m_loginFailedAttempts >= m_loginMaxAttempts) {
+                        m_loginLocked = true;
+                    }
+                    emit loginLockChanged();
+                }
+
+                if (m_loginLocked) {
+                    emit loginFailed("비밀번호를 여러 번 잘못 입력하여 로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+                } else {
+                    int remaining = m_loginMaxAttempts - m_loginFailedAttempts;
+                    emit loginFailed(QString("비밀번호가 잘못되었습니다. (%1회 남음)").arg(remaining));
+                }
             } else {
-                int remaining = m_loginMaxAttempts - m_loginFailedAttempts;
-                emit loginFailed(QString("비밀번호가 잘못 되었습니다. (%1회 남음)").arg(remaining));
+                emit loginFailed("로그인 요청에 실패했습니다. 네트워크 또는 서버 상태를 확인해 주세요.");
             }
         }
         reply->deleteLater();
     });
+}
+
+void Backend::skipLoginTemporarily() {
+    if (m_isLoggedIn) {
+        return;
+    }
+
+    m_isLoggedIn = true;
+    m_userId = "Skip";
+    m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
+    m_sessionTimer->start();
+
+    if (m_loginFailedAttempts != 0 || m_loginLocked) {
+        m_loginFailedAttempts = 0;
+        m_loginLocked = false;
+        emit loginLockChanged();
+    }
+
+    emit isLoggedInChanged();
+    emit userIdChanged();
+    emit sessionRemainingSecondsChanged();
+    emit loginSuccess();
 }
 
 void Backend::logout() {
@@ -239,7 +588,7 @@ void Backend::resetSessionTimer() {
 bool Backend::adminUnlock(QString adminCode) {
     QString expected = m_env.value("ADMIN_UNLOCK_KEY").trimmed();
     if (expected.isEmpty()) {
-        emit loginFailed("관리자 해제 키가 설정되지 않았습니다.");
+        emit loginFailed("관리자 해제 키가 설정되어 있지 않습니다.");
         return false;
     }
 
@@ -282,6 +631,34 @@ bool Backend::updateRtspConfig(QString ip, QString port) {
     return true;
 }
 
+bool Backend::resetRtspConfigToEnv() {
+    const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
+    const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
+
+    const QString nextIp = envIp.isEmpty() ? QString("127.0.0.1") : envIp;
+    const QString nextPort = envPort.isEmpty() ? QString("8554") : envPort;
+
+    QSettings settings;
+    settings.setValue("network/use_custom_rtsp", false);
+    settings.remove("network/rtsp_ip");
+    settings.remove("network/rtsp_port");
+    m_useCustomRtspConfig = false;
+
+    bool changed = false;
+    if (m_rtspIp != nextIp) {
+        m_rtspIp = nextIp;
+        emit rtspIpChanged();
+        changed = true;
+    }
+    if (m_rtspPort != nextPort) {
+        m_rtspPort = nextPort;
+        emit rtspPortChanged();
+        changed = true;
+    }
+
+    return changed;
+}
+
 void Backend::refreshRecordings() {
     QString urlStr = QString("%1/recordings?user=%2").arg(serverUrl(), m_userId);
     QUrl url(urlStr);
@@ -291,23 +668,24 @@ void Backend::refreshRecordings() {
     connect(reply, &QNetworkReply::finished, this, [=](){
         if (reply->error() == QNetworkReply::NoError) {
             QByteArray data = reply->readAll();
-            qDebug() << "Recordings Response:" << data.left(200); // 처음 200자 출력
+            qDebug() << "Recordings Response:" << data.left(200);
             QJsonDocument doc = QJsonDocument::fromJson(data);
-            if (!doc.isNull() && doc.object().contains("files")) {
-                QJsonArray arr = doc.object()["files"].toArray();
+            const QJsonObject rootObj = doc.object();
+            if (!doc.isNull() && rootObj.contains("files")) {
+                const QJsonArray arr = rootObj.value("files").toArray();
                 qDebug() << "Found" << arr.size() << "files";
                 
                 QVariantList fileList;
-                for(const QJsonValue &val : arr) {
-                    QJsonObject obj = val.toObject();
+                for (const QJsonValue &val : arr) {
+                    const QJsonObject obj = val.toObject();
                     QVariantMap fileMap;
                     fileMap["name"] = obj["name"].toString();
-                    fileMap["size"] = obj["size"].toVariant().toLongLong(); // size 필드 추가
+                    fileMap["size"] = obj["size"].toVariant().toLongLong();
                     fileList.append(fileMap);
                 }
                 emit recordingsLoaded(fileList);
             } else {
-                qDebug() << "응답에 'files' 배열 없음";
+                qDebug() << "Response has no 'files' array";
                 emit recordingsLoaded(QVariantList());
             }
         } else {
@@ -325,7 +703,7 @@ void Backend::deleteRecording(QString name) {
     connect(reply, &QNetworkReply::finished, this, [=](){
         if (reply->error() == QNetworkReply::NoError) {
             emit deleteSuccess();
-            refreshRecordings(); // 자동 새로고침
+            refreshRecordings();
         } else {
             emit deleteFailed(reply->errorString());
         }
@@ -334,7 +712,7 @@ void Backend::deleteRecording(QString name) {
 }
 
 void Backend::renameRecording(QString oldName, QString newName) {
-    QUrl url(serverUrl() + "/recordings/rename"); // 가정된 엔드포인트
+    QUrl url(serverUrl() + "/recordings/rename");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -342,13 +720,11 @@ void Backend::renameRecording(QString oldName, QString newName) {
     json["oldName"] = oldName;
     json["newName"] = newName;
     QJsonDocument doc(json);
-
-    // PUT 요청으로 이름 변경 시도
     QNetworkReply *reply = m_manager->put(request, doc.toJson());
     connect(reply, &QNetworkReply::finished, this, [=](){
         if (reply->error() == QNetworkReply::NoError) {
             emit renameSuccess();
-            refreshRecordings(); // 목록 갱신
+            refreshRecordings();
         } else {
             emit renameFailed(reply->errorString());
         }
@@ -361,25 +737,17 @@ QString Backend::getStreamUrl(QString fileName) {
 }
 
 void Backend::downloadAndPlay(QString fileName) {
-    qDebug() << "Backend::downloadAndPlay called for:" << fileName; // 즉시 로그 추가
-
-    // 1. 기존 다운로드 취소
+    qDebug() << "Backend::downloadAndPlay called for:" << fileName;
     if (m_downloadReply) {
         m_downloadReply->abort();
         m_downloadReply->deleteLater();
         m_downloadReply = nullptr;
     }
-
-    // 2. 임시 경로 설정
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     m_tempFilePath = tempDir + "/" + fileName;
-    
-    // 존재하면 삭제
     if (QFile::exists(m_tempFilePath)) {
         QFile::remove(m_tempFilePath);
     }
-
-    // 3. 다운로드 시작
     QUrl url = QUrl(getStreamUrl(fileName));
     QNetworkRequest request(url);
     m_downloadReply = m_manager->get(request);
@@ -391,16 +759,13 @@ void Backend::downloadAndPlay(QString fileName) {
     });
     
     connect(m_downloadReply, &QNetworkReply::finished, this, [=](){
-        // 취소된 경우 처리 안함 (cancelDownload에서 처리됨)
         if (!m_downloadReply) return; 
 
         if (m_downloadReply->error() == QNetworkReply::NoError) {
-            // 파일로 저장
             QFile file(m_tempFilePath);
             if (file.open(QIODevice::WriteOnly)) {
                 file.write(m_downloadReply->readAll());
                 file.close();
-                // 로컬 파일 재생
                 emit downloadFinished("file:///" + m_tempFilePath);
             } else {
                 emit downloadError("Failed to save file: " + file.errorString());
@@ -416,7 +781,6 @@ void Backend::downloadAndPlay(QString fileName) {
 
 void Backend::cancelDownload() {
     if (m_downloadReply) {
-        // 멤버 변수를 먼저 초기화하여 finished 시그널 핸들러가 이를 감지하고 종료하도록 함
         QNetworkReply *reply = m_downloadReply;
         m_downloadReply = nullptr;
 
@@ -429,16 +793,8 @@ void Backend::cancelDownload() {
 }
 
 void Backend::exportRecording(QString fileName, QString savePath) {
-    // 1. 기존 다운로드 취소 (충돌 방지)
     cancelDownload();
-
-    // 2. 경로 설정 (사용자 지정 경로)
-    m_tempFilePath = savePath; // 재사용 (다운로드 로직 공유를 위해 멤버변수 사용)
-    
-    // 3. 다운로드 시작 (downloadAndPlay 로직과 유사하지만 완료 시그널 다르게 처리 가능)
-    // 하지만 downloadFinished 로직을 공유하면 "재생"이 되어버림.
-    // 별도 함수로 분리하거나 플래그를 두는 것이 좋음.
-    // 여기서는 간단히 별도 로직 구현.
+    m_tempFilePath = savePath;
     
     QUrl url = QUrl(getStreamUrl(fileName));
     QNetworkRequest request(url);
@@ -456,10 +812,7 @@ void Backend::exportRecording(QString fileName, QString savePath) {
             if (file.open(QIODevice::WriteOnly)) {
                 file.write(m_downloadReply->readAll());
                 file.close();
-                // Export는 재생하지 않고 성공 메시지 (여기서는 downloadFinished 대신 별도 처리가 없으므로 그냥 둠? 
-                // 아니면 downloadFinished를 QML에서 구분하도록 함? -> QML에서 처리)
-                // QML에서 "파일 저장 완료" 알림을 띄우기 위해 downloadFinished 활용하되, Path를 주면 됨.
-                emit downloadFinished(savePath); // 완료 시그널
+                emit downloadFinished(savePath);
             } else {
                 emit downloadError("Failed to ensure file: " + file.errorString());
             }
@@ -515,3 +868,6 @@ void Backend::onSessionTick() {
         emit sessionExpired();
     }
 }
+
+
+

@@ -7,70 +7,154 @@ import Team3VideoReceiver 1.0
 Item {
     id: root
     property string source: ""
-    // property alias status: statusLabel.text // 별칭 제거됨, 이제 내부 로직 사용
+    property int tileIndex: -1
     property string locationName: "Camera"
-    property string bitrateText: (vlc.bitrate / 1000).toFixed(0) + " kbps"
     property var theme
-    
-    // 컨테이너 스타일 (테두리, 둥근 모서리)
+    property int cameraIndex: -1
+    property bool dptzEnabled: false
+    property real dptzScale: 1.0
+    property real dptzMinScale: 1.0
+    property real dptzMaxScale: 4.0
+    property real dptzPanX: 0
+    property real dptzPanY: 0
+    property real dptzPointerX: 0
+    property real dptzPointerY: 0
+    property bool dptzFocusLocked: false
+    property real dptzLockedFocusX: 0
+    property real dptzLockedFocusY: 0
+    property bool dptzDebugLog: true
+
+    signal cameraStateChanged(int cameraIndex, bool isLive)
+    signal cameraFpsChanged(int cameraIndex, int fps)
+    signal doubleClicked()
+
+    function dptzReset() {
+        dptzScale = 1.0
+        dptzPanX = 0
+        dptzPanY = 0
+        vlc.setDigitalZoom(dptzScale, 0.5, 0.5)
+    }
+
+    function dptzClampPan() {
+        if (!dptzEnabled || dptzScale <= 1.0) {
+            dptzPanX = 0
+            dptzPanY = 0
+            return
+        }
+
+        var maxX = (videoViewport.width * dptzScale - videoViewport.width) / 2
+        var maxY = (videoViewport.height * dptzScale - videoViewport.height) / 2
+        dptzPanX = Math.max(-maxX, Math.min(maxX, dptzPanX))
+        dptzPanY = Math.max(-maxY, Math.min(maxY, dptzPanY))
+    }
+
+    function dptzZoom(step) {
+        dptzZoomAt(step, videoViewport.width / 2, videoViewport.height / 2)
+    }
+
+    function dptzZoomAt(step, focusX, focusY) {
+        if (!dptzEnabled) return
+
+        var oldScale = dptzScale
+        var newScale = Math.max(dptzMinScale, Math.min(dptzMaxScale, dptzScale + step))
+        if (Math.abs(newScale - oldScale) < 0.0001) return
+
+        dptzScale = newScale
+
+        var viewW = Math.max(1, videoViewport.width)
+        var viewH = Math.max(1, videoViewport.height)
+        var srcW = vlc.videoWidth > 0 ? vlc.videoWidth : 1920
+        var srcH = vlc.videoHeight > 0 ? vlc.videoHeight : 1080
+        var srcAspect = srcW / Math.max(1, srcH)
+        var viewAspect = viewW / Math.max(1, viewH)
+
+        var contentX = 0
+        var contentY = 0
+        var contentW = viewW
+        var contentH = viewH
+
+        if (viewAspect > srcAspect) {
+            contentW = viewH * srcAspect
+            contentX = (viewW - contentW) / 2
+        } else if (viewAspect < srcAspect) {
+            contentH = viewW / srcAspect
+            contentY = (viewH - contentH) / 2
+        }
+
+        var nx = (focusX - contentX) / Math.max(1, contentW)
+        var ny = (focusY - contentY) / Math.max(1, contentH)
+        nx = Math.max(0, Math.min(1, nx))
+        ny = Math.max(0, Math.min(1, ny))
+        if (dptzDebugLog) {
+            console.log("[DPTZ][QML]",
+                        "step=", step,
+                        "scale=", newScale,
+                        "focus=", focusX, focusY,
+                        "view=", viewW, viewH,
+                        "src=", srcW, srcH,
+                        "content=", contentX, contentY, contentW, contentH,
+                        "norm=", nx, ny)
+        }
+        vlc.setDigitalZoom(dptzScale, nx, ny)
+    }
+
+    onDptzEnabledChanged: {
+        if (!dptzEnabled) dptzReset()
+    }
+
     Rectangle {
         anchors.fill: parent
         color: theme ? theme.bgSecondary : "#09090b"
         radius: 8
         border.color: mouseArea.containsMouse ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
         border.width: 2
-        clip: true 
-        
+        clip: true
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 2 // 테두리 제외
+            anchors.margins: 2
             spacing: 0
 
-            // 1. 헤더 바
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 36 // 컴팩트 헤더
-                color: "transparent" // 부모 배경 사용
-                
+                Layout.preferredHeight: 36
+                color: "transparent"
+
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     spacing: 8
-                    
-                    // 카메라 아이콘 및 정보
-                    RowLayout {
-                        spacing: 6
-                        Text { text: "📷"; font.pixelSize: 12 }
-                        Column {
-                            spacing: 0
-                            Text { text: "Cam " + (index + 1); color: theme ? theme.textPrimary : "white"; font.bold: true; font.pixelSize: 12 }
-                            Text { text: root.locationName; color: theme ? theme.textSecondary : "#a1a1aa"; font.pixelSize: 10 }
-                        }
+
+                    Column {
+                        spacing: 0
+                        Text { text: "Cam " + (root.tileIndex + 1); color: theme ? theme.textPrimary : "white"; font.bold: true; font.pixelSize: 12 }
+                        Text { text: root.locationName; color: theme ? theme.textSecondary : "#a1a1aa"; font.pixelSize: 10 }
                     }
 
                     Item { Layout.fillWidth: true }
-                    
-                    // 상태 배지
+
                     Rectangle {
                         Layout.preferredHeight: 18
                         Layout.preferredWidth: 46
-                        color: statusLabel.text === "LIVE" ? (theme ? theme.accent + "33" : "#33f97316") : "#3371717a" 
+                        color: statusLabel.text === "LIVE" ? (theme ? theme.accent + "33" : "#33f97316") : "#3371717a"
                         radius: 4
                         border.width: 1
                         border.color: statusLabel.text === "LIVE" ? (theme ? theme.accent : "#f97316") : "#71717a"
-                        
+
                         RowLayout {
                             anchors.centerIn: parent
                             spacing: 4
                             Rectangle {
-                                width: 6; height: 6; radius: 3
+                                width: 6
+                                height: 6
+                                radius: 3
                                 color: statusLabel.text === "LIVE" ? (theme ? theme.accent : "#f97316") : "#71717a"
                                 visible: statusLabel.text === "LIVE"
                             }
                             Text {
                                 id: statusLabel
-                                text: vlc.isPlaying ? "LIVE" : "OFFLINE"
+                                text: (vlc.isPlaying && vlc.fps > 0) ? "LIVE" : "OFFLINE"
                                 color: text === "LIVE" ? (theme ? theme.accent : "#f97316") : "#71717a"
                                 font.bold: true
                                 font.pixelSize: 9
@@ -78,8 +162,7 @@ Item {
                         }
                     }
                 }
-                
-                // 구분선
+
                 Rectangle {
                     anchors.bottom: parent.bottom
                     width: parent.width
@@ -88,20 +171,39 @@ Item {
                 }
             }
 
-            // 2. 비디오 영역 (네이티브 윈도우 자리 표시자)
-            // 이 아이템은 중간 공간을 채웁니다. 네이티브 윈도우가 위치를 추적합니다.
-            VlcPlayer {
-                id: vlc
+            Item {
+                id: videoViewport
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                // url: root.source // 바인딩 제거 (순서 보장을 위해 onSourceChanged에서 수동 설정)
-                
-                // 비디오 로딩 중이거나 오프라인일 때의 배경
+                clip: true
+
+                VlcPlayer {
+                    id: vlc
+                    width: videoViewport.width
+                    height: videoViewport.height
+                    x: 0
+                    y: 0
+
+                    onIsPlayingChanged: {
+                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying && vlc.fps > 0)
+                        if (!vlc.isPlaying) root.cameraFpsChanged(root.cameraIndex, 0)
+                    }
+                    onFpsChanged: {
+                        var roundedFps = Math.max(0, Math.round(vlc.fps))
+                        root.cameraFpsChanged(root.cameraIndex, roundedFps)
+                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying && roundedFps > 0)
+                    }
+
+                    onVideoDrag: function(dx, dy) {
+                        // Native VLC window mode: drag-pan is intentionally disabled to keep
+                        // zoom strictly inside the camera frame.
+                    }
+                }
+
                 Rectangle {
                     anchors.fill: parent
                     color: "black"
                     z: -1
-                    
                     Text {
                         anchors.centerIn: parent
                         text: "NO SIGNAL"
@@ -110,17 +212,73 @@ Item {
                         font.bold: true
                     }
                 }
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: false
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: enabled ? Qt.OpenHandCursor : Qt.ArrowCursor
+                    property real lastX: 0
+                    property real lastY: 0
+                    onPressed: (mouse) => {
+                        lastX = mouse.x
+                        lastY = mouse.y
+                        root.dptzPointerX = mouse.x
+                        root.dptzPointerY = mouse.y
+                        cursorShape = Qt.ClosedHandCursor
+                    }
+                    onReleased: cursorShape = Qt.OpenHandCursor
+                    onPositionChanged: (mouse) => {
+                        root.dptzPointerX = mouse.x
+                        root.dptzPointerY = mouse.y
+                        if (!pressed || root.dptzScale <= 1.0) return
+                        root.dptzPanX += mouse.x - lastX
+                        root.dptzPanY += mouse.y - lastY
+                        lastX = mouse.x
+                        lastY = mouse.y
+                        root.dptzClampPan()
+                    }
+                    onDoubleClicked: (mouse) => { mouse.accepted = false }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: root.dptzEnabled
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    onPositionChanged: (mouse) => {
+                        root.dptzPointerX = mouse.x
+                        root.dptzPointerY = mouse.y
+                    }
+                    onWheel: (wheel) => {
+                        if (!root.dptzFocusLocked) {
+                            root.dptzLockedFocusX = wheel.x
+                            root.dptzLockedFocusY = wheel.y
+                            root.dptzFocusLocked = true
+                        }
+                        focusUnlockTimer.restart()
+                        root.dptzPointerX = root.dptzLockedFocusX
+                        root.dptzPointerY = root.dptzLockedFocusY
+                        if (wheel.angleDelta.y > 0) root.dptzZoomAt(0.2, root.dptzLockedFocusX, root.dptzLockedFocusY)
+                        else if (wheel.angleDelta.y < 0) root.dptzZoomAt(-0.2, root.dptzLockedFocusX, root.dptzLockedFocusY)
+                        wheel.accepted = true
+                    }
+                }
+
+                Timer {
+                    id: focusUnlockTimer
+                    interval: 180
+                    repeat: false
+                    onTriggered: root.dptzFocusLocked = false
+                }
             }
-// ...
 
-
-            // 3. 바닥글 바
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 30
                 color: "transparent"
-                
-                // 상단 구분선
+
                 Rectangle {
                     anchors.top: parent.top
                     width: parent.width
@@ -133,19 +291,21 @@ Item {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     spacing: 8
-                    
+
                     RowLayout {
                         spacing: 4
                         Rectangle { width: 6; height: 6; radius: 3; color: theme ? theme.accent : "#f97316"; visible: true }
                         Text { text: "REC"; color: theme ? theme.accent : "#f97316"; font.bold: true; font.pixelSize: 10 }
                     }
-                    
-                    Text { text: "1080P • 30FPS"; color: theme ? theme.textSecondary : "#a1a1aa"; font.pixelSize: 10 }
-                    
-                    // 사용자 요청에 따라 비트레이트 제거됨
-                    
+
+                    Text {
+                        text: "1080P | " + Math.max(0, Math.round(vlc.fps)) + "FPS"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 10
+                    }
+
                     Item { Layout.fillWidth: true }
-                    
+
                     Text {
                         id: timeLabel
                         text: Qt.formatTime(new Date(), "hh:mm:ss")
@@ -163,25 +323,95 @@ Item {
                 }
             }
         }
-        
+
         MouseArea {
             id: mouseArea
             anchors.fill: parent
+            enabled: true
             hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
             onClicked: parent.forceActiveFocus()
             onDoubleClicked: root.doubleClicked()
-            // 참고: 네이티브 윈도우가 비디오 영역의 클릭을 가로챌 수 있음
+        }
+
+        Rectangle {
+            visible: root.dptzEnabled
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 10
+            anchors.bottomMargin: 40
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 8
+            width: 132
+            height: 34
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 4
+                spacing: 4
+
+                Button {
+                    text: "-"
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 26
+                    onClicked: {
+                        var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                        var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                        root.dptzZoomAt(-0.2, fx, fy)
+                    }
+                }
+                Button {
+                    text: "1x"
+                    Layout.preferredWidth: 44
+                    Layout.preferredHeight: 26
+                    onClicked: root.dptzReset()
+                }
+                Button {
+                    text: "+"
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 26
+                    onClicked: {
+                        var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                        var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                        root.dptzZoomAt(0.2, fx, fy)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            visible: root.dptzEnabled
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 10
+            anchors.bottomMargin: 78
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 6
+            width: 64
+            height: 24
+
+            Text {
+                anchors.centerIn: parent
+                text: Number(root.dptzScale).toFixed(1) + "x"
+                color: theme ? theme.textPrimary : "white"
+                font.bold: true
+                font.pixelSize: 11
+            }
         }
     }
-
-    signal doubleClicked()
 
     Component.onCompleted: {
         if (root.source !== "") vlc.play()
     }
+
     onSourceChanged: {
         console.log(root.source === "" ? "VideoPlayer source reset" : "VideoPlayer source changed: " + root.source)
         vlc.url = root.source
+        root.dptzReset()
 
         if (root.source !== "") {
             console.log("Source valid, calling play()")
