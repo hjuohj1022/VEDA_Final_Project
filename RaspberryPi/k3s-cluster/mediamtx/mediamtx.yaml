@@ -25,15 +25,23 @@ data:
       "0/sub":
         source: publisher
         # 저해상도 서브 스트림 생성 (그리드용)
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp -vf scale=426:240 -r 8 -g 16 -c:v libx264 -preset ultrafast -tune zerolatency -b:v 250k -maxrate 300k -bufsize 600k -an -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/0/sub
-        runOnInitRestart: yes
+        runOnInit: >-
+          sh -c "while true; do
+          ffmpeg -hide_banner -loglevel warning -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32 -rtsp_transport tcp
+          -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp
+          -vf scale=320:180 -r 8 -g 8
+          -c:v libx264 -preset ultrafast -tune zerolatency -x264-params keyint=8:min-keyint=8:scenecut=0
+          -b:v 220k -maxrate 260k -bufsize 260k -an
+          -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/0/sub;
+          sleep 1;
+          done"
+        runOnInitRestart: no
         # 서브 스트림은 녹화 비활성화
         record: no
 
       # [채널 1 - Main]
       "1/main":
         source: publisher
-        #
         runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/1/main
         runOnInitRestart: yes
         record: yes
@@ -44,8 +52,17 @@ data:
       # [채널 1 - Sub]
       "1/sub":
         source: publisher
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -vf scale=426:240 -r 8 -g 16 -c:v libx264 -preset ultrafast -tune zerolatency -b:v 250k -maxrate 300k -bufsize 600k -an -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/1/sub
-        runOnInitRestart: yes
+        runOnInit: >-
+          sh -c "while true; do
+          ffmpeg -hide_banner -loglevel warning -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32 -rtsp_transport tcp
+          -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp
+          -vf scale=320:180 -r 8 -g 8
+          -c:v libx264 -preset ultrafast -tune zerolatency -x264-params keyint=8:min-keyint=8:scenecut=0
+          -b:v 220k -maxrate 260k -bufsize 260k -an
+          -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/1/sub;
+          sleep 1;
+          done"
+        runOnInitRestart: no
         record: no
 
       # [채널 2 - Main]
@@ -61,8 +78,17 @@ data:
       # [채널 2 - Sub]
       "2/sub":
         source: publisher
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp -vf scale=426:240 -r 8 -g 16 -c:v libx264 -preset ultrafast -tune zerolatency -b:v 250k -maxrate 300k -bufsize 600k -an -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/2/sub
-        runOnInitRestart: yes
+        runOnInit: >-
+          sh -c "while true; do
+          ffmpeg -hide_banner -loglevel warning -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32 -rtsp_transport tcp
+          -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp
+          -vf scale=320:180 -r 8 -g 8
+          -c:v libx264 -preset ultrafast -tune zerolatency -x264-params keyint=8:min-keyint=8:scenecut=0
+          -b:v 220k -maxrate 260k -bufsize 260k -an
+          -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/2/sub;
+          sleep 1;
+          done"
+        runOnInitRestart: no
         record: no
 
       # [채널 3 - Main]
@@ -78,8 +104,17 @@ data:
       # [채널 3 - Sub]
       "3/sub":
         source: publisher
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp -vf scale=426:240 -r 8 -g 16 -c:v libx264 -preset ultrafast -tune zerolatency -b:v 250k -maxrate 300k -bufsize 600k -an -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/3/sub
-        runOnInitRestart: yes
+        runOnInit: >-
+          sh -c "while true; do
+          ffmpeg -hide_banner -loglevel warning -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32 -rtsp_transport tcp
+          -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp
+          -vf scale=320:180 -r 8 -g 8
+          -c:v libx264 -preset ultrafast -tune zerolatency -x264-params keyint=8:min-keyint=8:scenecut=0
+          -b:v 220k -maxrate 260k -bufsize 260k -an
+          -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/3/sub;
+          sleep 1;
+          done"
+        runOnInitRestart: no
         record: no
 
 ---
