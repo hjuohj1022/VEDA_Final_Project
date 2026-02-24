@@ -55,6 +55,10 @@ signals:
 
 private:
     static void handleVlcEvent(const libvlc_event_t *event, void *userData);
+    void stopInternal(bool manualStop);
+    void scheduleReconnect();
+    void cancelReconnect();
+    void setPlayingState(bool playing);
     void updateStats();
     void updateVideoSize();
     void attachWindow();
@@ -77,6 +81,10 @@ private:
     bool m_hasDisplayedBaseline = false;
     bool m_vlcEventsAttached = false;
     QTimer *m_statsTimer = nullptr;
+    QTimer *m_reconnectTimer = nullptr;
+    QTimer *m_offlineDelayTimer = nullptr;
+    bool m_manualStopRequested = false;
+    int m_reconnectAttempt = 0;
 
     libvlc_instance_t *m_vlcInstance = nullptr;
     libvlc_media_player_t *m_mediaPlayer = nullptr;

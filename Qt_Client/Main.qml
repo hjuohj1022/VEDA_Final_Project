@@ -25,6 +25,14 @@ ApplicationWindow {
     property int rtspConnectSuccessStreak: 0
     property int rtspConnectStartedMs: 0
     property int rtspConnectMinCheckMs: 800
+    property bool streamPrewarmEnabled: true
+    property int popupCameraIndex: -1
+
+    function cameraLocationName(index) {
+        var names = ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
+        if (index < 0 || index >= names.length) return "Camera"
+        return names[index]
+    }
 
     function startRtspConnectCheck() {
         rtspConnecting = true
@@ -196,7 +204,8 @@ ApplicationWindow {
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {
-                videoGrid.maximizedIndex = -1
+                mainViewPopup.visible = false
+                popupCameraIndex = -1
                 backend.logout()
                 stackLayout.currentIndex = 1
             }
@@ -316,7 +325,6 @@ ApplicationWindow {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 backend.resetSessionTimer()
-                                                videoGrid.maximizedIndex = -1
                                                 if (backend.isLoggedIn) {
                                                     stackLayout.currentIndex = 1
                                                 } else {
@@ -333,17 +341,18 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 currentIndex: backend.isLoggedIn ? 0 : 1
-                                onCurrentIndexChanged: {
-                                    if (currentIndex !== 0) {
-                                        videoGrid.maximizedIndex = -1
-                                    }
-                                }
 
                                 VideoGrid {
                                     id: videoGrid
                                     theme: window.appTheme
-                                    isActive: stackLayout.currentIndex === 0
+                                    isActive: backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn)
                                     visible: stackLayout.currentIndex === 0
+                                    onOpenMainViewRequested: function(cameraIndex) {
+                                        window.popupCameraIndex = cameraIndex
+                                        mainViewPopup.visible = true
+                                        mainViewPopup.raise()
+                                        mainViewPopup.requestActivate()
+                                    }
                                 }
 
                                 LoginScreen {
@@ -361,10 +370,61 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 theme: window.appTheme
                 visible: backend.isLoggedIn
-                showCameraControls: backend.isLoggedIn
-                                    && stackLayout.currentIndex === 0
-                                    && videoGrid.maximizedIndex !== -1
-                selectedCameraIndex: videoGrid.maximizedIndex
+                showCameraControls: false
+                selectedCameraIndex: -1
+            }
+        }
+    }
+
+    Window {
+        id: mainViewPopup
+        transientParent: window
+        modality: Qt.NonModal
+        width: 980
+        height: 580
+        minimumWidth: 800
+        minimumHeight: 450
+        visible: false
+        title: popupCameraIndex >= 0 ? ("Cam " + (popupCameraIndex + 1) + " - Main Stream") : "Main Stream"
+        color: window.appTheme.bgSecondary
+
+        onVisibleChanged: {
+            if (!visible) {
+                window.popupCameraIndex = -1
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: window.appTheme.bgSecondary
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 8
+
+                VideoPlayer {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    theme: window.appTheme
+                    tileIndex: window.popupCameraIndex
+                    cameraIndex: window.popupCameraIndex
+                    dptzEnabled: true
+                    locationName: window.cameraLocationName(window.popupCameraIndex)
+                    startDelayMs: 0
+                    source: (mainViewPopup.visible && backend.isLoggedIn && window.popupCameraIndex >= 0)
+                            ? backend.buildRtspUrl(window.popupCameraIndex, false)
+                            : ""
+                    onDoubleClicked: mainViewPopup.visible = false
+                }
+
+                Sidebar {
+                    Layout.preferredWidth: 256
+                    Layout.fillHeight: true
+                    theme: window.appTheme
+                    visible: mainViewPopup.visible
+                    showCameraControls: true
+                    selectedCameraIndex: window.popupCameraIndex
+                }
             }
         }
     }
@@ -392,12 +452,14 @@ ApplicationWindow {
         target: backend
         function onIsLoggedInChanged() {
             if (!backend.isLoggedIn) {
-                videoGrid.maximizedIndex = -1
+                mainViewPopup.visible = false
+                popupCameraIndex = -1
             }
             stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
         }
         function onSessionExpired() {
-            videoGrid.maximizedIndex = -1
+            mainViewPopup.visible = false
+            popupCameraIndex = -1
             stackLayout.currentIndex = 1
         }
     }

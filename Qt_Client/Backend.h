@@ -82,6 +82,7 @@ public:
     Q_INVOKABLE void downloadAndPlay(QString fileName); // 신규: 다운로드 후 재생
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
+    Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
 
 signals:
     void isLoggedInChanged();
