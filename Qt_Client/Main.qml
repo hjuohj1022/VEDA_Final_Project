@@ -19,6 +19,42 @@ ApplicationWindow {
     property real lastMoveY: -1
     property double lastMoveResetMs: 0
     property string rtspConfigError: ""
+    property bool rtspConfigIsError: false
+    property bool rtspConnecting: false
+    property int rtspConnectTimeoutMs: 8000
+    property int rtspConnectSuccessStreak: 0
+    property int rtspConnectStartedMs: 0
+    property int rtspConnectMinCheckMs: 800
+
+    function startRtspConnectCheck() {
+        rtspConnecting = true
+        rtspConnectSuccessStreak = 0
+        rtspConnectStartedMs = Date.now()
+        backend.activeCameras = 0
+        backend.currentFps = 0
+        rtspConfigIsError = false
+        rtspConfigError = "연결 확인 중..."
+        rtspConnectTimeout.restart()
+        rtspConnectPoll.start()
+    }
+
+    function stopRtspConnectCheck() {
+        rtspConnecting = false
+        rtspConnectSuccessStreak = 0
+        rtspConnectPoll.stop()
+        rtspConnectTimeout.stop()
+    }
+
+    function isValidIpv4(ip) {
+        var parts = ip.trim().split(".")
+        if (parts.length !== 4) return false
+        for (var i = 0; i < parts.length; i++) {
+            if (!/^\d+$/.test(parts[i])) return false
+            var v = parseInt(parts[i], 10)
+            if (v < 0 || v > 255) return false
+        }
+        return true
+    }
 
     function resetSessionFromMove(x, y) {
         var now = Date.now()
@@ -59,6 +95,8 @@ ApplicationWindow {
         // 전체 레이아웃(타이틀바 + 헤더 + 본문)
         anchors.fill: parent
         spacing: 0
+        focus: true
+        Keys.onPressed: backend.resetSessionTimer()
 
         // 커스텀 타이틀바
         Rectangle {
@@ -158,15 +196,18 @@ ApplicationWindow {
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {
+                videoGrid.maximizedIndex = -1
                 backend.logout()
                 stackLayout.currentIndex = 1
             }
             onRequestHome: stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
             onRequestRtspSettings: {
+                stopRtspConnectCheck()
                 rtspIpField.text = ""
                 rtspPortField.text = ""
                 rtspConfigError = ""
-                rtspSettingsPopup.open()
+                rtspConfigIsError = false
+                rtspSettingsPopup.visible = true
             }
         }
         // 메인 컨텐츠(중앙 화면 + 우측 사이드바)
@@ -227,7 +268,7 @@ ApplicationWindow {
                                         
                                         Text { 
                                             anchors.centerIn: parent
-                                            text: "Grid"
+                                            text: "View"
                                             color: !backend.isLoggedIn
                                                    ? (window.isDarkMode ? "#71717a" : "#a1a1aa")
                                                    : (stackLayout.currentIndex === 0 ? "white" : theme.textSecondary)
@@ -275,6 +316,7 @@ ApplicationWindow {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 backend.resetSessionTimer()
+                                                videoGrid.maximizedIndex = -1
                                                 if (backend.isLoggedIn) {
                                                     stackLayout.currentIndex = 1
                                                 } else {
@@ -291,11 +333,17 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 currentIndex: backend.isLoggedIn ? 0 : 1
+                                onCurrentIndexChanged: {
+                                    if (currentIndex !== 0) {
+                                        videoGrid.maximizedIndex = -1
+                                    }
+                                }
 
                                 VideoGrid {
                                     id: videoGrid
                                     theme: window.appTheme
                                     isActive: stackLayout.currentIndex === 0
+                                    visible: stackLayout.currentIndex === 0
                                 }
 
                                 LoginScreen {
@@ -313,6 +361,10 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 theme: window.appTheme
                 visible: backend.isLoggedIn
+                showCameraControls: backend.isLoggedIn
+                                    && stackLayout.currentIndex === 0
+                                    && videoGrid.maximizedIndex !== -1
+                selectedCameraIndex: videoGrid.maximizedIndex
             }
         }
     }
@@ -330,137 +382,252 @@ ApplicationWindow {
     }
 
     WheelHandler {
-        onWheel: backend.resetSessionTimer()
+        onWheel: (event) => {
+            backend.resetSessionTimer()
+            event.accepted = false
+        }
     }
-
-    Keys.onPressed: backend.resetSessionTimer()
 
     Connections {
         target: backend
         function onIsLoggedInChanged() {
+            if (!backend.isLoggedIn) {
+                videoGrid.maximizedIndex = -1
+            }
             stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
         }
         function onSessionExpired() {
+            videoGrid.maximizedIndex = -1
             stackLayout.currentIndex = 1
         }
     }
 
-    Popup {
+    Timer {
+        id: rtspConnectPoll
+        interval: 250
+        repeat: true
+        running: false
+        onTriggered: {
+            if (!window.rtspConnecting) {
+                stop()
+                return
+            }
+
+            var elapsed = Date.now() - window.rtspConnectStartedMs
+            var canJudgeSuccess = elapsed >= window.rtspConnectMinCheckMs
+            var connected = canJudgeSuccess && backend.activeCameras > 0
+
+            if (connected) {
+                window.rtspConnectSuccessStreak += 1
+                if (window.rtspConnectSuccessStreak >= 2) {
+                    window.stopRtspConnectCheck()
+                    window.rtspConfigError = ""
+                    rtspSettingsPopup.visible = false
+                }
+            } else {
+                window.rtspConnectSuccessStreak = 0
+            }
+        }
+    }
+
+    Timer {
+        id: rtspConnectTimeout
+        interval: window.rtspConnectTimeoutMs
+        repeat: false
+        running: false
+        onTriggered: {
+            if (!window.rtspConnecting)
+                return
+
+            window.stopRtspConnectCheck()
+            window.rtspConfigIsError = true
+            window.rtspConfigError = "연결 시간 초과. IP/포트를 확인 후 다시 시도해 주세요."
+        }
+    }
+
+    Window {
         id: rtspSettingsPopup
-        parent: Overlay.overlay
+        transientParent: window
         width: 380
         height: 230
-        modal: true
-        focus: true
-        closePolicy: Popup.NoAutoClose
-        anchors.centerIn: parent
-        z: 9999
+        visible: false
+        modality: Qt.ApplicationModal
+        flags: Qt.Dialog | Qt.FramelessWindowHint
+        color: "transparent"
 
-        onOpened: {
+        onVisibleChanged: {
+            if (!visible) {
+                stopRtspConnectCheck()
+                return
+            }
+            x = window.x + (window.width - width) / 2
+            y = window.y + (window.height - height) / 2
             rtspIpField.forceActiveFocus()
             rtspIpField.selectAll()
         }
 
-        background: Rectangle {
+        Rectangle {
+            anchors.fill: parent
             color: theme.bgComponent
             border.color: theme.border
             border.width: 1
             radius: 10
-        }
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 14
-            spacing: 10
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 10
 
-            Text {
-                text: "RTSP IP 설정"
-                color: theme.textPrimary
-                font.bold: true
-                font.pixelSize: 15
-            }
-
-            TextField {
-                id: rtspIpField
-                Layout.fillWidth: true
-                placeholderText: "IP 입력"
-                color: theme.textPrimary
-                background: Rectangle {
-                    color: theme.bgSecondary
-                    border.color: rtspIpField.activeFocus ? theme.accent : theme.border
-                    radius: 6
+                Text {
+                    text: "RTSP IP 설정"
+                    color: theme.textPrimary
+                    font.bold: true
+                    font.pixelSize: 15
                 }
-            }
 
-            TextField {
-                id: rtspPortField
-                Layout.fillWidth: true
-                placeholderText: "포트 입력"
-                inputMethodHints: Qt.ImhDigitsOnly
-                color: theme.textPrimary
-                background: Rectangle {
-                    color: theme.bgSecondary
-                    border.color: rtspPortField.activeFocus ? theme.accent : theme.border
-                    radius: 6
-                }
-                onAccepted: saveRtspButton.clicked()
-            }
-
-            Text {
-                Layout.fillWidth: true
-                visible: rtspConfigError.length > 0
-                text: rtspConfigError
-                color: "#ef4444"
-                font.pixelSize: 12
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-
-                Button {
-                    text: "취소"
-                    Layout.preferredWidth: 96
-                    onClicked: rtspSettingsPopup.close()
+                TextField {
+                    id: rtspIpField
+                    Layout.fillWidth: true
+                    placeholderText: "IP 입력"
+                    color: theme.textPrimary
+                    placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
                     background: Rectangle {
-                        color: parent.down ? theme.border : "transparent"
-                        border.color: theme.border
+                        color: theme.bgSecondary
+                        border.color: rtspIpField.activeFocus ? theme.accent : theme.border
                         radius: 6
                     }
-                    contentItem: Text {
-                        text: parent.text
-                        color: theme.textSecondary
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
 
-                Button {
-                    id: saveRtspButton
-                    text: "저장"
-                    Layout.preferredWidth: 96
-                    onClicked: {
-                        if (backend.updateRtspConfig(rtspIpField.text, rtspPortField.text)) {
-                            rtspConfigError = ""
-                            rtspSettingsPopup.close()
-                        } else {
-                            rtspConfigError = "IP/포트를 확인해 주세요. (포트 1~65535)"
+                TextField {
+                    id: rtspPortField
+                    Layout.fillWidth: true
+                    placeholderText: "포트 입력"
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    color: theme.textPrimary
+                    placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                    background: Rectangle {
+                        color: theme.bgSecondary
+                        border.color: rtspPortField.activeFocus ? theme.accent : theme.border
+                        radius: 6
+                    }
+                    onAccepted: saveRtspButton.clicked()
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: rtspConfigError.length > 0
+                    text: rtspConfigError
+                    color: rtspConfigIsError ? "#ef4444" : theme.textSecondary
+                    font.pixelSize: 12
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "초기화"
+                        Layout.preferredWidth: 96
+                        enabled: !window.rtspConnecting
+                        onClicked: {
+                            backend.resetRtspConfigToEnv()
+                            rtspIpField.text = ""
+                            rtspPortField.text = ""
+                            startRtspConnectCheck()
+                        }
+                        background: Rectangle {
+                            color: parent.down ? theme.border : "transparent"
+                            border.color: theme.border
+                            radius: 6
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: theme.textSecondary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                     }
-                    background: Rectangle {
-                        color: parent.down ? "#ea580c" : theme.accent
-                        radius: 6
+
+                    Button {
+                        text: "취소"
+                        Layout.preferredWidth: 96
+                        enabled: true
+                        onClicked: {
+                            if (window.rtspConnecting) {
+                                window.stopRtspConnectCheck()
+                                rtspConfigIsError = false
+                                rtspConfigError = "연결이 취소되었습니다."
+                            } else {
+                                window.stopRtspConnectCheck()
+                                rtspConfigError = ""
+                                rtspConfigIsError = false
+                                rtspSettingsPopup.visible = false
+                            }
+                        }
+                        background: Rectangle {
+                            color: parent.down ? theme.border : "transparent"
+                            border.color: theme.border
+                            radius: 6
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: theme.textSecondary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+
+                    Button {
+                        id: saveRtspButton
+                        text: window.rtspConnecting ? "연결 시도 중..." : "연결"
+                        Layout.preferredWidth: 96
+                        enabled: !window.rtspConnecting
+                        onClicked: {
+                            var ip = rtspIpField.text.trim()
+                            var portText = rtspPortField.text.trim()
+                            var portNum = parseInt(portText, 10)
+
+                            if (!isValidIpv4(ip)) {
+                                rtspConfigIsError = true
+                                rtspConfigError = "IP 형식을 확인해 주세요. (예: 192.168.0.10)"
+                                return
+                            }
+                            if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                                rtspConfigIsError = true
+                                rtspConfigError = "포트는 1~65535 범위로 입력해 주세요."
+                                return
+                            }
+
+                            if (backend.updateRtspConfig(ip, String(portNum))) {
+                                startRtspConnectCheck()
+                            } else {
+                                rtspConfigIsError = true
+                                rtspConfigError = "IP/포트를 확인해 주세요. (포트 1~65535)"
+                            }
+                        }
+                        background: Rectangle {
+                            color: parent.down ? "#ea580c" : theme.accent
+                            radius: 6
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
             }
         }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.color: window.isDarkMode ? "transparent" : "#d4d4d8"
+        border.width: window.isDarkMode ? 0 : 1
+        z: 1000
     }
 }
 

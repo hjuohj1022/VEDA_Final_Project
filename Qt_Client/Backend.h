@@ -7,6 +7,7 @@
 #include <QVariant>
 #include <QTimer>
 #include <QMap>
+#include <QMqttClient>
 
 class Backend : public QObject
 {
@@ -31,6 +32,8 @@ class Backend : public QObject
     Q_PROPERTY(QString storageUsed READ storageUsed NOTIFY storageChanged)
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
+    Q_PROPERTY(int detectedObjects READ detectedObjects NOTIFY detectedObjectsChanged)
+    Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -60,14 +63,18 @@ public:
     QString storageUsed() const { return m_storageUsed; }
     QString storageTotal() const { return m_storageTotal; }
     int storagePercent() const { return m_storagePercent; }
+    int detectedObjects() const { return m_detectedObjects; }
+    QString networkStatus() const { return m_networkStatus; }
 
     // QML에서 호출 가능한 메서드들
     Q_INVOKABLE void login(QString id, QString pw);
+    Q_INVOKABLE void skipLoginTemporarily();
     Q_INVOKABLE void logout();
     Q_INVOKABLE void resetSessionTimer();
     Q_INVOKABLE bool adminUnlock(QString adminCode);
     Q_INVOKABLE bool updateRtspIp(QString ip);
     Q_INVOKABLE bool updateRtspConfig(QString ip, QString port);
+    Q_INVOKABLE bool resetRtspConfigToEnv();
     Q_INVOKABLE void refreshRecordings();
     Q_INVOKABLE void deleteRecording(QString name);
     Q_INVOKABLE void renameRecording(QString oldName, QString newName); // 신규: 파일 이름 변경
@@ -87,6 +94,8 @@ signals:
     void currentFpsChanged();
     void latencyChanged();
     void storageChanged();
+    void detectedObjectsChanged();
+    void networkStatusChanged();
     
     void loginSuccess();
     void loginFailed(QString error);
@@ -113,6 +122,7 @@ private slots:
 
 private:
     void loadEnv();
+    void setupMqtt();
     
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;
@@ -139,6 +149,9 @@ private:
     QString m_storageUsed = "0 GB";
     QString m_storageTotal = "0 GB";
     int m_storagePercent = 0;
+    QMqttClient *m_mqttClient = nullptr;
+    int m_detectedObjects = 0;
+    QString m_networkStatus = "Disconnected";
     
     // 다운로드 관리
     QNetworkReply *m_downloadReply = nullptr;

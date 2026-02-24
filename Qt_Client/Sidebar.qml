@@ -5,7 +5,16 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     property var theme
+    property bool showCameraControls: false
+    property int selectedCameraIndex: -1
     color: theme ? theme.bgSecondary : "#09090b"
+
+    function selectedCameraTitle() {
+        var names = ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
+        if (selectedCameraIndex < 0 || selectedCameraIndex >= names.length)
+            return "Camera"
+        return "Cam " + (selectedCameraIndex + 1) + " - " + names[selectedCameraIndex]
+    }
     
     // ?쇱そ ?뚮몢由?
     Rectangle {
@@ -22,14 +31,107 @@ Rectangle {
 
         // ?쒖뒪??硫뷀듃由??쒕ぉ
         Text {
-            text: "System Metrics"
+            text: root.showCameraControls ? "Camera Controls" : "System Metrics"
             color: theme ? theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14 // text-sm
         }
 
+        Rectangle {
+            visible: root.showCameraControls
+            Layout.fillWidth: true
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 8
+            Layout.preferredHeight: 120
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 6
+
+                Text {
+                    text: root.selectedCameraTitle()
+                    color: theme ? theme.textPrimary : "white"
+                    font.bold: true
+                    font.pixelSize: 13
+                }
+                Text {
+                    text: "확대 화면 제어 패널"
+                    color: theme ? theme.textSecondary : "#71717a"
+                    font.pixelSize: 11
+                }
+            }
+        }
+
+        Rectangle {
+            visible: root.showCameraControls
+            Layout.fillWidth: true
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 8
+            Layout.preferredHeight: 120
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                Button {
+                    text: "3D Map (준비중)"
+                    Layout.fillWidth: true
+                    enabled: false
+                    background: Rectangle {
+                        color: theme ? theme.bgSecondary : "#09090b"
+                        border.color: theme ? theme.border : "#27272a"
+                        border.width: 1
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textSecondary : "#71717a"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.bold: true
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 64
+                    color: theme ? theme.bgSecondary : "#09090b"
+                    border.color: theme ? theme.border : "#27272a"
+                    border.width: 1
+                    radius: 6
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 3
+
+                        Text {
+                            text: "디지털 PTZ 사용 가능"
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            text: "휠: 줌  |  더블클릭: 줌 토글"
+                            color: theme ? theme.textSecondary : "#71717a"
+                            font.pixelSize: 10
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+            }
+        }
+
         // 李⑦듃 ?곸뿭
         ColumnLayout {
+            visible: !root.showCameraControls
             spacing: 8
             
             // ?ъ궗??媛?ν븳 李⑦듃 援ъ꽦 ?붿냼 (?몃씪??
@@ -170,6 +272,7 @@ Rectangle {
 
         // ?듦퀎 洹몃━??
         GridLayout {
+            visible: !root.showCameraControls
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
@@ -233,6 +336,7 @@ Rectangle {
 
             // AI ?곹깭 移대뱶
         Rectangle {
+            visible: !root.showCameraControls
             Layout.fillWidth: true
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
