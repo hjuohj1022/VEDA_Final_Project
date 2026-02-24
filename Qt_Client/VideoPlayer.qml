@@ -22,7 +22,8 @@ Item {
     property bool dptzFocusLocked: false
     property real dptzLockedFocusX: 0
     property real dptzLockedFocusY: 0
-    property bool dptzDebugLog: true
+    property bool dptzDebugLog: false
+    property int startDelayMs: 0
 
     signal cameraStateChanged(int cameraIndex, bool isLive)
     signal cameraFpsChanged(int cameraIndex, int fps)
@@ -154,7 +155,7 @@ Item {
                             }
                             Text {
                                 id: statusLabel
-                                text: (vlc.isPlaying && vlc.fps > 0) ? "LIVE" : "OFFLINE"
+                                text: vlc.isPlaying ? "LIVE" : "OFFLINE"
                                 color: text === "LIVE" ? (theme ? theme.accent : "#f97316") : "#71717a"
                                 font.bold: true
                                 font.pixelSize: 9
@@ -185,13 +186,13 @@ Item {
                     y: 0
 
                     onIsPlayingChanged: {
-                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying && vlc.fps > 0)
+                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying)
                         if (!vlc.isPlaying) root.cameraFpsChanged(root.cameraIndex, 0)
                     }
                     onFpsChanged: {
                         var roundedFps = Math.max(0, Math.round(vlc.fps))
                         root.cameraFpsChanged(root.cameraIndex, roundedFps)
-                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying && roundedFps > 0)
+                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying)
                     }
 
                     onVideoDrag: function(dx, dy) {
@@ -306,6 +307,40 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    RowLayout {
+                        visible: root.dptzEnabled
+                        spacing: 4
+
+                        Button {
+                            text: "-"
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 22
+                            onClicked: {
+                                var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                                var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                                root.dptzZoomAt(-0.2, fx, fy)
+                            }
+                        }
+
+                        Button {
+                            text: Number(root.dptzScale).toFixed(1) + "x"
+                            Layout.preferredWidth: 42
+                            Layout.preferredHeight: 22
+                            onClicked: root.dptzReset()
+                        }
+
+                        Button {
+                            text: "+"
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 22
+                            onClicked: {
+                                var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                                var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                                root.dptzZoomAt(0.2, fx, fy)
+                            }
+                        }
+                    }
+
                     Text {
                         id: timeLabel
                         text: Qt.formatTime(new Date(), "hh:mm:ss")
@@ -334,91 +369,33 @@ Item {
             onDoubleClicked: root.doubleClicked()
         }
 
-        Rectangle {
-            visible: root.dptzEnabled
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 10
-            anchors.bottomMargin: 40
-            color: theme ? theme.bgComponent : "#18181b"
-            border.color: theme ? theme.border : "#27272a"
-            border.width: 1
-            radius: 8
-            width: 132
-            height: 34
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 4
-                spacing: 4
-
-                Button {
-                    text: "-"
-                    Layout.preferredWidth: 34
-                    Layout.preferredHeight: 26
-                    onClicked: {
-                        var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
-                        var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
-                        root.dptzZoomAt(-0.2, fx, fy)
-                    }
-                }
-                Button {
-                    text: "1x"
-                    Layout.preferredWidth: 44
-                    Layout.preferredHeight: 26
-                    onClicked: root.dptzReset()
-                }
-                Button {
-                    text: "+"
-                    Layout.preferredWidth: 34
-                    Layout.preferredHeight: 26
-                    onClicked: {
-                        var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
-                        var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
-                        root.dptzZoomAt(0.2, fx, fy)
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            visible: root.dptzEnabled
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 10
-            anchors.bottomMargin: 78
-            color: theme ? theme.bgComponent : "#18181b"
-            border.color: theme ? theme.border : "#27272a"
-            border.width: 1
-            radius: 6
-            width: 64
-            height: 24
-
-            Text {
-                anchors.centerIn: parent
-                text: Number(root.dptzScale).toFixed(1) + "x"
-                color: theme ? theme.textPrimary : "white"
-                font.bold: true
-                font.pixelSize: 11
-            }
-        }
-    }
-
-    Component.onCompleted: {
-        if (root.source !== "") vlc.play()
     }
 
     onSourceChanged: {
-        console.log(root.source === "" ? "VideoPlayer source reset" : "VideoPlayer source changed: " + root.source)
         vlc.url = root.source
         root.dptzReset()
+        startPlayTimer.stop()
 
         if (root.source !== "") {
-            console.log("Source valid, calling play()")
-            vlc.play()
+            if (startDelayMs > 0) {
+                startPlayTimer.interval = startDelayMs
+                startPlayTimer.start()
+            } else {
+                vlc.play()
+            }
         } else {
-            console.log("Source empty, calling stop()")
             vlc.stop()
+        }
+    }
+
+    Timer {
+        id: startPlayTimer
+        interval: 0
+        repeat: false
+        onTriggered: {
+            if (root.source !== "") {
+                vlc.play()
+            }
         }
     }
 }
