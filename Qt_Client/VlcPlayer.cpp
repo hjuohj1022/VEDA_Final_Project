@@ -10,6 +10,16 @@
 #include <QLineF>
 #include <QByteArray>
 #include <cmath>
+#include <algorithm>
+
+namespace {
+libvlc_instance_t *g_sharedVlcInstance = nullptr;
+int g_sharedVlcUsers = 0;
+
+void vlcSilentLogCallback(void *, int, const libvlc_log_t *, const char *, va_list)
+{
+}
+}
 
 VlcPlayer::VlcPlayer(QQuickItem *parent)
     : QQuickItem(parent)
@@ -25,23 +35,60 @@ VlcPlayer::VlcPlayer(QQuickItem *parent)
     const char *const vlcArgs[] = {
         "--no-xlib",
         "--rtsp-tcp",
-        "--network-caching=3000",
         "--no-audio",
-        "--verbose=0"
+        "--aout=dummy",
+        "--quiet",
+        "--verbose=-1",
+        "--network-caching=450",
+        "--live-caching=450",
+        "--avcodec-threads=1",
+        "--drop-late-frames",
+        "--skip-frames"
     };
-    const int vlcArgc = static_cast<int>(sizeof(vlcArgs) / sizeof(vlcArgs[0]));
-    m_vlcInstance = libvlc_new(vlcArgc, vlcArgs);
+    if (!g_sharedVlcInstance) {
+        const int vlcArgc = static_cast<int>(sizeof(vlcArgs) / sizeof(vlcArgs[0]));
+        g_sharedVlcInstance = libvlc_new(vlcArgc, vlcArgs);
+        if (!g_sharedVlcInstance) {
+            qWarning() << "Failed to initialize shared libVLC instance";
+        } else {
+            // Drop libVLC internal logs entirely in app runtime.
+            libvlc_log_set(g_sharedVlcInstance, vlcSilentLogCallback, nullptr);
+        }
+    }
+    m_vlcInstance = g_sharedVlcInstance;
+    if (m_vlcInstance) {
+        g_sharedVlcUsers++;
+    }
 
     m_statsTimer = new QTimer(this);
     m_statsTimer->setInterval(1000);
     connect(m_statsTimer, &QTimer::timeout, this, &VlcPlayer::updateStats);
+
+    m_reconnectTimer = new QTimer(this);
+    m_reconnectTimer->setSingleShot(true);
+    connect(m_reconnectTimer, &QTimer::timeout, this, [this]() {
+        if (m_url.isEmpty()) {
+            return;
+        }
+        play();
+    });
+
+    m_offlineDelayTimer = new QTimer(this);
+    m_offlineDelayTimer->setSingleShot(true);
+    connect(m_offlineDelayTimer, &QTimer::timeout, this, [this]() {
+        setPlayingState(false);
+    });
 }
 
 VlcPlayer::~VlcPlayer()
 {
-    stop();
+    stopInternal(true);
     if (m_vlcInstance) {
-        libvlc_release(m_vlcInstance);
+        g_sharedVlcUsers = std::max(0, g_sharedVlcUsers - 1);
+        if (g_sharedVlcUsers == 0 && g_sharedVlcInstance) {
+            libvlc_release(g_sharedVlcInstance);
+            g_sharedVlcInstance = nullptr;
+        }
         m_vlcInstance = nullptr;
     }
 
@@ -64,7 +111,7 @@ void VlcPlayer::setUrl(const QString &url)
     emit urlChanged();
 
     if (m_isPlaying) {
-        stop();
+        stopInternal(false);
         play();
     }
 }
@@ -83,7 +130,8 @@ void VlcPlayer::attachWindow()
     }
 
     m_renderWindow->setParent(rootWindow);
-    m_renderWindow->setVisible(isVisible() && rootWindow->isVisible());
+    // Keep hidden until VLC actually has a vout surface.
+    m_renderWindow->setVisible(false);
     syncWindowPosition();
 }
 
@@ -97,19 +145,24 @@ void VlcPlayer::syncWindowPosition()
     const QRectF rect(pos.x(), pos.y(), width(), height());
 
     m_renderWindow->setGeometry(rect.toRect());
-    m_renderWindow->setVisible(isVisible() && width() > 0 && height() > 0);
+    const bool hasVout = m_mediaPlayer && (libvlc_media_player_has_vout(m_mediaPlayer) > 0);
+    m_renderWindow->setVisible(isVisible() && width() > 0 && height() > 0 && m_isPlaying && hasVout);
 }
 
 void VlcPlayer::play()
 {
-    qDebug() << "VlcPlayer::play called. URL:" << m_url << "Instance:" << m_vlcInstance;
+    const bool isReconnectAttempt = (m_reconnectAttempt > 0);
+    if (!isReconnectAttempt) {
+        cancelReconnect();
+    }
+    m_manualStopRequested = false;
 
     if (m_url.isEmpty() || !m_vlcInstance) {
         qWarning() << "Cannot play: URL empty or Instance null";
         return;
     }
 
-    stop();
+    stopInternal(false);
     attachWindow();
 
     if (!m_renderWindow) {
@@ -120,6 +173,12 @@ void VlcPlayer::play()
     m_mediaPlayer = libvlc_media_player_new(m_vlcInstance);
     libvlc_media_t *media = libvlc_media_new_location(m_vlcInstance, m_url.toUtf8().constData());
     libvlc_media_add_option(media, ":rtsp-tcp");
+    libvlc_media_add_option(media, ":network-caching=450");
+    libvlc_media_add_option(media, ":live-caching=450");
+    libvlc_media_add_option(media, ":avcodec-threads=1");
+    libvlc_media_add_option(media, ":drop-late-frames");
+    libvlc_media_add_option(media, ":skip-frames");
+    libvlc_media_add_option(media, ":no-audio");
     libvlc_media_player_set_media(m_mediaPlayer, media);
     libvlc_media_release(media);
 
@@ -137,15 +196,17 @@ void VlcPlayer::play()
     libvlc_event_attach(eventManager, libvlc_MediaPlayerEncounteredError, &VlcPlayer::handleVlcEvent, this);
     m_vlcEventsAttached = true;
 
-    libvlc_media_player_play(m_mediaPlayer);
+    const int playRc = libvlc_media_player_play(m_mediaPlayer);
+    if (playRc != 0) {
+        qWarning() << "libVLC failed to start playback for URL:" << m_url;
+        scheduleReconnect();
+    }
 
     m_statsTimer->start();
-    m_renderWindow->show();
 }
 
 void VlcPlayer::setVideoScale(double scale)
 {
-    qDebug() << "[DPTZ] setVideoScale request:" << scale;
     if (scale < 1.0) {
         scale = 1.0;
     }
@@ -166,7 +227,6 @@ void VlcPlayer::setVideoScale(double scale)
 
 void VlcPlayer::setDigitalZoom(double scale, double focusX, double focusY)
 {
-    qDebug() << "[DPTZ] setDigitalZoom request scale/focus:" << scale << focusX << focusY;
     if (scale < 1.0) {
         scale = 1.0;
     }
@@ -204,7 +264,6 @@ void VlcPlayer::applyDigitalZoom()
     updateVideoSize();
 
     if (m_videoScale <= 1.01) {
-        qDebug() << "[DPTZ] reset crop (scale<=1):" << m_videoScale;
         libvlc_video_set_crop_geometry(m_mediaPlayer, nullptr);
         return;
     }
@@ -213,7 +272,6 @@ void VlcPlayer::applyDigitalZoom()
     unsigned int videoH = 0;
     const int sizeRc = libvlc_video_get_size(m_mediaPlayer, 0, &videoW, &videoH);
     if (sizeRc != 0 || videoW == 0 || videoH == 0) {
-        qDebug() << "[DPTZ] libvlc_video_get_size not ready rc/w/h:" << sizeRc << videoW << videoH;
         return;
     }
 
@@ -242,14 +300,6 @@ void VlcPlayer::applyDigitalZoom()
                                     .arg(cropX)
                                     .arg(cropY)
                                     .toUtf8();
-    qDebug() << "[DPTZ] apply"
-             << "scale=" << m_videoScale
-             << "focus=" << m_zoomFocusX << m_zoomFocusY
-             << "src=" << srcW << "x" << srcH
-             << "crop=" << cropW << "x" << cropH
-             << "+" << cropX << "+" << cropY
-             << "rb=" << cropRight << cropBottom
-             << "geom=" << geometry;
     libvlc_video_set_crop_geometry(m_mediaPlayer, geometry.constData());
 }
 
@@ -278,6 +328,16 @@ void VlcPlayer::updateVideoSize()
 
 void VlcPlayer::stop()
 {
+    stopInternal(true);
+}
+
+void VlcPlayer::stopInternal(bool manualStop)
+{
+    if (manualStop) {
+        m_manualStopRequested = true;
+        cancelReconnect();
+    }
+
     if (m_mediaPlayer) {
         if (m_vlcEventsAttached) {
             libvlc_event_manager_t *eventManager = libvlc_media_player_event_manager(m_mediaPlayer);
@@ -313,15 +373,53 @@ void VlcPlayer::stop()
     m_lastStatsTimestampMs = 0;
     m_hasDisplayedBaseline = false;
 
-    if (m_isPlaying) {
-        m_isPlaying = false;
-        emit isPlayingChanged();
+    if (manualStop) {
+        setPlayingState(false);
+        emit stateChanged(0);
     }
-    emit stateChanged(0);
 
     if (m_statsTimer) {
         m_statsTimer->stop();
     }
+}
+
+void VlcPlayer::scheduleReconnect()
+{
+    if (m_manualStopRequested || m_url.isEmpty() || !m_reconnectTimer) {
+        return;
+    }
+    if (m_reconnectTimer->isActive()) {
+        return;
+    }
+
+    m_reconnectAttempt = std::min(m_reconnectAttempt + 1, 10);
+    const int delayMs = std::min(3000, 200 * m_reconnectAttempt);
+    m_reconnectTimer->start(delayMs);
+
+    // Keep LIVE for transient drops. Mark OFFLINE only after reconnect retries.
+    if (m_offlineDelayTimer && !m_offlineDelayTimer->isActive() && m_reconnectAttempt >= 2) {
+        m_offlineDelayTimer->start(5000);
+    }
+}
+
+void VlcPlayer::cancelReconnect()
+{
+    m_reconnectAttempt = 0;
+    if (m_reconnectTimer) {
+        m_reconnectTimer->stop();
+    }
+    if (m_offlineDelayTimer) {
+        m_offlineDelayTimer->stop();
+    }
+}
+
+void VlcPlayer::setPlayingState(bool playing)
+{
+    if (m_isPlaying == playing) {
+        return;
+    }
+    m_isPlaying = playing;
+    emit isPlayingChanged();
 }
 
 void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
@@ -334,24 +432,32 @@ void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
     switch (event->type) {
     case libvlc_MediaPlayerPlaying:
         QMetaObject::invokeMethod(self, [self]() {
-            if (!self->m_isPlaying) {
-                self->m_isPlaying = true;
-                emit self->isPlayingChanged();
-            }
+            self->cancelReconnect();
+            self->m_manualStopRequested = false;
+            self->setPlayingState(true);
+            // Refresh immediately so first frame appears without exposing an empty surface.
+            self->updateStats();
             emit self->stateChanged(3);
         }, Qt::QueuedConnection);
         break;
-    case libvlc_MediaPlayerPaused:
     case libvlc_MediaPlayerStopped:
     case libvlc_MediaPlayerEndReached:
     case libvlc_MediaPlayerEncounteredError:
         QMetaObject::invokeMethod(self, [self]() {
-            if (self->m_isPlaying) {
-                self->m_isPlaying = false;
-                emit self->isPlayingChanged();
+            if (self->m_manualStopRequested || self->m_url.isEmpty()) {
+                if (self->m_renderWindow) {
+                    self->m_renderWindow->hide();
+                }
+                self->setPlayingState(false);
+                emit self->stateChanged(0);
+                return;
             }
-            emit self->stateChanged(0);
+            // transient drop: try reconnect first
+            self->scheduleReconnect();
         }, Qt::QueuedConnection);
+        break;
+    case libvlc_MediaPlayerPaused:
+        // Paused can happen transiently during clock/PCR adjustments; don't force reconnect.
         break;
     default:
         break;
@@ -448,6 +554,12 @@ void VlcPlayer::updateStats()
         return;
     }
 
+    if (m_renderWindow) {
+        const bool hasVout = (libvlc_media_player_has_vout(m_mediaPlayer) > 0);
+        const bool shouldShow = hasVout && isVisible() && width() > 0 && height() > 0;
+        m_renderWindow->setVisible(shouldShow);
+    }
+
     updateVideoSize();
 
     libvlc_media_t *media = libvlc_media_player_get_media(m_mediaPlayer);
@@ -478,8 +590,9 @@ void VlcPlayer::updateStats()
         m_lastStatsTimestampMs = nowMs;
         m_hasDisplayedBaseline = true;
 
+        double nextBitrate = m_bitrate;
         if (stats.f_demux_bitrate > 0.1f) {
-            m_bitrate = stats.f_demux_bitrate * 1000.0;
+            nextBitrate = stats.f_demux_bitrate * 1000.0;
         }
 
         long long currentBytes = stats.i_demux_read_bytes;
@@ -499,7 +612,7 @@ void VlcPlayer::updateStats()
         if (m_lastReadBytes != 0) {
             const double kbps = (diff * 8.0) / 1000.0;
             if (kbps > 0.0) {
-                m_bitrate = kbps;
+                nextBitrate = kbps;
             }
         }
 
@@ -507,7 +620,10 @@ void VlcPlayer::updateStats()
             m_lastReadBytes = currentBytes;
         }
 
-        emit bitrateChanged();
+        if (std::fabs(m_bitrate - nextBitrate) > 1.0) {
+            m_bitrate = nextBitrate;
+            emit bitrateChanged();
+        }
     }
 
     libvlc_media_release(media);

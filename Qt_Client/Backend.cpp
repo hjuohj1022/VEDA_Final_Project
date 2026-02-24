@@ -14,6 +14,8 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QDir>
+#include <QPointer>
+#include <memory>
 #include <QSslConfiguration>
 #include <QSslCertificate>
 #include <QSslKey>
@@ -51,33 +53,57 @@ Backend::Backend(QObject *parent) : QObject(parent)
     m_storageTimer->start(5000);
     checkStorage();
     QTimer *simTimer = new QTimer(this);
-    connect(simTimer, &QTimer::timeout, this, [=](){
+    simTimer->setInterval(5000);
+    connect(simTimer, &QTimer::timeout, this, [this](){
+        static bool probeInFlight = false;
+        if (probeInFlight) {
+            return;
+        }
+        probeInFlight = true;
+
         QTcpSocket *socket = new QTcpSocket(this);
         QElapsedTimer *timer = new QElapsedTimer();
         timer->start();
-        
+
         QString ip = rtspIp();
         int port = rtspPort().toInt();
-        if(port == 0) port = 8554;
-        
-        connect(socket, &QTcpSocket::connected, this, [=](){
-            int elapsed = timer->elapsed();
+        if (port == 0) port = 8554;
+
+        auto finished = std::make_shared<bool>(false);
+        auto finishProbe = [socket, timer, finished]() {
+            if (*finished) {
+                return;
+            }
+            *finished = true;
+            socket->deleteLater();
+            delete timer;
+            probeInFlight = false;
+        };
+
+        connect(socket, &QTcpSocket::connected, this, [this, socket, timer, finishProbe]() {
+            const int elapsed = timer->elapsed();
             setLatency(elapsed);
             socket->disconnectFromHost();
-            socket->deleteLater();
-            delete timer;
+            finishProbe();
         });
-        
-        connect(socket, &QTcpSocket::errorOccurred, this, [=](QAbstractSocket::SocketError socketError){
+
+        connect(socket, &QTcpSocket::errorOccurred, this, [this, finishProbe](QAbstractSocket::SocketError socketError) {
             Q_UNUSED(socketError);
             setLatency(999);
-            socket->deleteLater();
-            delete timer;
+            finishProbe();
         });
-        
+
+        QPointer<QTcpSocket> socketGuard(socket);
+        QTimer::singleShot(1200, this, [socketGuard, finishProbe]() {
+            if (socketGuard && socketGuard->state() == QAbstractSocket::ConnectingState) {
+                socketGuard->abort();
+                finishProbe();
+            }
+        });
+
         socket->connectToHost(ip, port);
     });
-    simTimer->start(2000);
+    simTimer->start();
 }
 
 Backend::~Backend() {}
@@ -374,6 +400,54 @@ void Backend::setRtspPort(const QString &port) {
     settings.setValue("network/rtsp_port", m_rtspPort);
     m_useCustomRtspConfig = true;
     emit rtspPortChanged();
+}
+
+QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
+    if (cameraIndex < 0) {
+        return QString();
+    }
+
+    const QString defaultMainTemplate = "/{index}/onvif/profile{profile}/media.smp";
+    const QString defaultSubTemplate = "/{index}/onvif/profile{profile}/media.smp";
+    const QString mainTemplate = m_env.value("RTSP_MAIN_PATH_TEMPLATE", defaultMainTemplate).trimmed().isEmpty()
+            ? defaultMainTemplate
+            : m_env.value("RTSP_MAIN_PATH_TEMPLATE", defaultMainTemplate).trimmed();
+    QString pathTemplate = mainTemplate;
+
+    if (useSubStream) {
+        const QString subTemplate = m_env.value("RTSP_SUB_PATH_TEMPLATE").trimmed();
+        if (!subTemplate.isEmpty()) {
+            pathTemplate = subTemplate;
+        } else {
+            pathTemplate = defaultSubTemplate;
+        }
+    }
+
+    const QString mainProfile = m_env.value("RTSP_MAIN_PROFILE", "1").trimmed();
+    const QString subProfile = m_env.value("RTSP_SUB_PROFILE", "2").trimmed();
+    const QString selectedProfile = useSubStream
+            ? (subProfile.isEmpty() ? QString("2") : subProfile)
+            : (mainProfile.isEmpty() ? QString("1") : mainProfile);
+
+    QString path = pathTemplate;
+    path.replace("{index}", QString::number(cameraIndex));
+    path.replace("{profile}", selectedProfile);
+    if (!path.startsWith('/')) {
+        path.prepend('/');
+    }
+
+    const QString user = m_env.value("RTSP_USERNAME").trimmed();
+    const QString pass = m_env.value("RTSP_PASSWORD").trimmed();
+    QString authPrefix;
+    if (!user.isEmpty()) {
+        authPrefix = user;
+        if (!pass.isEmpty()) {
+            authPrefix += ":" + pass;
+        }
+        authPrefix += "@";
+    }
+
+    return QString("rtsp://%1%2:%3%4").arg(authPrefix, m_rtspIp, m_rtspPort, path);
 }
 
 void Backend::setActiveCameras(int count) {

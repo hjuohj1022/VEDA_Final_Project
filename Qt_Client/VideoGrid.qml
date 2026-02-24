@@ -64,9 +64,12 @@ Item {
                 dptzEnabled: root.maximizedIndex === index
                 tileIndex: index
                 cameraIndex: index
+                startDelayMs: 0
                 locationName: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"][index]
 
-                source: root.isActive ? "rtsp://" + backend.rtspIp + ":" + backend.rtspPort + "/" + index : ""
+                source: (root.isActive && (root.maximizedIndex === -1 || root.maximizedIndex === index))
+                        ? backend.buildRtspUrl(index, root.maximizedIndex === -1)
+                        : ""
 
                 onCameraStateChanged: function(cameraIndex, isLive) {
                     if (cameraIndex < 0 || cameraIndex >= root.cameraStates.length) {
