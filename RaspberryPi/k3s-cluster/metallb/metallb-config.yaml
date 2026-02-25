@@ -5,10 +5,13 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-  - 192.168.55.200-192.168.55.210  # <- 이 범위의 IP를 서버용으로 씁니다
+  - 192.168.55.200-192.168.55.210
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
   name: example
   namespace: metallb-system
+spec:
+  ipAddressPools:
+  - first-pool

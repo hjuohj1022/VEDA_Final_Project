@@ -79,7 +79,15 @@ int main()
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
 
-        std::cout << "[Login Attempt] ID: " << id << std::endl;
+        // mTLS를 통해 Nginx가 전달한 기기 정보 확인
+        std::string device_id = req.get_header_value("X-Device-ID");
+        std::string device_verify = req.get_header_value("X-Device-Verify");
+
+        if (!device_id.empty() && device_verify == "SUCCESS") {
+            std::cout << "[mTLS Verified Device] " << device_id << std::endl;
+        } else {
+            std::cout << "[Public Client] ID: " << id << std::endl;
+        }
 
         // DB 확인 함수 호출
         if (checkUserFromDB(id, pw)) {
@@ -267,10 +275,42 @@ int main()
         unsigned long long used = total - available;
         result["total_bytes"] = total;
         result["used_bytes"] = used;
-        result["available_bytes"] = available;
+                result["available_bytes"] = available;
+                
+                return crow::response(result);
+            });
         
-        return crow::response(result);
-    });
-
-    app.port(8080).multithreaded().run();
-}
+            // ==========================================
+            // 시스템 헬스 체크 및 연결 정보 조회 (테스트용)
+            // ==========================================
+            CROW_ROUTE(app, "/health")
+            ([](const crow::request& req){
+                crow::json::wvalue result;
+                
+                // 1. Crow Server Status
+                result["crow_server"]["status"] = "OK";
+                result["crow_server"]["message"] = "Crow server is receiving requests successfully.";
+        
+                // 2. Nginx mTLS Status
+                std::string device_id = req.get_header_value("X-Device-ID");
+                std::string device_verify = req.get_header_value("X-Device-Verify");
+                
+                if (device_verify == "SUCCESS") {
+                    result["nginx_mtls"]["status"] = "VERIFIED";
+                    result["nginx_mtls"]["device_id"] = device_id;
+                } else {
+                    result["nginx_mtls"]["status"] = "UNVERIFIED/NOT_PRESENT";
+                    result["nginx_mtls"]["message"] = "Client certificate was not verified by Nginx.";
+                }
+        
+                // 3. 안내 정보 (클라이언트 테스트용 주소 가이드)
+                result["services_info"]["mqtt"] = "Port 8883 (MQTTS) is exposed via Nginx Gateway.";
+                result["services_info"]["mediamtx_rtsp"] = "Port 8554 (RTSP) / 8555 (RTSPS) are available.";
+                result["services_info"]["mediamtx_hls"] = "/hls/ path is available on port 443.";
+        
+                return crow::response(result);
+            });
+        
+            app.port(8080).multithreaded().run();
+        }
+        

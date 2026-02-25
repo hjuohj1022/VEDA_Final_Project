@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-gateway
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-gateway
+  template:
+    metadata:
+      labels:
+        app: nginx-gateway
+    spec:
+      containers:
+      - name: nginx
+        image: hjuohj/nginx-gateway:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        - containerPort: 443
+        - containerPort: 8554
+        - containerPort: 8883
+        volumeMounts:
+        - name: certs
+          mountPath: /etc/nginx/certs
+          readOnly: true
+      volumes:
+      - name: certs
+        projected:
+          sources:
+          - secret:
+              name: nginx-certs
+              items:
+                - key: server.crt
+                  path: server.crt
+                - key: server.key
+                  path: server.key
+          - secret:
+              name: mtls-ca
+              items:
+                - key: rootCA.crt
+                  path: rootCA.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: default
+spec:
+  # MetalLB를 통해 외부 IP(예: 192.168.55.200) 할당
+  type: LoadBalancer
+  selector:
+    app: nginx-gateway
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 443
+    - name: rtsp
+      protocol: TCP
+      port: 8554
+      targetPort: 8554
+    - name: rtsps
+      protocol: TCP
+      port: 8555
+      targetPort: 8555
+    - name: mqtt-ssl
+      protocol: TCP
+      port: 8883
+      targetPort: 8883
