@@ -18,22 +18,58 @@ pipeline {
                 git branch: 'develop', url: GIT_URL
             }
         }
+
+        // 🔐 0. 인증서 및 공통 설정 준비 (하나의 압축 번들로 효율적 관리)
+        stage('인증서 준비') {
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    changeset 'Qt_Client/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    // 디렉터리 생성 및 클린업
+                    sh "mkdir -p RaspberryPi/k3s-cluster/security/certs"
+                    
+                    dir('RaspberryPi/k3s-cluster/security/certs') {
+                        echo "🔐 Jenkins Credentials에서 인증서 번들을 가져와 압축을 푸는 중..."
+                        withCredentials([file(credentialsId: 'all-certs-bundle', variable: 'CERTS_BUNDLE')]) {
+                            // tar.gz 압축 해제 (파일들이 바로 certs 폴더 안에 풀리도록 함)
+                            sh "tar -xzvf '$CERTS_BUNDLE'"
+                        }
+                    }
+                    
+                    // 다른 스테이지(Windows 등)에서 사용할 수 있도록 인증서 보관
+                    stash name: 'certs-stash', includes: 'RaspberryPi/k3s-cluster/security/certs/**'
+                    
+                    // 클라이언트 배포용으로 산출물 보관
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/**', fingerprint: true
+                }
+            }
+        }
         
         // 🦅 1. Crow Server (폴더명: crow_server)
         stage('Crow Server 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/crow_server/**' } // 폴더명 주의!
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
-                    dir('RaspberryPi/k3s-cluster/crow_server') { // 이 폴더로 들어가서 빌드해라
+                    dir('RaspberryPi/k3s-cluster/crow_server') { 
                         echo "🦅 Crow Server 빌드 시작..."
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/crow-server:latest --push ."
                         }
                     }
-                    // 배포 명령 (yaml 파일도 각 폴더 안에 있다고 가정하면 경로 수정 필요)
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일이 crow_server 폴더 안에 있다면 경로를 명시
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/crow-server"
                     }
@@ -43,7 +79,13 @@ pipeline {
 
         // 📡 2. Mosquitto (폴더명: mosquitto)
         stage('MQTT 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mosquitto/**' }
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/mosquitto/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mosquitto') {
@@ -53,45 +95,89 @@ pipeline {
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:latest --push ."
                         }
                     }
+
+                    // 1. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일 경로 주의: mosquitto/mqtt.yaml
+                        echo "🔑 MQTT K8s Secret 업데이트 중 (통합 인증서 사용)..."
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mqtt-certs \
+                                --from-file=ca.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                        """
+                        
+                        // 3. 배포 적용
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
+
+                    // 4. 클라이언트용 인증서 보관 (통합된 위치에서 가져옴)
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }
 
         // 🎥 3. MediaMTX (폴더명: mediamtx)
         stage('MediaMTX 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mediamtx/**' }
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/mediamtx/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
-                    // 1. YAML 파일 복사 (원본 보존용)
+                    // RTSP Read 인증 (Username with password) Credentials ID
+                    def MTX_CRED = 'mediamtx-rtsp-read'  // <- 너가 만든 Jenkins credential ID로 변경
+
+                    // 1) 카메라 접속 정보 치환에 필요한 값 가져오기
                     withCredentials([
-                    string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
-                    string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
-                    string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW')
-                ]) {
-                    script {
-                        // 2. sed 명령어로 YAML 파일 내용 바꿔치기 (덮어쓰기)
-                        // 주의: 구분자로 / 대신 | 를 사용 (URL이나 특수문자 충돌 방지)
-                        sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                    }
-                }
-                    dir('RaspberryPi/k3s-cluster/mediamtx') {
-                        echo "🎥 MediaMTX 빌드 시작..."
-                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:latest --push ."
+                        string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
+                        string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
+                        string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW'),
+                        usernamePassword(credentialsId: MTX_CRED, usernameVariable: 'MTX_READ_USER', passwordVariable: 'MTX_READ_PASS')
+                    ]) {
+                        // 2) 원본 mediamtx.yaml을 직접 sed -i로 바꾸지 말고, 임시 파일로 만들어 치환
+                        sh '''
+                            set -e
+
+                            SRC=RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
+                            OUT=/tmp/mediamtx.rendered.yaml
+
+                            # 원본 -> 임시 파일 복사
+                            cp "$SRC" "$OUT"
+
+                            # 카메라 정보 치환 (템플릿에 __CAMERA_*__ 가 존재해야 함)
+                            sed -i "s|__CAMERA_IP__|${REAL_IP}|g" "$OUT"
+                            sed -i "s|__CAMERA_USER__|${REAL_USER}|g" "$OUT"
+                            sed -i "s|__CAMERA_PASSWORD__|${REAL_PW}|g" "$OUT"
+
+                            # RTSP Read 인증 치환 (템플릿에 ${MTX_READ_USER}, ${MTX_READ_PASS}가 있어야 함)
+                            sed -i "s|\\${MTX_READ_USER}|${MTX_READ_USER}|g" "$OUT"
+                            sed -i "s|\\${MTX_READ_PASS}|${MTX_READ_PASS}|g" "$OUT"
+
+                            echo "[Rendered mediamtx.yaml head]"
+                            sed -n '1,40p' "$OUT"
+                        '''
+
+                        // 3) 이미지 빌드/푸시 (기존 유지)
+                        dir('RaspberryPi/k3s-cluster/mediamtx') {
+                            echo "🎥 MediaMTX 빌드 시작..."
+                            withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                                sh "echo $PASS | docker login -u $USER --password-stdin"
+                                sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:latest --push ."
+                            }
                         }
-                    }
-                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        // yaml 파일 경로 주의: mediamtx/mediamtx.yaml
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server"
+
+                        // 4) 렌더링된 yaml로 apply + rollout restart
+                        withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                            sh '''
+                                set -e
+                                kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/mediamtx.rendered.yaml
+                                kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server
+                            '''
+                        }
                     }
                 }
             }
@@ -99,7 +185,12 @@ pipeline {
 
         // 🐬 4. MariaDB (폴더명: mariadb)
         stage('MariaDB 배포') {
-            when { changeset 'RaspberryPi/k3s-cluster/mariadb/**' }
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/mariadb/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mariadb') {
@@ -117,68 +208,140 @@ pipeline {
             }
         }
 
-        stage('Qt Client 배포(Windows MinGW)') {
-            agent { label 'windows-qt' } 
-            
-            // Qt_Client 폴더 내 변경이 있거나 수동 실행 시 작동
-            when { changeset 'Qt_Client/**' }
-
-            environment {
-                // 1. 본인의 실제 설치 경로에 맞게 절대 경로 확인 필수!
-                QT_ROOT = "C:\\Qt\\6.10.0\\mingw_64"
-                // MinGW 컴파일러 도구 경로
-                MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
-                
-                // qmake, mingw32-make, windeployqt를 모두 사용하기 위한 PATH
-                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};C:\\Windows\\System32;${PATH}"
-                
-                BUILD_DIR = "build_mingw"
-                OUTPUT_DIR = "deploy_output"
+        // 🛡️ 5. Nginx Gateway (폴더명: nginx)
+        stage('Nginx Gateway 배포') {
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/nginx/**'
+                    changeset 'RaspberryPi/k3s-cluster/security/**'
+                    triggeredBy 'UserIdCause'
+                }
             }
-
             steps {
-                // 윈도우 에이전트에서 코드 체크아웃
-                git branch: 'develop', url: GIT_URL
+                script {
+                    unstash 'certs-stash' // 보관된 인증서 가져오기
 
-                dir('Qt_Client') {
-                    echo "🔨 MinGW 빌드 및 패키징 시작..."
-                    
-                    // 1. 기존 빌드 정리
-                    bat """
-                        if exist ${BUILD_DIR} rmdir /s /q ${BUILD_DIR}
-                        if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}
-                        mkdir ${BUILD_DIR}
-                        mkdir ${OUTPUT_DIR}
-                    """
-
-                    // 2. QMake & 빌드 (nmake 대신 mingw32-make 사용)
-                    dir(BUILD_DIR) {
-                        // 만약 .pro 파일이 아니라 CMake를 쓴다면 "cmake .."으로 바꿔야 합니다.
-                        // 여기서는 .pro 파일 기준입니다. 파일명을 실제 이름으로 수정하세요.
-                        bat "qmake ..\\Team3VideoReceiver.pro -config release" 
-                        bat "mingw32-make -j4"
+                    // 2. K8s Secret 업데이트 (이미지에 넣지 않고 클러스터에 직접 등록)
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        echo "🔑 K8s Secret 업데이트 중..."
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic nginx-certs \
+                                --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
+                                --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                            
+                            kubectl --kubeconfig=$KUBECONFIG create secret generic mtls-ca \
+                                --from-file=rootCA.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
+                                --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                        """
                     }
 
-                    // 3. 배포 (windeployqt)
-                    script {
-                        // MinGW는 보통 빌드 폴더 바로 아래에 exe가 생성됩니다. (release 폴더 안이 아님)
-                        // 파일명을 실제 생성된 이름으로 수정하세요.
-                        bat "copy ${BUILD_DIR}\\Team3VideoReceiver.exe ${OUTPUT_DIR}\\"
-                        
-                        dir(OUTPUT_DIR) {
-                            echo "📦 DLL 의존성 수집 중..."
-                            bat "windeployqt --release Team3VideoReceiver.exe"
+                    // 3. Nginx 이미지 빌드 및 푸시 (인증서 없이 설정파일만 포함)
+                    dir('RaspberryPi/k3s-cluster/nginx') {
+                        echo "🛡️ Nginx Gateway 빌드 시작..."
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
                         }
                     }
 
-                    // 4. 압축 (Powershell)
-                    dir(OUTPUT_DIR) {
-                        powershell "Compress-Archive -Path * -DestinationPath ..\\QtClient_Windows_MinGW.zip -Force"
+                    // 4. K8s 배포 적용
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
+                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
+                    }
+                }
+            }
+        }
+
+        // 🖥️ 6. Qt Client (Windows)
+        stage('Qt Client (Windows CMake)') {
+            agent { label 'windows-qt' } 
+            
+            // Qt 폴더 내 변경사항이 있을 때
+            when { 
+                anyOf {
+                    changeset 'Qt_Client/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+
+            environment {
+                QT_ROOT = "C:\\Qt\\6.10.2\\mingw_64"
+                MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
+                CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
+                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
+                
+                BUILD_DIR = "build_cmake"
+                OUTPUT_DIR = "deploy_output_new"
+            }
+
+            steps {
+                echo "🔨 CMake 기반 MinGW 빌드 시작..."
+                git branch: 'develop', url: GIT_URL
+
+                dir('Qt_Client') {
+                    script {
+                        bat "taskkill /F /IM Team3VideoReceiver.exe /T || exit 0"
+                        bat "taskkill /F /IM ld.exe /T || exit 0"
+                        bat "taskkill /F /IM g++.exe /T || exit 0"
+                        bat "taskkill /F /IM cmake.exe /T || exit 0"
+                        
+                        sleep 3
+                        
+                        // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
+                        bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
+                        bat "mkdir ${OUTPUT_DIR}"
+                        bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
+
+                        // 2. 필수 의존성 파일(VLC, .env, 인증서)을 '미리' 배포 폴더로 복사
+                        echo "🚚 라이브러리 및 설정 파일 복사..."
+                        
+                        unstash 'certs-stash' // 보관된 인증서 가져오기
+                        bat "copy RaspberryPi\\k3s-cluster\\security\\certs\\rootCA.crt ${OUTPUT_DIR}\\"
+                        
+                        bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
+                        bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
+                        bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
+
+                        // Jenkins Secret File(.env) 처리
+                        withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
+                             // 실행 시 필요하므로 배포 폴더에 바로 복사
+                            bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
+                        }
+
+                        // 3. CMake 설정 및 빌드 (결과물이 deploy_output_new로 직행)
+                        dir(BUILD_DIR) {
+                            bat """
+                                cmake -G "MinGW Makefiles" ^
+                                -DCMAKE_BUILD_TYPE=Release ^
+                                -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
+                                -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
+                                -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
+                                -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
+                                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="../${OUTPUT_DIR}" ^
+                                ..
+                            """
+                            
+                            // 병렬 빌드
+                            bat "cmake --build . --parallel 4"
+                        }
+                        
+                        // 4. 패키징 (windeployqt)
+                        // 이미 EXE와 DLL이 OUTPUT_DIR에 다 모여 있으므로 바로 실행
+                        dir(OUTPUT_DIR) {
+                            echo "📦 Qt 의존성 주입 (windeployqt)..."
+                            bat "windeployqt --release --no-translations --verbose 2 --qmldir .. Team3VideoReceiver.exe"
+                        }
+
+                        // 5. 압축 (deploy_output_new 전체를 압축)
+                        echo "🗜️ 압축 중..."
+                        powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_VMS.zip -Force"
                     }
                 }
                 
-                // 5. 결과물 저장
-                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_MinGW.zip', fingerprint: true
+                // 6. Jenkins에 산출물 보관
+                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_VMS.zip', fingerprint: true
             }
         }
     }

@@ -158,4 +158,11 @@ $RECYCLE.BIN/
 # C++ 빌드 폴더 (보통 build 폴더에 빌드하므로 통째로 무시)
 build/
 bin/
-*.md
+
+
+# .env 환경변수 파일 (보안상 민감한 정보가 포함될 수 있으므로 무시)
+.env
+*.crt
+*.key
+*.csr
+*.srl

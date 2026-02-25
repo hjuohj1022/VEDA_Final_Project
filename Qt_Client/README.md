@@ -1,4 +1,4 @@
-# Qt CCTV Client (Live Streaming & Recording Manager)
+﻿# Qt CCTV Client (Live Streaming & Recording Manager)
 
 이 프로젝트는 **Qt 6 (C++)**와 **libVLC**를 활용하여 개발된 CCTV 관제 클라이언트 프로그램입니다.
 현대적인 **Dark Theme** UI를 적용하였으며, 실시간 RTSP 스트리밍(4채널 멀티뷰)과 REST API를 통한 녹화 영상 관리(재생, 목록 조회, 삭제) 기능을 제공합니다.
@@ -6,7 +6,7 @@
 ## Key Features (주요 기능)
 
 ### 1. Modern UI & UX
-- **Vision VMS 디자인 포팅:** React 기반의 모던한 CCTV 관제 UI를 Qt Widgets으로 완벽하게 이식.
+- **Vision VMS 디자인 포팅:** React 기반의 모던한 CCTV 관제 UI를 **Qt Quick (QML)**으로 완벽하게 이식.
 - **Dark/Light 테마 전환:** 헤더의 토글 버튼으로 실시간 테마 변경 지원 (Windows 타이틀바 색상 연동).
 - **반응형 레이아웃:** 사이드바, 헤더, 메인 콘텐츠 영역이 유기적으로 동작.
 
@@ -20,11 +20,15 @@
 
 ### 3. Recordings (녹화 영상 관리)
 - **사용자 인증:** MariaDB 연동 로그인 시스템 (ID/PW).
-- **영상 목록 조회:** 서버(`/app/recordings`)에 저장된 녹화 파일 리스트 및 용량 확인.
+- **영상 목록 조회:** 서버(`/app/recordings`)에 저장된 녹화 파일 리스트 및 **용량(File Size)** 확인.
 - **영상 재생 (Download & Play):** 
-  - **끊김 없는 재생:** 녹화 파일을 임시 폴더로 다운로드 후 재생하여 버퍼링 문제 해결.
+  - **끊김 없는 재생:** 녹화 파일을 임시 폴더로 다운로드 후 재생 (더블 클릭).
+  - **다운로드 상태 표시:** 실시간 다운로드 진행률 및 **예상 소요 시간(ETA)** 표시.
   - **정확한 탐색:** 전체 재생 시간 인식 및 즉각적인 탐색(Seek) 지원.
-- **영상 삭제:** 권한이 있는 사용자의 녹화 파일 삭제 기능.
+- **영상 관리 (Context Menu):** 
+  - **이름 변경 (Rename):** 우클릭 메뉴를 통해 파일 이름 변경.
+  - **내보내기 (Export):** 우클릭 메뉴를 통해 원하는 경로에 파일 저장.
+  - **삭제 (Delete):** 권한이 있는 사용자의 녹화 파일 삭제 기능.
 
 ### 4. System Integration
 - **Server Storage Monitoring:** Crow 서버 API(`/system/storage`)를 통해 원격 서버의 디스크 사용량 실시간 표시.
@@ -34,7 +38,7 @@
 ## Tech Stack (기술 스택)
 
 - **Language:** C++17
-- **Framework:** Qt 6 (Qt Multimedia, Qt Network, Qt Widgets)
+- **Framework:** Qt 6 (Qt Multimedia, Qt Network, **Qt Quick/QML**)
 - **Video Engine:** libVLC (VLC SDK)
 - **Backend Server:** Crow (C++ Microframework)
 - **Database:** MariaDB (Authentication)
@@ -92,7 +96,7 @@ RTSP_PORT=8554
 ### RTSP URL Rule (주소 규칙)
 MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소를 생성합니다.
 `rtsp://{RTSP_IP}:{RTSP_PORT}/{Channel_Number}`
-(예: `rtsp://192.168.55.xxx:8554/0`)
+(예: `rtsp://192.168.xxx.xxx:xxxx/0`)
 
 ---
 
@@ -112,3 +116,5 @@ MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소
 ## License
 
 This project is for educational purposes.
+
+---

@@ -7,55 +7,85 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
-    
+  
+    # 공통 인증 설정 (모든 path에 적용)
+    # Jenkins에서 ${MTX_READ_USER}, ${MTX_READ_PASS 실제 값으로 치환됨}
+    pathDefaults:
+      readUser: ${MTX_READ_USER}
+      readPass: ${MTX_READ_PASS}
+
     paths:
-      # [채널 0]
-      "0":
+      # [채널 0 - Main]
+      "0/main":
         source: publisher
         # $CAMERA_USER, $CAMERA_PASSWORD, $CAMERA_IP 변수 사용으로 하드코딩 방지
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/0/main
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
-        recordFormat: fmp4        
+        recordFormat: fmp4
         # 5분마다 파일 생성
         recordSegmentDuration: 5m
-        # [수정됨] 용량 기반 삭제를 위해 시간 기반 삭제는 비활성화 (Disk Cleaner 컨테이너가 담당)
-        # recordDeleteAfter: 10m
 
-      # [채널 1]
-      "1":
+      # [채널 0 - Sub]
+      "0/sub":
         source: publisher
-        # 
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        # 저해상도 서브 스트림 생성 (그리드용)
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/MOBILE/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/0/sub
+        runOnInitRestart: yes
+        # 서브 스트림은 녹화 비활성화
+        record: no
+
+      # [채널 1 - Main]
+      "1/main":
+        source: publisher
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/1/main
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
 
-      # [채널 2]
-      "2":
+      # [채널 1 - Sub]
+      "1/sub":
         source: publisher
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/1/MOBILE/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/1/sub
+        runOnInitRestart: yes
+        record: no
+
+      # [채널 2 - Main]
+      "2/main":
+        source: publisher
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/2/main
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
 
-      # [채널 3]
-      "3":
+      # [채널 2 - Sub]
+      "2/sub":
         source: publisher
-        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/2/MOBILE/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/2/sub
+        runOnInitRestart: yes
+        record: no
+
+      # [채널 3 - Main]
+      "3/main":
+        source: publisher
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/H.264/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/3/main
         runOnInitRestart: yes
         record: yes
         recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S
         recordFormat: fmp4
         recordSegmentDuration: 5m
-        # recordDeleteAfter: 10m
+
+      # [채널 3 - Sub]
+      "3/sub":
+        source: publisher
+        runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/3/MOBILE/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/3/sub
+        runOnInitRestart: yes
+        record: no
 
 ---
 # -----------------------------------------------------------
@@ -64,25 +94,25 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mediamtx-server 
+  name: mediamtx-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mediamtx      
+      app: mediamtx
   template:
     metadata:
       labels:
-        app: mediamtx    
+        app: mediamtx
     spec:
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
-      
+
       containers:
-      # [컨테이너 1] MediaMTX 서버
-      - name: mediamtx          
-        image: bluenviron/mediamtx:latest-ffmpeg          
-        
+      # MediaMTX 서버
+      - name: mediamtx
+        image: bluenviron/mediamtx:latest-ffmpeg
+
         # 카메라 접속 정보 암호화 (젠킨스에서 실제 값으로 치환됨)
         env:
         - name: CAMERA_IP
@@ -91,7 +121,7 @@ spec:
           value: "__CAMERA_USER__"
         - name: CAMERA_PASSWORD
           value: "__CAMERA_PASSWORD__"
-        
+
         ports:
         - containerPort: 8554
         - containerPort: 1935
@@ -101,48 +131,20 @@ spec:
           protocol: UDP
         - containerPort: 8001
           protocol: UDP
-        
+
         volumeMounts:
         - name: config-volume
           mountPath: /mediamtx.yml
           subPath: mediamtx.yml
-          
+
         - name: recordings
           mountPath: /recordings
 
-      # [컨테이너 2] Disk Cleaner (70% 초과 시 강력 삭제)
-      - name: disk-cleaner
-        image: alpine:latest
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "Disk Cleaner started with AGGRESSIVE mode..."
-            # 10초마다 체크
-            while true; do
-              
-              # 현재 /recordings 경로의 사용량(%) 추출
-              USAGE=$(df -P /recordings | awk 'NR==2 {print $5}' | tr -d '%')
-              
-              # 70%로 기준 (컨테이너 Eviction 방지용 안전마진)
-              if [ "$USAGE" -gt 70 ]; then
-                echo "Warning: Disk usage is ${USAGE}%. Cleaning up..."
-                
-                # 한 번에 30개씩 삭제
-                find /recordings -type f -name "*.mp4" -printf '%T+ %p\n' | sort | head -n 30 | awk '{print $2}' | xargs -r rm
-                
-              fi
-              
-              sleep 10
-            done
-        volumeMounts:
-        - name: recordings
-          mountPath: /recordings
-          
       volumes:
       - name: config-volume
         configMap:
           name: mediamtx-config
-          
+
       - name: recordings
         # PVC 대신 호스트 경로 직접 사용
         hostPath:
@@ -161,23 +163,23 @@ spec:
   type: LoadBalancer
   externalTrafficPolicy: Cluster
   selector:
-    app: mediamtx  
+    app: mediamtx
   ports:
     - name: rtsp
       protocol: TCP
       port: 8554
       targetPort: 8554
-      
+
     - name: rtmp
       protocol: TCP
       port: 1935
       targetPort: 1935
-      
+
     - name: hls
       protocol: TCP
       port: 8888
       targetPort: 8888
-      
+
     - name: webrtc
       protocol: TCP
       port: 8889
