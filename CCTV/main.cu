@@ -68,7 +68,17 @@ class Logger : public ILogger {
     }
 } gLogger;
 
-int main() {
+int main(int argc, char** argv) {
+    bool headless = false;
+    bool forceGui = false;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--headless" || arg == "-hl") headless = true;
+        if (arg == "--gui") forceGui = true;
+    }
+    if (forceGui) headless = false;
+    std::cout << "[APP] Mode: " << (headless ? "headless" : "gui") << std::endl;
+
     // --------------------------------------
     // 1. TensorRT 초기화
     // --------------------------------------
@@ -177,6 +187,9 @@ int main() {
     context->setTensorAddress(inputName, d_input);
     context->setTensorAddress(outputName, d_output);
 
+    cudaStream_t trtStream;
+    checkCudaErrors(cudaStreamCreate(&trtStream));
+
     // --------------------------------------
     // 3. 스트리밍 시작
     // --------------------------------------
@@ -190,6 +203,7 @@ int main() {
     
     Mat frame, resized;
     std::vector<float> outputBuffer(outputElements);
+    uint64_t frameIdx = 0;
 
     std::cout << "Stream Started. Press 'q' to exit." << std::endl;
     
@@ -205,48 +219,65 @@ int main() {
             continue;
         }
         if (!cap.retrieve(frame)) continue;
+        frameIdx++;
+        if (frame.empty()) {
+            std::cerr << "[WARN] Empty frame at idx=" << frameIdx << std::endl;
+            continue;
+        }
+        if (frame.channels() != 3) {
+            std::cerr << "[WARN] Unexpected channels=" << frame.channels()
+                      << " at idx=" << frameIdx << std::endl;
+            continue;
+        }
 
         // 1. CPU Resize (INTER_LINEAR)
         cv::resize(frame, resized, Size(INPUT_SIZE, INPUT_SIZE), 0, 0, INTER_LINEAR);
+        if (resized.empty() || resized.cols != INPUT_SIZE || resized.rows != INPUT_SIZE) {
+            std::cerr << "[WARN] Resize failed or size mismatch at idx=" << frameIdx << std::endl;
+            continue;
+        }
+        if (resized.type() != CV_8UC3) {
+            std::cerr << "[WARN] Unexpected resized type=" << resized.type()
+                      << " at idx=" << frameIdx << std::endl;
+            continue;
+        }
 
         // 2. Raw Image Copy (CPU -> GPU)
         if (!resized.isContinuous()) {
             resized = resized.clone();
         }
-        checkCudaErrors(cudaMemcpy(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyAsync(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice, trtStream));
 
         // 3. CUDA Preprocess Kernel 실행 (Normalize & HWC->CHW)
-        preprocess_kernel<<<grid, block>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
+        preprocess_kernel<<<grid, block, 0, trtStream>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
         auto err = cudaGetLastError();
         if (err != cudaSuccess) {
-            std::cerr << "CUDA kernel error: " << cudaGetErrorString(err) << std::endl;
-            break;
-        }
-        err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA kernel sync error: " << cudaGetErrorString(err) << std::endl;
+            std::cerr << "CUDA kernel error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
             break;
         }
 
         // 4. TensorRT 추론
-        if (!context->enqueueV3(0)) {
-            std::cerr << "enqueueV3 failed" << std::endl;
+        if (!context->enqueueV3(trtStream)) {
+            std::cerr << "enqueueV3 failed (frame=" << frameIdx << ")" << std::endl;
             break;
         }
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            std::cerr << "CUDA post-enqueue error: " << cudaGetErrorString(err) << std::endl;
-            break;
-        }
-        err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA enqueue sync error: " << cudaGetErrorString(err) << std::endl;
+            std::cerr << "CUDA post-enqueue error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
             break;
         }
 
         // 5. 결과 회수 (GPU -> CPU)
-        checkCudaErrors(cudaMemcpy(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost));
-        
+        checkCudaErrors(cudaMemcpyAsync(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost, trtStream));
+        err = cudaStreamSynchronize(trtStream);
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA stream sync error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            break;
+        }
+
         // 6. 시각화 (CPU)
         int outH = INPUT_SIZE;
         int outW = INPUT_SIZE;
@@ -261,6 +292,13 @@ int main() {
             outW = outputDims.d[1];
         }
 
+        if (static_cast<size_t>(outH) * static_cast<size_t>(outW) > outputElements) {
+            std::cerr << "[WARN] Output size mismatch outH*outW="
+                      << (static_cast<size_t>(outH) * static_cast<size_t>(outW))
+                      << " > outputElements=" << outputElements
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            continue;
+        }
         Mat depthMat(outH, outW, CV_32F, outputBuffer.data());
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
@@ -275,19 +313,22 @@ int main() {
         cv::resize(frame, showFrame, Size(640, 480));
         cv::resize(depthColor, showDepth, Size(640, 480));
         
-        Mat combined;
-        cv::hconcat(showFrame, showDepth, combined);
+        if (!headless) {
+            Mat combined;
+            cv::hconcat(showFrame, showDepth, combined);
 
-        auto currTime = std::chrono::high_resolution_clock::now();
-        double fps = 1.0 / std::chrono::duration<double>(currTime - prevTime).count();
-        prevTime = currTime;
+            auto currTime = std::chrono::high_resolution_clock::now();
+            double fps = 1.0 / std::chrono::duration<double>(currTime - prevTime).count();
+            prevTime = currTime;
 
-        cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
-        cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
+            cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+            cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
 
-        if (cv::waitKey(1) == 'q') break;
+            if (cv::waitKey(1) == 'q') break;
+        }
     }
 
+    cudaStreamDestroy(trtStream);
     cudaFree(d_input);
     cudaFree(d_output);
     cudaFree(d_raw_img);
