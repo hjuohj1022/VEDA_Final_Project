@@ -66,8 +66,13 @@ int main() {
     }
 
     _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
-    VideoCapture cap(RTSP_URL, CAP_FFMPEG);
+    const std::string& rtspUrl = GetSelectedRtspUrl();
+    VideoCapture cap(rtspUrl, CAP_FFMPEG);
     cap.set(CAP_PROP_BUFFERSIZE, 1);
+    if (!cap.isOpened()) {
+        std::cerr << "Error: Cannot open RTSP stream: " << rtspUrl << std::endl;
+        return -1;
+    }
 
     Mat frame, resized, floatImg;
     std::vector<float> inputBuffer(3 * INPUT_SIZE * INPUT_SIZE);
@@ -79,13 +84,21 @@ int main() {
 
     auto prevTime = std::chrono::high_resolution_clock::now();
 
+    int grabFailCount = 0;
+    const int grabFailLogEvery = 30;
     while (true) {
         if (!cap.grab()) {
+            grabFailCount++;
+            if (grabFailCount % grabFailLogEvery == 1) {
+                std::cerr << "[WARN] RTSP grab failed (" << grabFailCount
+                          << "x). url=" << rtspUrl << std::endl;
+            }
             std::cout << "[WARN] No Frame... wait..." << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
         if (!cap.retrieve(frame)) continue;
+        grabFailCount = 0;
 
         // --------------------------------------
         // 초고속 전처리 (벡터 연산)

@@ -3,12 +3,19 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <sstream>
 #include <chrono>
 #include <thread>
+#include <atomic>
 
 // TensorRT & CUDA
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
+
+// Windows networking
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 
 // OpenCV
 #include <opencv2/opencv.hpp>
@@ -68,15 +75,88 @@ class Logger : public ILogger {
     }
 } gLogger;
 
-int main() {
-    // --------------------------------------
-    // 1. TensorRT 초기화
-    // --------------------------------------
+struct Request {
+    int channel = -1;
+    bool headless = false;
+    bool headlessSet = false;
+    bool gui = false;
+    bool stop = false;
+};
+
+static std::vector<std::string> SplitTokens(const std::string& line) {
+    std::istringstream iss(line);
+    std::vector<std::string> tokens;
+    std::string tok;
+    while (iss >> tok) tokens.push_back(tok);
+    return tokens;
+}
+
+static bool ParseInt(const std::string& s, int& out) {
+    char* end = nullptr;
+    long val = std::strtol(s.c_str(), &end, 10);
+    if (end == s.c_str() || *end != '\0') return false;
+    out = static_cast<int>(val);
+    return true;
+}
+
+static Request ParseRequest(const std::string& line) {
+    Request req;
+    auto tokens = SplitTokens(line);
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const std::string& t = tokens[i];
+        if (t == "stop") {
+            req.stop = true;
+            continue;
+        }
+        if (t == "headless" || t == "headless=1" || t == "headless=true") {
+            req.headless = true;
+            req.headlessSet = true;
+            continue;
+        }
+        if (t == "headless=0" || t == "headless=false") {
+            req.headless = false;
+            req.headlessSet = true;
+            continue;
+        }
+        if (t == "gui" || t == "gui=1" || t == "gui=true") {
+            req.gui = true;
+            req.headlessSet = true;
+            req.headless = false;
+            continue;
+        }
+        if (t.rfind("channel=", 0) == 0) {
+            int ch = -1;
+            if (ParseInt(t.substr(8), ch)) req.channel = ch;
+            continue;
+        }
+        if (t == "channel" && i + 1 < tokens.size()) {
+            int ch = -1;
+            if (ParseInt(tokens[i + 1], ch)) req.channel = ch;
+            ++i;
+            continue;
+        }
+        int ch = -1;
+        if (ParseInt(t, ch)) {
+            req.channel = ch;
+            continue;
+        }
+    }
+    return req;
+}
+
+static void SendResponse(SOCKET client, const std::string& msg) {
+    send(client, msg.c_str(), static_cast<int>(msg.size()), 0);
+}
+
+static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
+    std::cout << "[APP] Mode: " << (headless ? "headless" : "gui")
+              << " | Channel: " << channel << std::endl;
+
     std::cout << "🚀 Loading Engine (CUDA Optimized Version)..." << std::endl;
     std::ifstream file(ENGINE_PATH, std::ios::binary | std::ios::ate);
     if (!file.good()) {
         std::cerr << "Error: Cannot find engine file at " << ENGINE_PATH << std::endl;
-        return -1;
+        return;
     }
     size_t size = file.tellg();
     file.seekg(0, std::ios::beg);
@@ -88,105 +168,360 @@ int main() {
     std::unique_ptr<ICudaEngine> engine{runtime->deserializeCudaEngine(engineData.data(), size)};
     std::unique_ptr<IExecutionContext> context{engine->createExecutionContext()};
 
-    // --------------------------------------
-    // 2. 메모리 할당
-    // --------------------------------------
-    size_t inputSize = 1 * 3 * INPUT_SIZE * INPUT_SIZE * sizeof(float);
-    size_t outputSize = 1 * INPUT_SIZE * INPUT_SIZE * sizeof(float);
-    size_t rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t); 
+    auto volume = [](const Dims& dims) {
+        size_t v = 1;
+        for (int i = 0; i < dims.nbDims; ++i) v *= static_cast<size_t>(dims.d[i]);
+        return v;
+    };
 
-    void *d_input, *d_output, *d_raw_img;
-    checkCudaErrors(cudaMalloc(&d_input, inputSize));
-    checkCudaErrors(cudaMalloc(&d_output, outputSize));
-    checkCudaErrors(cudaMalloc(&d_raw_img, rawInputSize)); 
+    const char* inputName = nullptr;
+    const char* outputName = nullptr;
 
-    // 동적 텐서 바인딩 (안전함)
     for (int i = 0; i < engine->getNbIOTensors(); ++i) {
         const char* name = engine->getIOTensorName(i);
         TensorIOMode mode = engine->getTensorIOMode(name);
         if (mode == TensorIOMode::kINPUT) {
+            inputName = name;
             std::cout << "[TRT] Found Input Tensor: " << name << std::endl;
-            context->setTensorAddress(name, d_input);
         } else if (mode == TensorIOMode::kOUTPUT) {
+            outputName = name;
             std::cout << "[TRT] Found Output Tensor: " << name << std::endl;
-            context->setTensorAddress(name, d_output);
         }
     }
 
-    // --------------------------------------
-    // 3. 스트리밍 시작
-    // --------------------------------------
-    _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
-    VideoCapture cap(RTSP_URL, CAP_FFMPEG);
-    cap.set(CAP_PROP_BUFFERSIZE, 1);
-    if (!cap.isOpened()) {
-        std::cerr << "Error: Cannot open RTSP stream" << std::endl;
-        return -1;
+    if (!inputName || !outputName) {
+        std::cerr << "Error: Failed to find input/output tensor names." << std::endl;
+        return;
     }
-    
+
+    Dims inputDims = context->getTensorShape(inputName);
+    bool needSetInput = false;
+    for (int i = 0; i < inputDims.nbDims; ++i) {
+        if (inputDims.d[i] < 0) {
+            needSetInput = true;
+            break;
+        }
+    }
+    if (needSetInput || inputDims.nbDims == 0) {
+        Dims4 fixedInput{1, 3, INPUT_SIZE, INPUT_SIZE};
+        if (!context->setInputShape(inputName, fixedInput)) {
+            std::cerr << "Error: Failed to set input shape." << std::endl;
+            return;
+        }
+    }
+
+    inputDims = context->getTensorShape(inputName);
+    Dims outputDims = context->getTensorShape(outputName);
+
+    for (int i = 0; i < inputDims.nbDims; ++i) {
+        if (inputDims.d[i] < 0) {
+            std::cerr << "Error: Input dims unresolved after setInputShape." << std::endl;
+            return;
+        }
+    }
+    for (int i = 0; i < outputDims.nbDims; ++i) {
+        if (outputDims.d[i] < 0) {
+            std::cerr << "Error: Output dims unresolved." << std::endl;
+            return;
+        }
+    }
+
+    nvinfer1::DataType inputType = engine->getTensorDataType(inputName);
+    nvinfer1::DataType outputType = engine->getTensorDataType(outputName);
+    if (inputType != nvinfer1::DataType::kFLOAT || outputType != nvinfer1::DataType::kFLOAT) {
+        std::cerr << "Error: Expected FP32 tensors. Input type=" << static_cast<int>(inputType)
+                  << " Output type=" << static_cast<int>(outputType) << std::endl;
+        return;
+    }
+
+    size_t inputSize = volume(inputDims) * sizeof(float);
+    size_t outputElements = volume(outputDims);
+    size_t outputSize = outputElements * sizeof(float);
+
+    std::cout << "[TRT] Input Dims: ";
+    for (int i = 0; i < inputDims.nbDims; ++i) std::cout << inputDims.d[i] << (i + 1 < inputDims.nbDims ? "x" : "");
+    std::cout << " (" << inputSize << " bytes)" << std::endl;
+    std::cout << "[TRT] Output Dims: ";
+    for (int i = 0; i < outputDims.nbDims; ++i) std::cout << outputDims.d[i] << (i + 1 < outputDims.nbDims ? "x" : "");
+    std::cout << " (" << outputSize << " bytes)" << std::endl;
+    size_t rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t);
+
+    void *d_input, *d_output, *d_raw_img;
+    checkCudaErrors(cudaMalloc(&d_input, inputSize));
+    checkCudaErrors(cudaMalloc(&d_output, outputSize));
+    checkCudaErrors(cudaMalloc(&d_raw_img, rawInputSize));
+
+    context->setTensorAddress(inputName, d_input);
+    context->setTensorAddress(outputName, d_output);
+
+    cudaStream_t trtStream;
+    checkCudaErrors(cudaStreamCreate(&trtStream));
+
+    _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000|rw_timeout;5000000");
+    const std::string& rtspUrl = RTSP_URLS[channel];
+    VideoCapture cap(rtspUrl, CAP_FFMPEG);
+    cap.set(CAP_PROP_BUFFERSIZE, 1);
+    cap.set(CAP_PROP_OPEN_TIMEOUT_MSEC, 3000);
+    cap.set(CAP_PROP_READ_TIMEOUT_MSEC, 3000);
+    if (!cap.isOpened()) {
+        std::cerr << "Error: Cannot open RTSP stream: " << rtspUrl << std::endl;
+        cudaStreamDestroy(trtStream);
+        cudaFree(d_input);
+        cudaFree(d_output);
+        cudaFree(d_raw_img);
+        return;
+    }
+
     Mat frame, resized;
-    std::vector<float> outputBuffer(INPUT_SIZE * INPUT_SIZE);
+    std::vector<float> outputBuffer(outputElements);
+    uint64_t frameIdx = 0;
 
     std::cout << "Stream Started. Press 'q' to exit." << std::endl;
-    
-    // CUDA Grid/Block 설정
+
     dim3 block(16, 16);
     dim3 grid((INPUT_SIZE + block.x - 1) / block.x, (INPUT_SIZE + block.y - 1) / block.y);
 
     auto prevTime = std::chrono::high_resolution_clock::now();
 
-    while (true) {
+    int grabFailCount = 0;
+    const int grabFailLogEvery = 30;
+    while (!stopFlag.load()) {
         if (!cap.grab()) {
+            grabFailCount++;
+            if (grabFailCount % grabFailLogEvery == 1) {
+                std::cerr << "[WARN] RTSP grab failed (" << grabFailCount
+                          << "x). url=" << rtspUrl << std::endl;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
         if (!cap.retrieve(frame)) continue;
+        grabFailCount = 0;
+        frameIdx++;
+        if (frame.empty()) {
+            std::cerr << "[WARN] Empty frame at idx=" << frameIdx << std::endl;
+            continue;
+        }
+        if (frame.channels() != 3) {
+            std::cerr << "[WARN] Unexpected channels=" << frame.channels()
+                      << " at idx=" << frameIdx << std::endl;
+            continue;
+        }
 
-        // 1. CPU Resize (INTER_LINEAR)
         cv::resize(frame, resized, Size(INPUT_SIZE, INPUT_SIZE), 0, 0, INTER_LINEAR);
+        if (resized.empty() || resized.cols != INPUT_SIZE || resized.rows != INPUT_SIZE) {
+            std::cerr << "[WARN] Resize failed or size mismatch at idx=" << frameIdx << std::endl;
+            continue;
+        }
+        if (resized.type() != CV_8UC3) {
+            std::cerr << "[WARN] Unexpected resized type=" << resized.type()
+                      << " at idx=" << frameIdx << std::endl;
+            continue;
+        }
 
-        // 2. Raw Image Copy (CPU -> GPU)
-        checkCudaErrors(cudaMemcpy(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice));
+        if (!resized.isContinuous()) {
+            resized = resized.clone();
+        }
+        checkCudaErrors(cudaMemcpyAsync(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice, trtStream));
 
-        // 3. CUDA Preprocess Kernel 실행 (Normalize & HWC->CHW)
-        preprocess_kernel<<<grid, block>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
+        preprocess_kernel<<<grid, block, 0, trtStream>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
+        auto err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA kernel error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            break;
+        }
 
-        // 4. TensorRT 추론
-        context->enqueueV3(0);
+        if (!context->enqueueV3(trtStream)) {
+            std::cerr << "enqueueV3 failed (frame=" << frameIdx << ")" << std::endl;
+            break;
+        }
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA post-enqueue error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            break;
+        }
 
-        // 5. 결과 회수 (GPU -> CPU)
-        checkCudaErrors(cudaMemcpy(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost));
-        
-        // 6. 시각화 (CPU)
-        Mat depthMat(INPUT_SIZE, INPUT_SIZE, CV_32F, outputBuffer.data());
+        checkCudaErrors(cudaMemcpyAsync(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost, trtStream));
+        err = cudaStreamSynchronize(trtStream);
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA stream sync error: " << cudaGetErrorString(err)
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            break;
+        }
+
+        int outH = INPUT_SIZE;
+        int outW = INPUT_SIZE;
+        if (outputDims.nbDims == 4) {
+            outH = outputDims.d[2];
+            outW = outputDims.d[3];
+        } else if (outputDims.nbDims == 3) {
+            outH = outputDims.d[1];
+            outW = outputDims.d[2];
+        } else if (outputDims.nbDims == 2) {
+            outH = outputDims.d[0];
+            outW = outputDims.d[1];
+        }
+
+        if (static_cast<size_t>(outH) * static_cast<size_t>(outW) > outputElements) {
+            std::cerr << "[WARN] Output size mismatch outH*outW="
+                      << (static_cast<size_t>(outH) * static_cast<size_t>(outW))
+                      << " > outputElements=" << outputElements
+                      << " (frame=" << frameIdx << ")" << std::endl;
+            continue;
+        }
+        Mat depthMat(outH, outW, CV_32F, outputBuffer.data());
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
-        
+
         Mat depthNorm;
         depthMat.convertTo(depthNorm, CV_8U, 255.0 / (maxVal - minVal + 1e-5), -minVal * 255.0 / (maxVal - minVal + 1e-5));
 
         Mat depthColor;
         cv::applyColorMap(depthNorm, depthColor, COLORMAP_INFERNO);
-        
+
         Mat showFrame, showDepth;
         cv::resize(frame, showFrame, Size(640, 480));
         cv::resize(depthColor, showDepth, Size(640, 480));
-        
-        Mat combined;
-        cv::hconcat(showFrame, showDepth, combined);
 
-        auto currTime = std::chrono::high_resolution_clock::now();
-        double fps = 1.0 / std::chrono::duration<double>(currTime - prevTime).count();
-        prevTime = currTime;
+        if (!headless) {
+            Mat combined;
+            cv::hconcat(showFrame, showDepth, combined);
 
-        cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
-        cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
+            auto currTime = std::chrono::high_resolution_clock::now();
+            double fps = 1.0 / std::chrono::duration<double>(currTime - prevTime).count();
+            prevTime = currTime;
 
-        if (cv::waitKey(1) == 'q') break;
+            cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+            cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
+
+            if (cv::waitKey(1) == 'q') break;
+        }
     }
 
+    cap.release();
+    if (!headless) {
+        cv::destroyAllWindows();
+    }
+
+    cudaStreamDestroy(trtStream);
     cudaFree(d_input);
     cudaFree(d_output);
     cudaFree(d_raw_img);
+}
+
+int main(int argc, char** argv) {
+    int port = 9090;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind("--port=", 0) == 0) {
+            port = std::stoi(arg.substr(7));
+        }
+    }
+
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        std::cerr << "WSAStartup failed" << std::endl;
+        return 1;
+    }
+
+    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (server == INVALID_SOCKET) {
+        std::cerr << "socket failed" << std::endl;
+        WSACleanup();
+        return 1;
+    }
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(static_cast<u_short>(port));
+
+    if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        std::cerr << "bind failed" << std::endl;
+        closesocket(server);
+        WSACleanup();
+        return 1;
+    }
+
+    if (listen(server, 5) == SOCKET_ERROR) {
+        std::cerr << "listen failed" << std::endl;
+        closesocket(server);
+        WSACleanup();
+        return 1;
+    }
+
+    std::cout << "[APP] Listening on port " << port << std::endl;
+
+    std::thread worker;
+    std::atomic<bool> workerStop{false};
+    bool workerRunning = false;
+
+    while (true) {
+        sockaddr_in clientAddr{};
+        int clientLen = sizeof(clientAddr);
+        SOCKET client = accept(server, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
+        if (client == INVALID_SOCKET) continue;
+
+        char buf[1024];
+        int len = recv(client, buf, sizeof(buf) - 1, 0);
+        if (len <= 0) {
+            std::cout << "[APP] Client connected but sent no data" << std::endl;
+            closesocket(client);
+            continue;
+        }
+        buf[len] = '\0';
+
+        std::string line(buf);
+        {
+            char ip[64] = {0};
+            inet_ntop(AF_INET, &clientAddr.sin_addr, ip, sizeof(ip));
+            std::cout << "[APP] Request from " << ip << ":" << ntohs(clientAddr.sin_port)
+                      << " -> " << line << std::endl;
+        }
+        Request req = ParseRequest(line);
+
+        if (req.channel < -1 || req.channel > 3) {
+            std::cout << "[APP] Invalid channel request" << std::endl;
+            SendResponse(client, "ERR invalid channel\n");
+            closesocket(client);
+            continue;
+        }
+
+        if (workerRunning) {
+            workerStop.store(true);
+            if (worker.joinable()) worker.join();
+            workerRunning = false;
+        }
+
+        if (req.stop) {
+            std::cout << "[APP] Stop request processed" << std::endl;
+            SendResponse(client, "OK stopped\n");
+            closesocket(client);
+            continue;
+        }
+
+        int channel = req.channel >= 0 ? req.channel : RTSP_CHANNEL;
+        bool headless = req.headlessSet ? req.headless : false;
+        if (req.gui) headless = false;
+
+        workerStop.store(false);
+        worker = std::thread([channel, headless, &workerStop]() {
+            RunDepthWorker(channel, headless, workerStop);
+        });
+        workerRunning = true;
+
+        std::string modeStr = headless ? "headless" : "gui";
+        SendResponse(client, "OK started channel=" + std::to_string(channel) + " mode=" + modeStr + "\n");
+        closesocket(client);
+    }
+
+    if (workerRunning) {
+        workerStop.store(true);
+        if (worker.joinable()) worker.join();
+    }
+    closesocket(server);
+    WSACleanup();
     return 0;
 }

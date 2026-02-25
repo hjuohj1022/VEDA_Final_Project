@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(DepthAnythingTRT LANGUAGES CXX)
+set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT ALL_BUILD)
 
 # 1. C++ 표준
 set(CMAKE_CXX_STANDARD 17)
@@ -36,12 +37,13 @@ add_custom_command(
     COMMAND "${NVCC_PATH}"
     ARGS -c "${CMAKE_CURRENT_SOURCE_DIR}/main.cu"
          -o "${CUDA_OBJ}"
+         -I"${CMAKE_CURRENT_SOURCE_DIR}"
          -I"${TRT_INCLUDE}"
          -I"${CUDA_INCLUDE}"
          -I"${OPENCV_INCLUDE}"
          -Xcompiler "/MD"
          -O3
-    MAIN_DEPENDENCY main.cu
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/main.cu" "${CMAKE_CURRENT_SOURCE_DIR}/app_config.h"
     COMMENT "Compiling CUDA source main.cu manually..."
 )
 
@@ -52,12 +54,12 @@ add_executable(depth_trt ${CUDA_OBJ} dummy.cpp)
 target_link_libraries(depth_trt debug ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100d.lib)
 target_link_libraries(depth_trt optimized ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100.lib)
 target_link_libraries(depth_trt nvinfer_10 nvinfer_plugin_10 cudart)
+target_link_libraries(depth_trt Ws2_32)
 
 # 8. DLL 복사
 add_custom_command(TARGET depth_trt POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TRT_PATH}/bin/nvinfer_10.dll" $<TARGET_FILE_DIR:depth_trt>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TRT_PATH}/bin/nvinfer_plugin_10.dll" $<TARGET_FILE_DIR:depth_trt>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_PATH}/x64/vc16/bin/opencv_world4100.dll" $<TARGET_FILE_DIR:depth_trt>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_PATH}/x64/vc16/bin/opencv_world4100d.dll" $<TARGET_FILE_DIR:depth_trt>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<IF:$<CONFIG:Debug>,${OPENCV_PATH}/x64/vc16/bin/opencv_world4100d.dll,${OPENCV_PATH}/x64/vc16/bin/opencv_world4100.dll>" $<TARGET_FILE_DIR:depth_trt>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_PATH}/x64/vc16/bin/opencv_videoio_ffmpeg4100_64.dll" $<TARGET_FILE_DIR:depth_trt>
 )
