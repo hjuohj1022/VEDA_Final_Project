@@ -121,7 +121,7 @@ pipeline {
 
         // 🎥 3. MediaMTX (폴더명: mediamtx)
         stage('MediaMTX 배포') {
-            when { 
+            when {
                 anyOf {
                     changeset 'RaspberryPi/k3s-cluster/mediamtx/**'
                     triggeredBy 'UserIdCause'
@@ -129,27 +129,56 @@ pipeline {
             }
             steps {
                 script {
+                    // RTSP Read 인증 (Username with password) Credentials ID
+                    def MTX_CRED = 'mediamtx-rtsp-read'  // <- 너가 만든 Jenkins credential ID로 변경
+
+                    // 1) 카메라 접속 정보 치환에 필요한 값 가져오기
                     withCredentials([
                         string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
                         string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
-                        string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW')
+                        string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW'),
+                        usernamePassword(credentialsId: MTX_CRED, usernameVariable: 'MTX_READ_USER', passwordVariable: 'MTX_READ_PASS')
                     ]) {
-                        script {
-                            sh "sed -i 's|__CAMERA_IP__|${REAL_IP}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                            sh "sed -i 's|__CAMERA_USER__|${REAL_USER}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                            sh "sed -i 's|__CAMERA_PASSWORD__|${REAL_PW}|g' RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
+                        // 2) 원본 mediamtx.yaml을 직접 sed -i로 바꾸지 말고, 임시 파일로 만들어 치환
+                        sh '''
+                            set -e
+
+                            SRC=RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
+                            OUT=/tmp/mediamtx.rendered.yaml
+
+                            # 원본 -> 임시 파일 복사
+                            cp "$SRC" "$OUT"
+
+                            # 카메라 정보 치환 (템플릿에 __CAMERA_*__ 가 존재해야 함)
+                            sed -i "s|__CAMERA_IP__|${REAL_IP}|g" "$OUT"
+                            sed -i "s|__CAMERA_USER__|${REAL_USER}|g" "$OUT"
+                            sed -i "s|__CAMERA_PASSWORD__|${REAL_PW}|g" "$OUT"
+
+                            # RTSP Read 인증 치환 (템플릿에 ${MTX_READ_USER}, ${MTX_READ_PASS}가 있어야 함)
+                            sed -i "s|\\${MTX_READ_USER}|${MTX_READ_USER}|g" "$OUT"
+                            sed -i "s|\\${MTX_READ_PASS}|${MTX_READ_PASS}|g" "$OUT"
+
+                            echo "[Rendered mediamtx.yaml head]"
+                            sed -n '1,40p' "$OUT"
+                        '''
+
+                        // 3) 이미지 빌드/푸시 (기존 유지)
+                        dir('RaspberryPi/k3s-cluster/mediamtx') {
+                            echo "🎥 MediaMTX 빌드 시작..."
+                            withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                                sh "echo $PASS | docker login -u $USER --password-stdin"
+                                sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:latest --push ."
+                            }
                         }
-                    }
-                    dir('RaspberryPi/k3s-cluster/mediamtx') {
-                        echo "🎥 MediaMTX 빌드 시작..."
-                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:latest --push ."
+
+                        // 4) 렌더링된 yaml로 apply + rollout restart
+                        withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                            sh '''
+                                set -e
+                                kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/mediamtx.rendered.yaml
+                                kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server
+                            '''
                         }
-                    }
-                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml"
-                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mediamtx-server"
                     }
                 }
             }
