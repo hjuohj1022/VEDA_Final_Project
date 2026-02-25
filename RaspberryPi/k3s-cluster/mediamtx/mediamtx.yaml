@@ -7,8 +7,12 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
-    readUser: ${MTX_READ_USER}
-    readPass: ${MTX_READ_PASS}
+  
+    # 공통 인증 설정 (모든 path에 적용)
+    # Jenkins에서 ${MTX_READ_USER}, ${MTX_READ_PASS 실제 값으로 치환됨}
+    pathDefaults:
+      readUser: ${MTX_READ_USER}
+      readPass: ${MTX_READ_PASS}
 
     paths:
       # [채널 0 - Main]
@@ -111,10 +115,6 @@ spec:
 
         # 카메라 접속 정보 암호화 (젠킨스에서 실제 값으로 치환됨)
         env:
-        - name: MTX_READ_USER
-          value: "test"        # 원하는 ID 입력
-        - name: MTX_READ_PASS
-          value: "test"     # 원하는 비밀번호 입력
         - name: CAMERA_IP
           value: "__CAMERA_IP__"
         - name: CAMERA_USER
@@ -153,14 +153,15 @@ spec:
 
 ---
 # -----------------------------------------------------------
-# 서비스 (Service) - 내부 전용 (ClusterIP)
+# 서비스 (Service) - MetalLB LoadBalancer
 # -----------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: mediamtx-service
 spec:
-  type: ClusterIP
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
   selector:
     app: mediamtx
   ports:
