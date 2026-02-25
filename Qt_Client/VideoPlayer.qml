@@ -8,6 +8,7 @@ Item {
     id: root
     property string source: ""
     property int tileIndex: -1
+    property string titleText: ""
     property string locationName: "Camera"
     property var theme
     property int cameraIndex: -1
@@ -129,7 +130,12 @@ Item {
 
                     Column {
                         spacing: 0
-                        Text { text: "Cam " + (root.tileIndex + 1); color: theme ? theme.textPrimary : "white"; font.bold: true; font.pixelSize: 12 }
+                        Text {
+                            text: root.titleText.length > 0 ? root.titleText : ("Cam " + (root.tileIndex + 1))
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            font.pixelSize: 12
+                        }
                         Text { text: root.locationName; color: theme ? theme.textSecondary : "#a1a1aa"; font.pixelSize: 10 }
                     }
 

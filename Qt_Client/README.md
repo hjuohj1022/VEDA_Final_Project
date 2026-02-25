@@ -1,4 +1,4 @@
-# Qt CCTV Client (Live Streaming & Recording Manager)
+﻿# Qt CCTV Client (Live Streaming & Recording Manager)
 
 이 프로젝트는 **Qt 6 (C++)**와 **libVLC**를 활용하여 개발된 CCTV 관제 클라이언트 프로그램입니다.
 현대적인 **Dark Theme** UI를 적용하였으며, 실시간 RTSP 스트리밍(4채널 멀티뷰)과 REST API를 통한 녹화 영상 관리(재생, 목록 조회, 삭제) 기능을 제공합니다.
@@ -118,52 +118,3 @@ MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소
 This project is for educational purposes.
 
 ---
-
-## 최근 업데이트 (2026-02)
-
-### 1) 스트리밍 구조 확정
-- 그리드 4분할은 모든 채널을 `sub` 스트림으로 재생합니다.
-- 카메라 더블클릭 시 메인 화면 내부 전환이 아니라 별도 팝업 창에서 `main` 스트림을 재생합니다.
-- 팝업을 닫아도 메인 화면의 4채널 `sub`는 유지되어, 복귀 시 재연결 지연을 줄였습니다.
-
-### 2) 이렇게 바꾼 이유
-- 기존 방식(`sub -> main -> sub` 같은 플레이어 전환)은 축소 복귀 시 4채널 재버퍼링 체감이 컸습니다.
-- 팝업 분리 방식은 고해상도 단일 뷰와 저해상도 4분할 뷰를 분리해 지연 영향을 줄입니다.
-
-### 3) 클라이언트 RTSP 경로 규칙
-- `main`: `rtsp://{RTSP_IP}:{RTSP_PORT}/{index}/main`
-- `sub`: `rtsp://{RTSP_IP}:{RTSP_PORT}/{index}/sub`
-
-### 4) `.env` 권장 키
-```ini
-RTSP_IP=192.168.55.xxx
-RTSP_PORT=8554
-RTSP_MAIN_PATH_TEMPLATE=/{index}/main
-RTSP_SUB_PATH_TEMPLATE=/{index}/sub
-RTSP_MAIN_PROFILE=1
-RTSP_SUB_PROFILE=2
-```
-
-### 5) MediaMTX 운영 고정안 (현재 안정화)
-- `main`: 카메라 `H.264/media.smp`를 `-c copy`로 중계
-- `sub`: 카메라 `MOBILE/media.smp`를 `-c copy`로 중계
-- `main/sub` 모두 `runOnInitRestart: yes` 유지
-
-예시 (`sub`):
-```yaml
-"0/sub":
-  source: publisher
-  runOnInit: ffmpeg -hide_banner -loglevel error -rtsp_transport tcp -i rtsp://$CAMERA_USER:$CAMERA_PASSWORD@$CAMERA_IP/0/MOBILE/media.smp -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/0/sub
-  runOnInitRestart: yes
-  record: no
-```
-
-### 6) 운영 점검 체크리스트
-1. CH1~CH4 모두 카메라 `MOBILE` 프로파일이 활성화되어 있는지 확인
-2. 4채널 `MOBILE` 프로파일 설정(해상도/FPS/GOV/비트레이트)을 최대한 동일하게 맞출 것
-3. MediaMTX에서 `/{index}/sub` 퍼블리셔가 4채널 모두 정상 기동인지 확인
-4. 특정 채널만 지연/오프라인이면(예: `3/sub`) 클라이언트보다 서버/카메라 경로(404, 프로파일, 퍼블리셔 재시작)부터 점검
-
-### 7) 결론
-- 현재는 **Qt 추가 구조 변경 없이**, 카메라 프로파일 + MediaMTX 경로를 위 고정안으로 유지하는 것이 가장 안정적입니다.
-- 지연의 핵심 원인은 서브스트림 재인코딩 경로였고, 네이티브 `MOBILE -c copy` 전환으로 체감 지연이 크게 줄었습니다.
