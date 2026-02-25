@@ -103,7 +103,35 @@ static bool KillProcessByName(const std::string& exeName) {
     return killedAny;
 }
 
+static std::string GetLastErrorString() {
+    DWORD err = GetLastError();
+    if (err == 0) return "0";
+    char* msg = nullptr;
+    DWORD len = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        err,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&msg),
+        0,
+        nullptr
+    );
+    std::string out = len ? msg : "Unknown error";
+    if (msg) LocalFree(msg);
+    return out;
+}
+
+static bool FileExists(const std::string& path) {
+    DWORD attr = GetFileAttributesA(path.c_str());
+    return (attr != INVALID_FILE_ATTRIBUTES) && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 static bool StartDepthProcess(const std::string& exePath, const Request& req) {
+    if (!FileExists(exePath)) {
+        std::cout << "[ENTRANCE] depth_trt.exe not found at: " << exePath << std::endl;
+        return false;
+    }
+
     std::string cmd = "\"" + exePath + "\"";
     if (req.headlessSet && req.headless) cmd += " --headless";
     if (req.headlessSet && !req.headless && req.gui) cmd += " --gui";
@@ -116,6 +144,11 @@ static bool StartDepthProcess(const std::string& exePath, const Request& req) {
     char cmdline[1024];
     std::snprintf(cmdline, sizeof(cmdline), "%s", cmd.c_str());
 
+    std::string workdir = exePath;
+    size_t pos = workdir.find_last_of("\\/");
+    if (pos != std::string::npos) workdir = workdir.substr(0, pos);
+    else workdir = ".";
+
     BOOL ok = CreateProcessA(
         nullptr,
         cmdline,
@@ -124,7 +157,7 @@ static bool StartDepthProcess(const std::string& exePath, const Request& req) {
         FALSE,
         CREATE_NO_WINDOW,
         nullptr,
-        nullptr,
+        workdir.c_str(),
         &si,
         &pi
     );
@@ -133,6 +166,7 @@ static bool StartDepthProcess(const std::string& exePath, const Request& req) {
         CloseHandle(pi.hProcess);
         return true;
     }
+    std::cout << "[ENTRANCE] CreateProcess failed: " << GetLastErrorString() << std::endl;
     return false;
 }
 
@@ -152,6 +186,8 @@ int main(int argc, char** argv) {
             exePath = arg.substr(6);
         }
     }
+
+    std::cout << "[ENTRANCE] depth_trt path: " << exePath << std::endl;
 
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -188,29 +224,41 @@ int main(int argc, char** argv) {
     std::cout << "[ENTRANCE] Listening on port " << port << std::endl;
 
     while (true) {
-        SOCKET client = accept(server, nullptr, nullptr);
+        sockaddr_in clientAddr{};
+        int clientLen = sizeof(clientAddr);
+        SOCKET client = accept(server, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
         if (client == INVALID_SOCKET) continue;
 
         char buf[1024];
         int len = recv(client, buf, sizeof(buf) - 1, 0);
         if (len <= 0) {
+            std::cout << "[ENTRANCE] Client connected but sent no data" << std::endl;
             closesocket(client);
             continue;
         }
         buf[len] = '\0';
 
         std::string line(buf);
+        {
+            char ip[64] = {0};
+            inet_ntop(AF_INET, &clientAddr.sin_addr, ip, sizeof(ip));
+            std::cout << "[ENTRANCE] Request from " << ip << ":" << ntohs(clientAddr.sin_port)
+                      << " -> " << line << std::endl;
+        }
         Request req = ParseRequest(line);
 
         if (req.channel < -1 || req.channel > 3) {
+            std::cout << "[ENTRANCE] Invalid channel request" << std::endl;
             SendResponse(client, "ERR invalid channel\n");
             closesocket(client);
             continue;
         }
 
+        std::cout << "[ENTRANCE] Killing existing depth_trt.exe..." << std::endl;
         KillProcessByName("depth_trt.exe");
 
         if (req.stop) {
+            std::cout << "[ENTRANCE] Stop request processed" << std::endl;
             SendResponse(client, "OK stopped\n");
             closesocket(client);
             continue;
@@ -218,8 +266,10 @@ int main(int argc, char** argv) {
 
         bool started = StartDepthProcess(exePath, req);
         if (started) {
+            std::cout << "[ENTRANCE] depth_trt.exe started" << std::endl;
             SendResponse(client, "OK started\n");
         } else {
+            std::cout << "[ENTRANCE] depth_trt.exe failed to start" << std::endl;
             SendResponse(client, "ERR start failed\n");
         }
 
