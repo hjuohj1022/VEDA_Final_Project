@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 
 // =========================================================
@@ -9,8 +10,20 @@
 // TensorRT 엔진 파일 경로
 const std::string ENGINE_PATH = "C:/path/to/your/model.engine";
 
-// RTSP 카메라 주소
-const std::string RTSP_URL = "rtsp://192.168.x.x:8554/0";
+// RTSP 채널 목록 (0~3)
+const std::array<std::string, 4> RTSP_URLS = {
+    "rtsp://192.168.x.x:8554/0/main",
+    "rtsp://192.168.x.x:8554/1/main",
+    "rtsp://192.168.x.x:8554/2/main",
+    "rtsp://192.168.x.x:8554/3/main"
+};
+
+// 사용할 RTSP 채널 인덱스 (0~3)
+const int RTSP_CHANNEL = 0;
+
+inline const std::string& GetSelectedRtspUrl() {
+    return RTSP_URLS[(RTSP_CHANNEL >= 0 && RTSP_CHANNEL < static_cast<int>(RTSP_URLS.size())) ? RTSP_CHANNEL : 0];
+}
 
 // 입력 해상도
 const int INPUT_SIZE = 518;

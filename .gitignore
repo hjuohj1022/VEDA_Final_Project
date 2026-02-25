@@ -158,3 +158,4 @@ $RECYCLE.BIN/
 # C++ 빌드 폴더 (보통 build 폴더에 빌드하므로 통째로 무시)
 build/
 bin/
+*.md
