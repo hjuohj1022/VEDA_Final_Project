@@ -30,6 +30,16 @@ Item {
     signal cameraFpsChanged(int cameraIndex, int fps)
     signal doubleClicked()
 
+    function restartStream() {
+        if (root.source === "")
+            return
+        startPlayTimer.stop()
+        vlc.stop()
+        // Small delay helps camera-side stream reconfiguration settle.
+        startPlayTimer.interval = 350
+        startPlayTimer.start()
+    }
+
     function dptzReset() {
         dptzScale = 1.0
         dptzPanX = 0

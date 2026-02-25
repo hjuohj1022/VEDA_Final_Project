@@ -24,6 +24,11 @@ qt_add_executable(Team3VideoReceiver
     VlcPlayer.cpp
     VlcPlayer.h
     Backend.cpp
+    BackendCore.cpp
+    BackendAuth.cpp
+    BackendMedia.cpp
+    BackendRtsp.cpp
+    BackendSunapi.cpp
     Backend.h
     .env
 )
