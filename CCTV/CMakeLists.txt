@@ -54,9 +54,7 @@ add_executable(depth_trt ${CUDA_OBJ} dummy.cpp)
 target_link_libraries(depth_trt debug ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100d.lib)
 target_link_libraries(depth_trt optimized ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100.lib)
 target_link_libraries(depth_trt nvinfer_10 nvinfer_plugin_10 cudart)
-
-add_executable(entrance_server entrance_server.cpp)
-target_link_libraries(entrance_server Ws2_32)
+target_link_libraries(depth_trt Ws2_32)
 
 # 8. DLL 복사
 add_custom_command(TARGET depth_trt POST_BUILD
