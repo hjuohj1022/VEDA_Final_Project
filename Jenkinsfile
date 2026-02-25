@@ -19,7 +19,7 @@ pipeline {
             }
         }
 
-        // 🔐 0. 인증서 및 공통 설정 준비
+        // 🔐 0. 인증서 및 공통 설정 준비 (하나의 압축 번들로 효율적 관리)
         stage('인증서 준비') {
             when {
                 anyOf {
@@ -32,15 +32,21 @@ pipeline {
             }
             steps {
                 script {
-                    dir('RaspberryPi/k3s-cluster/security') {
-                        echo "🔐 통합 인증서 생성 및 준비 중..."
-                        sh "chmod +x generate_certs.sh"
-                        sh "./generate_certs.sh"
+                    // 디렉터리 생성 및 클린업
+                    sh "mkdir -p RaspberryPi/k3s-cluster/security/certs"
+                    
+                    dir('RaspberryPi/k3s-cluster/security/certs') {
+                        echo "🔐 Jenkins Credentials에서 인증서 번들을 가져와 압축을 푸는 중..."
+                        withCredentials([file(credentialsId: 'all-certs-bundle', variable: 'CERTS_BUNDLE')]) {
+                            // tar.gz 압축 해제 (파일들이 바로 certs 폴더 안에 풀리도록 함)
+                            sh "tar -xzvf '$CERTS_BUNDLE'"
+                        }
                     }
+                    
                     // 다른 스테이지(Windows 등)에서 사용할 수 있도록 인증서 보관
                     stash name: 'certs-stash', includes: 'RaspberryPi/k3s-cluster/security/certs/**'
                     
-                    // 산출물 보관 (Nginx, MQTT 단계에서 하던 것을 여기서 통합 관리)
+                    // 클라이언트 배포용으로 산출물 보관
                     archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/**', fingerprint: true
                 }
             }
@@ -90,14 +96,7 @@ pipeline {
                         }
                     }
 
-                    // 1. 공통 인증서 생성 (이미 되어 있을 수도 있지만 안전을 위해 호출)
-                    dir('RaspberryPi/k3s-cluster/security') {
-                        echo "🔐 통합 인증서 확인 및 생성 중..."
-                        sh "chmod +x generate_certs.sh"
-                        sh "./generate_certs.sh"
-                    }
-
-                    // 2. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
+                    // 1. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         echo "🔑 MQTT K8s Secret 업데이트 중 (통합 인증서 사용)..."
                         sh """
