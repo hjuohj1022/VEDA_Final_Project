@@ -71,13 +71,22 @@ class Logger : public ILogger {
 int main(int argc, char** argv) {
     bool headless = false;
     bool forceGui = false;
+    int channelOverride = -1;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--headless" || arg == "-hl") headless = true;
         if (arg == "--gui") forceGui = true;
+        if (arg.rfind("--channel=", 0) == 0) {
+            channelOverride = std::stoi(arg.substr(10));
+        } else if (arg == "--channel" && i + 1 < argc) {
+            channelOverride = std::stoi(argv[i + 1]);
+            ++i;
+        }
     }
     if (forceGui) headless = false;
-    std::cout << "[APP] Mode: " << (headless ? "headless" : "gui") << std::endl;
+    if (channelOverride < 0 || channelOverride > 3) channelOverride = RTSP_CHANNEL;
+    std::cout << "[APP] Mode: " << (headless ? "headless" : "gui")
+              << " | Channel: " << channelOverride << std::endl;
 
     // --------------------------------------
     // 1. TensorRT 초기화
@@ -194,7 +203,7 @@ int main(int argc, char** argv) {
     // 3. 스트리밍 시작
     // --------------------------------------
     _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
-    VideoCapture cap(GetSelectedRtspUrl(), CAP_FFMPEG);
+    VideoCapture cap(RTSP_URLS[channelOverride], CAP_FFMPEG);
     cap.set(CAP_PROP_BUFFERSIZE, 1);
     if (!cap.isOpened()) {
         std::cerr << "Error: Cannot open RTSP stream" << std::endl;
