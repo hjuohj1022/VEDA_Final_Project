@@ -66,13 +66,9 @@ Item {
                 startDelayMs: 0
                 locationName: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"][index]
 
-<<<<<<< HEAD
-                source: (root.isActive && (root.maximizedIndex === -1 || root.maximizedIndex === index))
-                        ? backend.buildRtspUrl(index, root.maximizedIndex === -1)
-=======
                 source: root.isActive
-                        ? backend.buildRtspUrl(index, true)
->>>>>>> 0b743cb... Update Qt_Client Optimization v2
+                        ? ((backend.rtspIp, backend.rtspPort),
+                           backend.buildRtspUrl(index, true))
                         : ""
 
                 onCameraStateChanged: function(cameraIndex, isLive) {

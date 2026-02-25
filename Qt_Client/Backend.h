@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QMap>
 #include <QMqttClient>
+#include <QPointer>
 
 class Backend : public QObject
 {
@@ -75,6 +76,7 @@ public:
     Q_INVOKABLE bool updateRtspIp(QString ip);
     Q_INVOKABLE bool updateRtspConfig(QString ip, QString port);
     Q_INVOKABLE bool resetRtspConfigToEnv();
+    Q_INVOKABLE void probeRtspEndpoint(QString ip, QString port, int timeoutMs = 1200);
     Q_INVOKABLE void refreshRecordings();
     Q_INVOKABLE void deleteRecording(QString name);
     Q_INVOKABLE void renameRecording(QString oldName, QString newName); // 신규: 파일 이름 변경
@@ -83,6 +85,17 @@ public:
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
+    Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
+    Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
+    Q_INVOKABLE bool sunapiZoomStop(int cameraIndex);
+    Q_INVOKABLE bool sunapiFocusNear(int cameraIndex);
+    Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
+    Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
+    Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
+    Q_INVOKABLE bool sunapiMovePreset(int cameraIndex, int presetId);
+    Q_INVOKABLE bool sunapiSetExposureMode(int cameraIndex, QString mode);
+    Q_INVOKABLE bool sunapiSetWhiteBalanceMode(int cameraIndex, QString mode);
+    Q_INVOKABLE void sunapiLoadSupportedPtzActions(int cameraIndex);
 
 signals:
     void isLoggedInChanged();
@@ -115,6 +128,9 @@ signals:
     void downloadProgress(qint64 received, qint64 total);
     void downloadFinished(QString path);
     void downloadError(QString error);
+    void cameraControlMessage(QString message, bool isError);
+    void rtspProbeFinished(bool success, QString error);
+    void sunapiSupportedPtzActionsLoaded(int cameraIndex, QVariantMap actions);
 
 private slots:
     void checkStorage();
@@ -124,6 +140,11 @@ private slots:
 private:
     void loadEnv();
     void setupMqtt();
+    bool sendSunapiCommand(const QString &cgiName,
+                           const QMap<QString, QString> &params,
+                           int cameraIndex,
+                           const QString &actionLabel,
+                           bool includeChannelParam = true);
     
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;
@@ -140,6 +161,8 @@ private:
     bool m_useCustomRtspConfig = false;
     QString m_rtspIp;
     QString m_rtspPort;
+    QString m_rtspMainPathTemplateOverride;
+    QString m_rtspSubPathTemplateOverride;
     
     // 메트릭 데이터
     int m_activeCameras = 0;
@@ -156,6 +179,8 @@ private:
     
     // 다운로드 관리
     QNetworkReply *m_downloadReply = nullptr;
+    QPointer<QNetworkReply> m_loginReply;
+    bool m_loginInProgress = false;
     QString m_tempFilePath;
 };
 

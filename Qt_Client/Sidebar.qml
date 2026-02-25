@@ -7,6 +7,12 @@ Rectangle {
     property var theme
     property bool showCameraControls: false
     property int selectedCameraIndex: -1
+    property string cameraControlStatus: ""
+    property bool cameraControlError: false
+    property bool mapModeEnabled: false
+    property bool supportZoom: true
+    property bool supportFocus: true
+    property bool supportPreset: true
     color: theme ? theme.bgSecondary : "#09090b"
 
     function selectedCameraTitle() {
@@ -14,6 +20,49 @@ Rectangle {
         if (selectedCameraIndex < 0 || selectedCameraIndex >= names.length)
             return "Camera"
         return "Cam " + (selectedCameraIndex + 1) + " - " + names[selectedCameraIndex]
+    }
+
+    Connections {
+        target: backend
+        function onCameraControlMessage(message, isError) {
+            if (!root.showCameraControls)
+                return
+            root.cameraControlStatus = message
+            root.cameraControlError = isError
+            controlStatusTimer.restart()
+        }
+        function onSunapiSupportedPtzActionsLoaded(cameraIndex, actions) {
+            if (cameraIndex !== root.selectedCameraIndex)
+                return
+            root.supportZoom = actions.zoom !== false
+            root.supportFocus = actions.focus !== false
+            root.supportPreset = actions.preset !== false
+        }
+    }
+
+    Timer {
+        id: controlStatusTimer
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            root.cameraControlStatus = ""
+            root.cameraControlError = false
+        }
+    }
+
+    onShowCameraControlsChanged: {
+        if (showCameraControls && selectedCameraIndex >= 0) {
+            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
+        }
+    }
+
+    onSelectedCameraIndexChanged: {
+        if (showCameraControls && selectedCameraIndex >= 0) {
+            supportZoom = true
+            supportFocus = true
+            supportPreset = true
+            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
+        }
     }
     
     // ?쇱そ ?뚮몢由?
@@ -44,7 +93,7 @@ Rectangle {
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: 150
 
             ColumnLayout {
                 anchors.fill: parent
@@ -62,6 +111,18 @@ Rectangle {
                     color: theme ? theme.textSecondary : "#71717a"
                     font.pixelSize: 11
                 }
+
+                Text {
+                    text: "휠 업/다운: 줌 인/아웃"
+                    color: theme ? theme.textSecondary : "#71717a"
+                    font.pixelSize: 10
+                }
+
+                Button {
+                    text: root.mapModeEnabled ? "3D Map 모드 ON (미구현)" : "3D Map 모드 OFF (미구현)"
+                    Layout.fillWidth: true
+                    onClicked: root.mapModeEnabled = !root.mapModeEnabled
+                }
             }
         }
 
@@ -72,17 +133,18 @@ Rectangle {
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: 360
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 12
-                spacing: 8
+                spacing: 6
 
                 Button {
-                    text: "3D Map (준비중)"
+                    text: "줌 +"
                     Layout.fillWidth: true
-                    enabled: false
+                    enabled: root.selectedCameraIndex >= 0 && root.supportZoom
+                    onClicked: backend.sunapiZoomIn(root.selectedCameraIndex)
                     background: Rectangle {
                         color: theme ? theme.bgSecondary : "#09090b"
                         border.color: theme ? theme.border : "#27272a"
@@ -98,33 +160,117 @@ Rectangle {
                     }
                 }
 
-                Rectangle {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    color: theme ? theme.bgSecondary : "#09090b"
-                    border.color: theme ? theme.border : "#27272a"
-                    border.width: 1
-                    radius: 6
+                    spacing: 6
+                    Button {
+                        text: "줌 -"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportZoom
+                        onClicked: backend.sunapiZoomOut(root.selectedCameraIndex)
+                    }
+                    Button {
+                        text: "줌 정지"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportZoom
+                        onClicked: backend.sunapiZoomStop(root.selectedCameraIndex)
+                    }
+                }
 
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 3
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Button {
+                        text: "포커스 Near"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportFocus
+                        onClicked: backend.sunapiFocusNear(root.selectedCameraIndex)
+                    }
+                    Button {
+                        text: "포커스 Far"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportFocus
+                        onClicked: backend.sunapiFocusFar(root.selectedCameraIndex)
+                    }
+                }
 
-                        Text {
-                            text: "디지털 PTZ 사용 가능"
-                            color: theme ? theme.textPrimary : "white"
-                            font.bold: true
-                            font.pixelSize: 11
-                        }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Button {
+                        text: "포커스 정지"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportFocus
+                        onClicked: backend.sunapiFocusStop(root.selectedCameraIndex)
+                    }
+                    Button {
+                        text: "오토포커스"
+                        Layout.fillWidth: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportFocus
+                        onClicked: backend.sunapiSimpleAutoFocus(root.selectedCameraIndex)
+                    }
+                }
 
-                        Text {
-                            text: "휠: 줌  |  더블클릭: 줌 토글"
-                            color: theme ? theme.textSecondary : "#71717a"
-                            font.pixelSize: 10
-                            wrapMode: Text.WordWrap
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    TextField {
+                        id: presetIdField
+                        Layout.fillWidth: true
+                        placeholderText: "프리셋 번호"
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        enabled: root.selectedCameraIndex >= 0 && root.supportPreset
+                        onTextEdited: {
+                            var sanitized = text.replace(/[^0-9]/g, "")
+                            if (sanitized !== text) {
+                                text = sanitized
+                                cursorPosition = text.length
+                            }
                         }
                     }
+                    Button {
+                        text: "프리셋 이동"
+                        Layout.preferredWidth: 96
+                        enabled: root.selectedCameraIndex >= 0 && root.supportPreset
+                                 && presetIdField.text.length > 0
+                        onClicked: backend.sunapiMovePreset(root.selectedCameraIndex, parseInt(presetIdField.text, 10))
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    ComboBox {
+                        id: exposureModeCombo
+                        Layout.fillWidth: true
+                        model: ["Auto", "Manual"]
+                        enabled: root.selectedCameraIndex >= 0
+                    }
+                    ComboBox {
+                        id: wbModeCombo
+                        Layout.fillWidth: true
+                        model: ["Auto", "Manual"]
+                        enabled: root.selectedCameraIndex >= 0
+                    }
+                }
+
+                Button {
+                    text: "이미지 튜닝 적용"
+                    Layout.fillWidth: true
+                    enabled: root.selectedCameraIndex >= 0
+                    onClicked: {
+                        backend.sunapiSetExposureMode(root.selectedCameraIndex, exposureModeCombo.currentText)
+                        backend.sunapiSetWhiteBalanceMode(root.selectedCameraIndex, wbModeCombo.currentText)
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.cameraControlStatus.length > 0
+                    text: root.cameraControlStatus
+                    color: root.cameraControlError ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
                 }
             }
         }

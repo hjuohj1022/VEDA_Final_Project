@@ -20,6 +20,10 @@
 #include <QSslCertificate>
 #include <QSslKey>
 #include <QSslError>
+#include <QUrlQuery>
+#include <QRegularExpression>
+#include <QByteArray>
+#include <QAuthenticator>
 
 Backend::Backend(QObject *parent) : QObject(parent)
 {
@@ -27,6 +31,21 @@ Backend::Backend(QObject *parent) : QObject(parent)
     m_manager->setCookieJar(new QNetworkCookieJar(this));
     setActiveCameras(0);
     loadEnv();
+    connect(m_manager, &QNetworkAccessManager::authenticationRequired,
+            this,
+            [this](QNetworkReply *reply, QAuthenticator *authenticator) {
+                const QString user = m_env.value("SUNAPI_USER").trimmed();
+                const QString pass = m_env.value("SUNAPI_PASSWORD").trimmed();
+                const QString sunapiHost = m_env.value("SUNAPI_IP").trimmed();
+                const QString host = reply ? reply->url().host() : QString();
+                qInfo() << "[SUNAPI][AUTH] challenge host=" << host
+                        << "realm=" << authenticator->realm()
+                        << "userConfigured=" << !user.isEmpty();
+                if (!user.isEmpty() && !sunapiHost.isEmpty() && host.compare(sunapiHost, Qt::CaseInsensitive) == 0) {
+                    authenticator->setUser(user);
+                    authenticator->setPassword(pass);
+                }
+            });
     setupMqtt();
 
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
@@ -409,18 +428,22 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
 
     const QString defaultMainTemplate = "/{index}/onvif/profile{profile}/media.smp";
     const QString defaultSubTemplate = "/{index}/onvif/profile{profile}/media.smp";
-    const QString mainTemplate = m_env.value("RTSP_MAIN_PATH_TEMPLATE", defaultMainTemplate).trimmed().isEmpty()
+    const QString envMainTemplate = m_env.value("RTSP_MAIN_PATH_TEMPLATE", defaultMainTemplate).trimmed().isEmpty()
             ? defaultMainTemplate
             : m_env.value("RTSP_MAIN_PATH_TEMPLATE", defaultMainTemplate).trimmed();
+    const QString envSubTemplate = m_env.value("RTSP_SUB_PATH_TEMPLATE").trimmed();
+
+    const QString mainTemplate = m_rtspMainPathTemplateOverride.isEmpty()
+            ? envMainTemplate
+            : m_rtspMainPathTemplateOverride;
+    const QString subTemplate = m_rtspSubPathTemplateOverride.isEmpty()
+            ? (envSubTemplate.isEmpty() ? defaultSubTemplate : envSubTemplate)
+            : m_rtspSubPathTemplateOverride;
+
     QString pathTemplate = mainTemplate;
 
     if (useSubStream) {
-        const QString subTemplate = m_env.value("RTSP_SUB_PATH_TEMPLATE").trimmed();
-        if (!subTemplate.isEmpty()) {
-            pathTemplate = subTemplate;
-        } else {
-            pathTemplate = defaultSubTemplate;
-        }
+        pathTemplate = subTemplate;
     }
 
     const QString mainProfile = m_env.value("RTSP_MAIN_PROFILE", "1").trimmed();
@@ -450,6 +473,297 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
     return QString("rtsp://%1%2:%3%4").arg(authPrefix, m_rtspIp, m_rtspPort, path);
 }
 
+bool Backend::sendSunapiCommand(const QString &cgiName,
+                                const QMap<QString, QString> &params,
+                                int cameraIndex,
+                                const QString &actionLabel,
+                                bool includeChannelParam) {
+    if (cameraIndex < 0) {
+        emit cameraControlMessage(QString("%1 실패: 잘못된 카메라 인덱스").arg(actionLabel), true);
+        return false;
+    }
+
+    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    if (host.isEmpty()) {
+        emit cameraControlMessage(QString("%1 실패: SUNAPI_IP가 비어 있습니다").arg(actionLabel), true);
+        return false;
+    }
+
+    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
+    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
+    const int defaultPort = (scheme == "https") ? 443 : 80;
+    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+    QUrl url;
+    url.setScheme(scheme);
+    url.setHost(host);
+    if (port > 0) {
+        url.setPort(port);
+    }
+    url.setPath(QString("/stw-cgi/%1").arg(cgiName));
+
+    QUrlQuery query;
+    // Some SUNAPI firmware is sensitive to parameter order.
+    // Keep canonical order: msubmenu -> action -> Channel -> others.
+    if (params.contains("msubmenu")) {
+        query.addQueryItem("msubmenu", params.value("msubmenu"));
+    }
+    if (params.contains("action")) {
+        query.addQueryItem("action", params.value("action"));
+    }
+
+    if (params.contains("Channel")) {
+        query.addQueryItem("Channel", params.value("Channel"));
+    } else if (params.contains("channel")) {
+        query.addQueryItem("channel", params.value("channel"));
+    } else if (includeChannelParam) {
+        query.addQueryItem("Channel", QString::number(cameraIndex));
+    }
+
+    for (auto it = params.constBegin(); it != params.constEnd(); ++it) {
+        if (it.key() == "msubmenu" || it.key() == "action" || it.key() == "Channel" || it.key() == "channel") {
+            continue;
+        }
+        query.addQueryItem(it.key(), it.value());
+    }
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    qInfo() << "[SUNAPI] request:" << actionLabel << "url=" << url.toString();
+    QNetworkReply *reply = m_manager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, actionLabel]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+        const QString bodyLower = body.toLower();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            bool sunapiBodyError = false;
+            QString sunapiErrMsg;
+
+            // SUNAPI는 HTTP 200이어도 본문에 Error/Fail을 내려주는 경우가 있어 본문 검사 필요.
+            if (!body.isEmpty()) {
+                const QRegularExpression errPattern("^\\s*error\\s*=\\s*([^\\r\\n]+)",
+                                                    QRegularExpression::CaseInsensitiveOption
+                                                    | QRegularExpression::MultilineOption);
+                const QRegularExpressionMatch errMatch = errPattern.match(body);
+                if (errMatch.hasMatch()) {
+                    const QString errValue = errMatch.captured(1).trimmed();
+                    const QString errValueLower = errValue.toLower();
+                    if (errValueLower != "0"
+                        && errValueLower != "ok"
+                        && errValueLower != "none"
+                        && errValueLower != "success") {
+                        sunapiBodyError = true;
+                        sunapiErrMsg = QString("Error=%1").arg(errValue);
+                    }
+                }
+
+                if (!sunapiBodyError
+                    && (bodyLower.contains("fail")
+                        || bodyLower.contains("unsupported")
+                        || bodyLower.contains("not support")
+                        || bodyLower.contains("invalid"))) {
+                    // 일부 모델은 Error= 대신 문자열만 반환함.
+                    sunapiBodyError = true;
+                    sunapiErrMsg = body.left(120);
+                }
+            }
+
+            if (sunapiBodyError) {
+                const QString err = QString("%1 실패: 장비 응답 오류 (%2)")
+                                        .arg(actionLabel, sunapiErrMsg);
+                qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(200);
+                emit cameraControlMessage(err, true);
+            } else {
+                emit cameraControlMessage(QString("%1 성공").arg(actionLabel), false);
+            }
+        } else {
+            const QString err = QString("%1 실패 (HTTP %2): %3")
+                                    .arg(actionLabel)
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(160);
+            emit cameraControlMessage(err, true);
+        }
+        reply->deleteLater();
+    });
+
+    return true;
+}
+
+bool Backend::sunapiZoomIn(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"ZoomContinuous", "In"}},
+        cameraIndex,
+        "줌 인");
+}
+
+bool Backend::sunapiZoomOut(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"ZoomContinuous", "Out"}},
+        cameraIndex,
+        "줌 아웃");
+}
+
+bool Backend::sunapiZoomStop(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"ZoomContinuous", "Stop"}},
+        cameraIndex,
+        "줌 정지");
+}
+
+bool Backend::sunapiFocusNear(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"FocusContinuous", "Near"}},
+        cameraIndex,
+        "초점 Near");
+}
+
+bool Backend::sunapiFocusFar(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"FocusContinuous", "Far"}},
+        cameraIndex,
+        "초점 Far");
+}
+
+bool Backend::sunapiFocusStop(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"FocusContinuous", "Stop"}},
+        cameraIndex,
+        "초점 정지");
+}
+
+bool Backend::sunapiSimpleAutoFocus(int cameraIndex) {
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "focus"}, {"action", "control"}, {"Mode", "SimpleFocus"}},
+        cameraIndex,
+        "오토포커스");
+}
+
+bool Backend::sunapiMovePreset(int cameraIndex, int presetId) {
+    if (presetId < 1) {
+        emit cameraControlMessage("프리셋 이동 실패: 프리셋 번호는 1 이상이어야 합니다.", true);
+        return false;
+    }
+    return sendSunapiCommand(
+        "ptzcontrol.cgi",
+        {{"msubmenu", "preset"}, {"action", "control"}, {"Preset", QString::number(presetId)}},
+        cameraIndex,
+        QString("프리셋 %1 이동").arg(presetId));
+}
+
+bool Backend::sunapiSetExposureMode(int cameraIndex, QString mode) {
+    const QString normalized = mode.trimmed();
+    if (normalized.isEmpty()) {
+        emit cameraControlMessage("노출 모드 변경 실패: 모드 값이 비어 있습니다.", true);
+        return false;
+    }
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "exposure"}, {"action", "control"}, {"Mode", normalized}},
+        cameraIndex,
+        QString("노출 모드 %1").arg(normalized));
+}
+
+bool Backend::sunapiSetWhiteBalanceMode(int cameraIndex, QString mode) {
+    const QString normalized = mode.trimmed();
+    if (normalized.isEmpty()) {
+        emit cameraControlMessage("화이트밸런스 변경 실패: 모드 값이 비어 있습니다.", true);
+        return false;
+    }
+    return sendSunapiCommand(
+        "image.cgi",
+        {{"msubmenu", "whitebalance"}, {"action", "control"}, {"Mode", normalized}},
+        cameraIndex,
+        QString("화이트밸런스 %1").arg(normalized));
+}
+
+void Backend::sunapiLoadSupportedPtzActions(int cameraIndex) {
+    if (cameraIndex < 0) {
+        emit cameraControlMessage("지원 기능 조회 실패: 잘못된 카메라 인덱스", true);
+        return;
+    }
+
+    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    if (host.isEmpty()) {
+        emit cameraControlMessage("지원 기능 조회 실패: SUNAPI_IP가 비어 있습니다", true);
+        return;
+    }
+
+    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
+    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
+    const int defaultPort = (scheme == "https") ? 443 : 80;
+    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+    QUrl url;
+    url.setScheme(scheme);
+    url.setHost(host);
+    if (port > 0) {
+        url.setPort(port);
+    }
+    url.setPath("/stw-cgi/ptzcontrol.cgi");
+
+    QUrlQuery query;
+    query.addQueryItem("msubmenu", "supportedptzactions");
+    query.addQueryItem("action", "view");
+    query.addQueryItem("Channel", QString::number(cameraIndex));
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    qInfo() << "[SUNAPI] request:" << "지원 기능 조회" << "url=" << url.toString();
+    QNetworkReply *reply = m_manager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraIndex]() {
+        QVariantMap actions;
+        actions.insert("zoom", true);
+        actions.insert("focus", true);
+        actions.insert("preset", true);
+
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+        const QString lower = body.toLower();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            // Best-effort parser: disable only when body explicitly says unsupported/unavailable.
+            const bool zoomUnsupported =
+                (lower.contains("zoom=\"false\"")
+                 || lower.contains("zoom=false")
+                 || lower.contains("zoom: false")
+                 || lower.contains("zoom unsupported"));
+            const bool focusUnsupported =
+                (lower.contains("focus=\"false\"")
+                 || lower.contains("focus=false")
+                 || lower.contains("focus: false")
+                 || lower.contains("focus unsupported"));
+            const bool presetUnsupported =
+                (lower.contains("preset=\"false\"")
+                 || lower.contains("preset=false")
+                 || lower.contains("preset: false")
+                 || lower.contains("preset unsupported"));
+
+            if (zoomUnsupported) actions.insert("zoom", false);
+            if (focusUnsupported) actions.insert("focus", false);
+            if (presetUnsupported) actions.insert("preset", false);
+
+            emit sunapiSupportedPtzActionsLoaded(cameraIndex, actions);
+            emit cameraControlMessage("지원 기능 조회 완료", false);
+        } else {
+            const QString err = QString("지원 기능 조회 실패 (HTTP %1): %2")
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(160);
+            emit cameraControlMessage(err, true);
+            emit sunapiSupportedPtzActionsLoaded(cameraIndex, actions);
+        }
+        reply->deleteLater();
+    });
+}
+
 void Backend::setActiveCameras(int count) {
     if (m_activeCameras != count) {
         m_activeCameras = count;
@@ -474,6 +788,10 @@ void Backend::setLatency(int ms) {
 void Backend::login(QString id, QString pw) {
     if (m_loginLocked) {
         emit loginFailed("로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+        return;
+    }
+    if (m_loginInProgress) {
+        emit loginFailed("로그인 요청 처리 중입니다. 잠시만 기다려 주세요.");
         return;
     }
 
@@ -520,6 +838,8 @@ void Backend::login(QString id, QString pw) {
     QJsonDocument doc(json);
 
     QNetworkReply *reply = m_manager->post(request, doc.toJson());
+    m_loginReply = reply;
+    m_loginInProgress = true;
     connect(reply, &QNetworkReply::sslErrors, this, [=](const QList<QSslError> &errors) {
         for (const QSslError &e : errors) {
             qWarning() << "[LOGIN][SSL]" << e.errorString();
@@ -528,7 +848,8 @@ void Backend::login(QString id, QString pw) {
 
     QTimer *loginTimeout = new QTimer(reply);
     loginTimeout->setSingleShot(true);
-    loginTimeout->setInterval(5000);
+    const int timeoutMs = qMax(8000, m_env.value("LOGIN_TIMEOUT_MS", "15000").toInt());
+    loginTimeout->setInterval(timeoutMs);
     connect(loginTimeout, &QTimer::timeout, this, [reply]() {
         if (reply->isRunning()) {
             reply->setProperty("timedOut", true);
@@ -541,8 +862,13 @@ void Backend::login(QString id, QString pw) {
         const bool timedOut = reply->property("timedOut").toBool();
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QNetworkReply::NetworkError netError = reply->error();
+        if (loginTimeout) {
+            loginTimeout->stop();
+        }
         qWarning() << "[LOGIN] status=" << statusCode
                    << "netError=" << static_cast<int>(netError)
+                   << "timedOut=" << timedOut
+                   << "timeoutMs=" << timeoutMs
                    << "errorString=" << reply->errorString();
 
         if (reply->error() == QNetworkReply::NoError) {
@@ -562,51 +888,55 @@ void Backend::login(QString id, QString pw) {
         } else {
             if (timedOut) {
                 emit loginFailed("서버 응답 시간이 초과되었습니다. 서버 상태를 확인해 주세요.");
-                reply->deleteLater();
-                return;
-            }
-
-            const bool isAuthFailure = (statusCode == 401 || statusCode == 403
-                                     || netError == QNetworkReply::AuthenticationRequiredError
-                                     || netError == QNetworkReply::ContentAccessDenied);
-
-            const bool isServerUnavailable =
-                    (netError == QNetworkReply::ConnectionRefusedError
-                  || netError == QNetworkReply::RemoteHostClosedError
-                  || netError == QNetworkReply::HostNotFoundError
-                  || netError == QNetworkReply::TimeoutError
-                  || netError == QNetworkReply::TemporaryNetworkFailureError
-                  || netError == QNetworkReply::NetworkSessionFailedError
-                  || netError == QNetworkReply::ServiceUnavailableError
-                  || statusCode >= 500);
-
-            const bool isSslFailure =
-                    (netError == QNetworkReply::SslHandshakeFailedError
-                  || netError == QNetworkReply::UnknownNetworkError);
-
-            if (isSslFailure) {
-                emit loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN) 또는 API_URL(HTTP/HTTPS)을 확인해 주세요.");
-            } else if (isServerUnavailable) {
-                emit loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
-            } else if (isAuthFailure) {
-                if (!m_loginLocked) {
-                    m_loginFailedAttempts++;
-                    if (m_loginFailedAttempts >= m_loginMaxAttempts) {
-                        m_loginLocked = true;
-                    }
-                    emit loginLockChanged();
-                }
-
-                if (m_loginLocked) {
-                    emit loginFailed("비밀번호를 여러 번 잘못 입력하여 로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
-                } else {
-                    int remaining = m_loginMaxAttempts - m_loginFailedAttempts;
-                    emit loginFailed(QString("비밀번호가 잘못되었습니다. (%1회 남음)").arg(remaining));
-                }
             } else {
-                emit loginFailed("로그인 요청에 실패했습니다. 네트워크 또는 서버 상태를 확인해 주세요.");
+                const bool isAuthFailure = (statusCode == 401 || statusCode == 403
+                                         || netError == QNetworkReply::AuthenticationRequiredError
+                                         || netError == QNetworkReply::ContentAccessDenied);
+
+                const bool isServerUnavailable =
+                        (netError == QNetworkReply::ConnectionRefusedError
+                      || netError == QNetworkReply::RemoteHostClosedError
+                      || netError == QNetworkReply::HostNotFoundError
+                      || netError == QNetworkReply::TimeoutError
+                      || netError == QNetworkReply::TemporaryNetworkFailureError
+                      || netError == QNetworkReply::NetworkSessionFailedError
+                      || netError == QNetworkReply::ServiceUnavailableError
+                      || statusCode >= 500);
+
+                const bool isSslFailure =
+                        (netError == QNetworkReply::SslHandshakeFailedError
+                      || netError == QNetworkReply::UnknownNetworkError);
+
+                if (netError == QNetworkReply::OperationCanceledError) {
+                    emit loginFailed("로그인 요청이 취소되었습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.");
+                } else if (isSslFailure) {
+                    emit loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN) 또는 API_URL(HTTP/HTTPS)을 확인해 주세요.");
+                } else if (isServerUnavailable) {
+                    emit loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
+                } else if (isAuthFailure) {
+                    if (!m_loginLocked) {
+                        m_loginFailedAttempts++;
+                        if (m_loginFailedAttempts >= m_loginMaxAttempts) {
+                            m_loginLocked = true;
+                        }
+                        emit loginLockChanged();
+                    }
+
+                    if (m_loginLocked) {
+                        emit loginFailed("비밀번호를 여러 번 잘못 입력하여 로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
+                    } else {
+                        int remaining = m_loginMaxAttempts - m_loginFailedAttempts;
+                        emit loginFailed(QString("비밀번호가 잘못되었습니다. (%1회 남음)").arg(remaining));
+                    }
+                } else {
+                    emit loginFailed("로그인 요청에 실패했습니다. 네트워크 또는 서버 상태를 확인해 주세요.");
+                }
             }
         }
+        if (m_loginReply == reply) {
+            m_loginReply = nullptr;
+        }
+        m_loginInProgress = false;
         reply->deleteLater();
     });
 }
@@ -688,16 +1018,113 @@ bool Backend::updateRtspIp(QString ip) {
 }
 
 bool Backend::updateRtspConfig(QString ip, QString port) {
-    QString ipTrimmed = ip.trimmed();
+    QString inputTrimmed = ip.trimmed();
     QString portTrimmed = port.trimmed();
-    if (ipTrimmed.isEmpty() || portTrimmed.isEmpty()) {
+    if (inputTrimmed.isEmpty()) {
         return false;
     }
 
+    QString ipTrimmed = inputTrimmed;
+    int portNum = 0;
     bool ok = false;
-    int portNum = portTrimmed.toInt(&ok);
-    if (!ok || portNum < 1 || portNum > 65535) {
+    if (!portTrimmed.isEmpty()) {
+        portNum = portTrimmed.toInt(&ok);
+        if (!ok || portNum < 1 || portNum > 65535) {
+            return false;
+        }
+    }
+
+    QString requestedMainPath;
+    QString requestedSubPath;
+
+    const bool inputIsRtspUrl = inputTrimmed.startsWith("rtsp://", Qt::CaseInsensitive)
+                                || inputTrimmed.startsWith("rtsps://", Qt::CaseInsensitive);
+
+    if (inputIsRtspUrl) {
+        QUrl rtspUrl(inputTrimmed);
+        if (!rtspUrl.isValid() || rtspUrl.host().trimmed().isEmpty()) {
+            return false;
+        }
+
+        ipTrimmed = rtspUrl.host().trimmed();
+        if (portNum == 0) {
+            int parsedPort = rtspUrl.port();
+            if (parsedPort > 0) {
+                portNum = parsedPort;
+            }
+        }
+
+        QString path = rtspUrl.path().trimmed();
+        if (!path.isEmpty() && path != "/") {
+            QRegularExpression indexHead("^/(\\d+)(/.*)$");
+            QRegularExpressionMatch m = indexHead.match(path);
+            if (m.hasMatch()) {
+                path = "/{index}" + m.captured(2);
+            }
+
+            if (!path.startsWith('/')) {
+                path.prepend('/');
+            }
+
+            if (requestedMainPath.isEmpty() && requestedSubPath.isEmpty()) {
+                if (path.contains("/main")) {
+                    requestedMainPath = path;
+                    requestedSubPath = path;
+                    requestedSubPath.replace("/main", "/sub");
+                } else if (path.contains("/sub")) {
+                    requestedSubPath = path;
+                    requestedMainPath = path;
+                    requestedMainPath.replace("/sub", "/main");
+                }
+            }
+        }
+    }
+
+    if (portNum == 0) {
+        portNum = m_rtspPort.trimmed().toInt(&ok);
+        if (!ok || portNum < 1 || portNum > 65535) {
+            portNum = 8554;
+        }
+    }
+
+    if (ipTrimmed.isEmpty()) {
         return false;
+    }
+
+    // If user entered plain host/IP+port in settings popup,
+    // keep path policy from .env (clear runtime overrides).
+    if (!inputIsRtspUrl && requestedMainPath.isEmpty() && requestedSubPath.isEmpty()) {
+        m_rtspMainPathTemplateOverride.clear();
+        m_rtspSubPathTemplateOverride.clear();
+    }
+
+    if (!requestedMainPath.isEmpty()) {
+        if (!requestedMainPath.startsWith('/')) {
+            requestedMainPath.prepend('/');
+        }
+        if (!requestedMainPath.contains("{index}")) {
+            return false;
+        }
+        m_rtspMainPathTemplateOverride = requestedMainPath;
+    }
+
+    if (!requestedSubPath.isEmpty()) {
+        if (!requestedSubPath.startsWith('/')) {
+            requestedSubPath.prepend('/');
+        }
+        if (!requestedSubPath.contains("{index}")) {
+            return false;
+        }
+        m_rtspSubPathTemplateOverride = requestedSubPath;
+    }
+
+    if (!requestedMainPath.isEmpty() && requestedSubPath.isEmpty() && m_rtspSubPathTemplateOverride.isEmpty()) {
+        m_rtspSubPathTemplateOverride = requestedMainPath;
+        m_rtspSubPathTemplateOverride.replace("/main", "/sub");
+    }
+    if (!requestedSubPath.isEmpty() && requestedMainPath.isEmpty() && m_rtspMainPathTemplateOverride.isEmpty()) {
+        m_rtspMainPathTemplateOverride = requestedSubPath;
+        m_rtspMainPathTemplateOverride.replace("/sub", "/main");
     }
 
     setRtspIp(ipTrimmed);
@@ -717,6 +1144,8 @@ bool Backend::resetRtspConfigToEnv() {
     settings.remove("network/rtsp_ip");
     settings.remove("network/rtsp_port");
     m_useCustomRtspConfig = false;
+    m_rtspMainPathTemplateOverride.clear();
+    m_rtspSubPathTemplateOverride.clear();
 
     bool changed = false;
     if (m_rtspIp != nextIp) {
@@ -731,6 +1160,54 @@ bool Backend::resetRtspConfigToEnv() {
     }
 
     return changed;
+}
+
+void Backend::probeRtspEndpoint(QString ip, QString port, int timeoutMs) {
+    const QString ipTrimmed = ip.trimmed();
+    if (ipTrimmed.isEmpty()) {
+        emit rtspProbeFinished(false, "IP가 비어 있습니다.");
+        return;
+    }
+
+    bool ok = false;
+    int portNum = port.trimmed().toInt(&ok);
+    if (!ok || portNum < 1 || portNum > 65535) {
+        portNum = 8554;
+    }
+
+    const int safeTimeoutMs = qBound(300, timeoutMs, 5000);
+
+    QTcpSocket *socket = new QTcpSocket(this);
+    QTimer *timer = new QTimer(socket);
+    timer->setSingleShot(true);
+    timer->setInterval(safeTimeoutMs);
+
+    auto done = [this, socket, timer](bool success, const QString &errorMsg) {
+        if (socket->property("probe_done").toBool()) {
+            return;
+        }
+        socket->setProperty("probe_done", true);
+        timer->stop();
+        socket->abort();
+        emit rtspProbeFinished(success, errorMsg);
+        socket->deleteLater();
+    };
+
+    connect(socket, &QTcpSocket::connected, this, [done]() {
+        done(true, QString());
+    });
+
+    connect(socket, &QTcpSocket::errorOccurred, this,
+            [done, socket](QAbstractSocket::SocketError) {
+                done(false, QString("RTSP 서버 연결 실패: %1").arg(socket->errorString()));
+            });
+
+    connect(timer, &QTimer::timeout, this, [done]() {
+        done(false, QString("RTSP 연결 확인 시간 초과"));
+    });
+
+    timer->start();
+    socket->connectToHost(ipTrimmed, static_cast<quint16>(portNum));
 }
 
 void Backend::refreshRecordings() {

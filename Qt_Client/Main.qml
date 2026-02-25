@@ -25,8 +25,11 @@ ApplicationWindow {
     property int rtspConnectSuccessStreak: 0
     property int rtspConnectStartedMs: 0
     property int rtspConnectMinCheckMs: 800
+    property string pendingRtspIp: ""
+    property string pendingRtspPort: ""
     property bool streamPrewarmEnabled: true
-    property int popupCameraIndex: -1
+    property int inlineMainCameraIndex: -1
+    property bool inlineMainViewVisible: false
 
     function cameraLocationName(index) {
         var names = ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
@@ -34,12 +37,16 @@ ApplicationWindow {
         return names[index]
     }
 
-    function startRtspConnectCheck() {
+    function startRtspConnectCheck(resetStats) {
+        if (resetStats === undefined)
+            resetStats = true
         rtspConnecting = true
         rtspConnectSuccessStreak = 0
         rtspConnectStartedMs = Date.now()
-        backend.activeCameras = 0
-        backend.currentFps = 0
+        if (resetStats) {
+            backend.activeCameras = 0
+            backend.currentFps = 0
+        }
         rtspConfigIsError = false
         rtspConfigError = "연결 확인 중..."
         rtspConnectTimeout.restart()
@@ -49,8 +56,20 @@ ApplicationWindow {
     function stopRtspConnectCheck() {
         rtspConnecting = false
         rtspConnectSuccessStreak = 0
+        pendingRtspIp = ""
+        pendingRtspPort = ""
         rtspConnectPoll.stop()
         rtspConnectTimeout.stop()
+    }
+
+    function startRtspProbe(ip, portText) {
+        stopRtspConnectCheck()
+        pendingRtspIp = ip
+        pendingRtspPort = portText
+        rtspConnecting = true
+        rtspConfigIsError = false
+        rtspConfigError = "RTSP 서버 확인 중..."
+        backend.probeRtspEndpoint(ip, portText, 1200)
     }
 
     function isValidIpv4(ip) {
@@ -62,6 +81,53 @@ ApplicationWindow {
             if (v < 0 || v > 255) return false
         }
         return true
+    }
+
+    function isPrivateIpv4(ip) {
+        var parts = ip.trim().split(".")
+        if (parts.length !== 4) return false
+        var a = parseInt(parts[0], 10)
+        var b = parseInt(parts[1], 10)
+        if (a === 10) return true
+        if (a === 172 && b >= 16 && b <= 31) return true
+        if (a === 192 && b === 168) return true
+        return false
+    }
+
+    function sanitizeIpv4Input(raw) {
+        var txt = raw.replace(/[^0-9.]/g, "")
+        var parts = txt.split(".")
+        if (parts.length > 4) {
+            parts = parts.slice(0, 4)
+        }
+
+        for (var i = 0; i < parts.length; i++) {
+            var p = parts[i]
+            if (p.length > 3) {
+                p = p.slice(0, 3)
+            }
+            if (p.length > 0) {
+                var n = parseInt(p, 10)
+                if (!isNaN(n) && n > 255) {
+                    p = "255"
+                }
+            }
+            parts[i] = p
+        }
+        return parts.join(".")
+    }
+
+    function sanitizePortInput(raw) {
+        var txt = raw.replace(/[^0-9]/g, "")
+        if (txt.length === 0) return ""
+        if (txt.length > 5) {
+            txt = txt.slice(0, 5)
+        }
+        var n = parseInt(txt, 10)
+        if (!isNaN(n) && n > 65535) {
+            txt = "65535"
+        }
+        return txt
     }
 
     function resetSessionFromMove(x, y) {
@@ -204,8 +270,8 @@ ApplicationWindow {
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {
-                mainViewPopup.visible = false
-                popupCameraIndex = -1
+                inlineMainViewVisible = false
+                inlineMainCameraIndex = -1
                 backend.logout()
                 stackLayout.currentIndex = 1
             }
@@ -340,7 +406,9 @@ ApplicationWindow {
                                 id: stackLayout
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                currentIndex: backend.isLoggedIn ? 0 : 1
+                                currentIndex: backend.isLoggedIn
+                                              ? (window.inlineMainViewVisible ? 2 : 0)
+                                              : 1
 
                                 VideoGrid {
                                     id: videoGrid
@@ -348,16 +416,60 @@ ApplicationWindow {
                                     isActive: backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn)
                                     visible: stackLayout.currentIndex === 0
                                     onOpenMainViewRequested: function(cameraIndex) {
-                                        window.popupCameraIndex = cameraIndex
-                                        mainViewPopup.visible = true
-                                        mainViewPopup.raise()
-                                        mainViewPopup.requestActivate()
+                                        window.inlineMainCameraIndex = cameraIndex
+                                        window.inlineMainViewVisible = true
+                                        stackLayout.currentIndex = 2
                                     }
                                 }
 
                                 LoginScreen {
                                     id: loginScreen
                                     theme: window.appTheme
+                                }
+
+                                Item {
+                                    id: inlineMainView
+                                    visible: stackLayout.currentIndex === 2
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: window.appTheme.bgSecondary
+
+                                        ColumnLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 0
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                spacing: 0
+
+                                                VideoPlayer {
+                                                    Layout.fillWidth: true
+                                                    Layout.fillHeight: true
+                                                    theme: window.appTheme
+                                                    tileIndex: window.inlineMainCameraIndex
+                                                    titleText: window.inlineMainCameraIndex >= 0
+                                                               ? ("Cam " + (window.inlineMainCameraIndex + 1) + " - Main Stream")
+                                                               : "Main Stream"
+                                                    cameraIndex: window.inlineMainCameraIndex
+                                                    dptzEnabled: true
+                                                    locationName: window.cameraLocationName(window.inlineMainCameraIndex)
+                                                    startDelayMs: 0
+                                                    source: (backend.isLoggedIn && window.inlineMainCameraIndex >= 0)
+                                                            ? ((backend.rtspIp, backend.rtspPort),
+                                                               backend.buildRtspUrl(window.inlineMainCameraIndex, false))
+                                                            : ""
+                                                    onDoubleClicked: {
+                                                        window.inlineMainViewVisible = false
+                                                        window.inlineMainCameraIndex = -1
+                                                        stackLayout.currentIndex = 0
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -370,61 +482,8 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 theme: window.appTheme
                 visible: backend.isLoggedIn
-                showCameraControls: false
-                selectedCameraIndex: -1
-            }
-        }
-    }
-
-    Window {
-        id: mainViewPopup
-        transientParent: window
-        modality: Qt.NonModal
-        width: 980
-        height: 580
-        minimumWidth: 800
-        minimumHeight: 450
-        visible: false
-        title: popupCameraIndex >= 0 ? ("Cam " + (popupCameraIndex + 1) + " - Main Stream") : "Main Stream"
-        color: window.appTheme.bgSecondary
-
-        onVisibleChanged: {
-            if (!visible) {
-                window.popupCameraIndex = -1
-            }
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: window.appTheme.bgSecondary
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 8
-
-                VideoPlayer {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    theme: window.appTheme
-                    tileIndex: window.popupCameraIndex
-                    cameraIndex: window.popupCameraIndex
-                    dptzEnabled: true
-                    locationName: window.cameraLocationName(window.popupCameraIndex)
-                    startDelayMs: 0
-                    source: (mainViewPopup.visible && backend.isLoggedIn && window.popupCameraIndex >= 0)
-                            ? backend.buildRtspUrl(window.popupCameraIndex, false)
-                            : ""
-                    onDoubleClicked: mainViewPopup.visible = false
-                }
-
-                Sidebar {
-                    Layout.preferredWidth: 256
-                    Layout.fillHeight: true
-                    theme: window.appTheme
-                    visible: mainViewPopup.visible
-                    showCameraControls: true
-                    selectedCameraIndex: window.popupCameraIndex
-                }
+                showCameraControls: window.inlineMainViewVisible
+                selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
             }
         }
     }
@@ -452,15 +511,45 @@ ApplicationWindow {
         target: backend
         function onIsLoggedInChanged() {
             if (!backend.isLoggedIn) {
-                mainViewPopup.visible = false
-                popupCameraIndex = -1
+                inlineMainViewVisible = false
+                inlineMainCameraIndex = -1
             }
-            stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
+            stackLayout.currentIndex = backend.isLoggedIn
+                                     ? (inlineMainViewVisible ? 2 : 0)
+                                     : 1
         }
         function onSessionExpired() {
-            mainViewPopup.visible = false
-            popupCameraIndex = -1
+            inlineMainViewVisible = false
+            inlineMainCameraIndex = -1
             stackLayout.currentIndex = 1
+        }
+        function onRtspProbeFinished(success, error) {
+            if (!window.rtspConnecting || window.pendingRtspIp.length === 0) {
+                return
+            }
+
+            var ip = window.pendingRtspIp
+            var portText = window.pendingRtspPort
+            window.pendingRtspIp = ""
+            window.pendingRtspPort = ""
+
+            if (!success) {
+                window.rtspConnecting = false
+                window.rtspConfigIsError = true
+                window.rtspConfigError = error
+                return
+            }
+
+            var prevIp = backend.rtspIp
+            var prevPort = backend.rtspPort
+            if (backend.updateRtspConfig(ip, portText)) {
+                var changed = (prevIp !== backend.rtspIp) || (prevPort !== backend.rtspPort)
+                startRtspConnectCheck(changed)
+            } else {
+                window.rtspConnecting = false
+                window.rtspConfigIsError = true
+                window.rtspConfigError = "IP/포트 형식을 확인해 주세요."
+            }
         }
     }
 
@@ -553,6 +642,13 @@ ApplicationWindow {
                     placeholderText: "IP 입력"
                     color: theme.textPrimary
                     placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                    onTextEdited: {
+                        var sanitized = sanitizeIpv4Input(text)
+                        if (sanitized !== text) {
+                            text = sanitized
+                            cursorPosition = text.length
+                        }
+                    }
                     background: Rectangle {
                         color: theme.bgSecondary
                         border.color: rtspIpField.activeFocus ? theme.accent : theme.border
@@ -567,6 +663,13 @@ ApplicationWindow {
                     inputMethodHints: Qt.ImhDigitsOnly
                     color: theme.textPrimary
                     placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                    onTextEdited: {
+                        var sanitized = sanitizePortInput(text)
+                        if (sanitized !== text) {
+                            text = sanitized
+                            cursorPosition = text.length
+                        }
+                    }
                     background: Rectangle {
                         color: theme.bgSecondary
                         border.color: rtspPortField.activeFocus ? theme.accent : theme.border
@@ -592,10 +695,15 @@ ApplicationWindow {
                         Layout.preferredWidth: 96
                         enabled: !window.rtspConnecting
                         onClicked: {
-                            backend.resetRtspConfigToEnv()
-                            rtspIpField.text = ""
-                            rtspPortField.text = ""
-                            startRtspConnectCheck()
+                            var changed = backend.resetRtspConfigToEnv()
+                            rtspIpField.text = backend.rtspIp
+                            rtspPortField.text = backend.rtspPort
+                            if (changed) {
+                                startRtspConnectCheck(true)
+                            } else {
+                                rtspConfigIsError = false
+                                rtspConfigError = "이미 기본 RTSP 설정입니다."
+                            }
                         }
                         background: Rectangle {
                             color: parent.down ? theme.border : "transparent"
@@ -647,25 +755,44 @@ ApplicationWindow {
                         onClicked: {
                             var ip = rtspIpField.text.trim()
                             var portText = rtspPortField.text.trim()
-                            var portNum = parseInt(portText, 10)
+
+                            if (ip.length === 0) {
+                                rtspConfigIsError = true
+                                rtspConfigError = "IP를 입력해 주세요."
+                                return
+                            }
 
                             if (!isValidIpv4(ip)) {
                                 rtspConfigIsError = true
-                                rtspConfigError = "IP 형식을 확인해 주세요. (예: 192.168.0.10)"
-                                return
-                            }
-                            if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-                                rtspConfigIsError = true
-                                rtspConfigError = "포트는 1~65535 범위로 입력해 주세요."
+                                rtspConfigError = "IP 형식이 올바르지 않습니다. (예: 192.168.55.203)"
                                 return
                             }
 
-                            if (backend.updateRtspConfig(ip, String(portNum))) {
-                                startRtspConnectCheck()
-                            } else {
+                            if (!isPrivateIpv4(ip)) {
                                 rtspConfigIsError = true
-                                rtspConfigError = "IP/포트를 확인해 주세요. (포트 1~65535)"
+                                rtspConfigError = "사설망 IP만 허용됩니다. (10.x / 172.16~31.x / 192.168.x)"
+                                return
                             }
+
+                            if (portText.length > 0) {
+                                var portNum = parseInt(portText, 10)
+                                if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                                    rtspConfigIsError = true
+                                    rtspConfigError = "포트는 1~65535 범위로 입력해 주세요."
+                                    return
+                                }
+                            }
+
+                            var normalizedPort = portText.length > 0
+                                                 ? String(parseInt(portText, 10))
+                                                 : backend.rtspPort
+                            if (ip === backend.rtspIp && normalizedPort === backend.rtspPort) {
+                                rtspConfigIsError = false
+                                rtspConfigError = "이미 연결된 RTSP 설정입니다."
+                                return
+                            }
+
+                            startRtspProbe(ip, portText)
                         }
                         background: Rectangle {
                             color: parent.down ? "#ea580c" : theme.accent
@@ -692,6 +819,7 @@ ApplicationWindow {
         z: 1000
     }
 }
+
 
 
 
