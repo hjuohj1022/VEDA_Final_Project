@@ -27,6 +27,9 @@ ApplicationWindow {
     property int rtspConnectMinCheckMs: 800
     property string pendingRtspIp: ""
     property string pendingRtspPort: ""
+    property bool pendingRtspUseCustomAuth: false
+    property string pendingRtspUser: ""
+    property string pendingRtspPass: ""
     property bool streamPrewarmEnabled: true
     property int inlineMainCameraIndex: -1
     property bool inlineMainViewVisible: false
@@ -58,14 +61,20 @@ ApplicationWindow {
         rtspConnectSuccessStreak = 0
         pendingRtspIp = ""
         pendingRtspPort = ""
+        pendingRtspUseCustomAuth = false
+        pendingRtspUser = ""
+        pendingRtspPass = ""
         rtspConnectPoll.stop()
         rtspConnectTimeout.stop()
     }
 
-    function startRtspProbe(ip, portText) {
+    function startRtspProbe(ip, portText, useCustomAuth, username, password) {
         stopRtspConnectCheck()
         pendingRtspIp = ip
         pendingRtspPort = portText
+        pendingRtspUseCustomAuth = !!useCustomAuth
+        pendingRtspUser = username || ""
+        pendingRtspPass = password || ""
         rtspConnecting = true
         rtspConfigIsError = false
         rtspConfigError = "RTSP 서버 확인 중..."
@@ -280,6 +289,9 @@ ApplicationWindow {
                 stopRtspConnectCheck()
                 rtspIpField.text = ""
                 rtspPortField.text = ""
+                rtspAdvancedToggle.checked = false
+                rtspUserField.text = ""
+                rtspPassField.text = ""
                 rtspConfigError = ""
                 rtspConfigIsError = false
                 rtspSettingsPopup.visible = true
@@ -413,7 +425,9 @@ ApplicationWindow {
                                 VideoGrid {
                                     id: videoGrid
                                     theme: window.appTheme
-                                    isActive: backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn)
+                                    // In inline main view, stop hidden grid players to avoid 4-channel reconnect storms.
+                                    isActive: (!window.inlineMainViewVisible)
+                                              && (backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn))
                                     visible: stackLayout.currentIndex === 0
                                     onOpenMainViewRequested: function(cameraIndex) {
                                         window.inlineMainCameraIndex = cameraIndex
@@ -440,12 +454,13 @@ ApplicationWindow {
                                             anchors.margins: 8
                                             spacing: 0
 
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                Layout.fillHeight: true
-                                                spacing: 0
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    Layout.fillHeight: true
+                                                    spacing: 0
 
                                                 VideoPlayer {
+                                                    id: inlineMainPlayer
                                                     Layout.fillWidth: true
                                                     Layout.fillHeight: true
                                                     theme: window.appTheme
@@ -484,6 +499,13 @@ ApplicationWindow {
                 visible: backend.isLoggedIn
                 showCameraControls: window.inlineMainViewVisible
                 selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
+                onMainCameraReconnectRequested: function(cameraIndex) {
+                    if (!window.inlineMainViewVisible)
+                        return
+                    if (cameraIndex !== window.inlineMainCameraIndex)
+                        return
+                    inlineMainPlayer.restartStream()
+                }
             }
         }
     }
@@ -530,8 +552,14 @@ ApplicationWindow {
 
             var ip = window.pendingRtspIp
             var portText = window.pendingRtspPort
+            var useCustomAuth = window.pendingRtspUseCustomAuth
+            var authUser = window.pendingRtspUser
+            var authPass = window.pendingRtspPass
             window.pendingRtspIp = ""
             window.pendingRtspPort = ""
+            window.pendingRtspUseCustomAuth = false
+            window.pendingRtspUser = ""
+            window.pendingRtspPass = ""
 
             if (!success) {
                 window.rtspConnecting = false
@@ -543,6 +571,16 @@ ApplicationWindow {
             var prevIp = backend.rtspIp
             var prevPort = backend.rtspPort
             if (backend.updateRtspConfig(ip, portText)) {
+                if (useCustomAuth) {
+                    if (!backend.updateRtspCredentials(authUser, authPass)) {
+                        window.rtspConnecting = false
+                        window.rtspConfigIsError = true
+                        window.rtspConfigError = "RTSP 계정 형식을 확인해 주세요."
+                        return
+                    }
+                } else {
+                    backend.useEnvRtspCredentials()
+                }
                 var changed = (prevIp !== backend.rtspIp) || (prevPort !== backend.rtspPort)
                 startRtspConnectCheck(changed)
             } else {
@@ -600,7 +638,7 @@ ApplicationWindow {
         id: rtspSettingsPopup
         transientParent: window
         width: 380
-        height: 230
+        height: rtspAdvancedToggle.checked ? 330 : 230
         visible: false
         modality: Qt.ApplicationModal
         flags: Qt.Dialog | Qt.FramelessWindowHint
@@ -678,6 +716,67 @@ ApplicationWindow {
                     onAccepted: saveRtspButton.clicked()
                 }
 
+                CheckBox {
+                    id: rtspAdvancedToggle
+                    Layout.fillWidth: true
+                    text: "고급 설정 (RTSP 계정 직접 입력)"
+                    checked: false
+                    enabled: !window.rtspConnecting
+                    onToggled: {
+                        if (!checked) {
+                            rtspUserField.text = ""
+                            rtspPassField.text = ""
+                        }
+                    }
+                    indicator: Rectangle {
+                        implicitWidth: 14
+                        implicitHeight: 14
+                        radius: 3
+                        border.color: rtspAdvancedToggle.checked ? theme.accent : theme.border
+                        color: rtspAdvancedToggle.checked ? theme.accent : "transparent"
+                    }
+                    contentItem: Text {
+                        text: rtspAdvancedToggle.text
+                        color: theme.textSecondary
+                        font.pixelSize: 12
+                        leftPadding: 20
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: rtspAdvancedToggle.checked
+
+                    TextField {
+                        id: rtspUserField
+                        Layout.fillWidth: true
+                        placeholderText: "RTSP 아이디"
+                        color: theme.textPrimary
+                        placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                        background: Rectangle {
+                            color: theme.bgSecondary
+                            border.color: rtspUserField.activeFocus ? theme.accent : theme.border
+                            radius: 6
+                        }
+                    }
+
+                    TextField {
+                        id: rtspPassField
+                        Layout.fillWidth: true
+                        placeholderText: "RTSP 비밀번호"
+                        echoMode: TextInput.Password
+                        color: theme.textPrimary
+                        placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                        background: Rectangle {
+                            color: theme.bgSecondary
+                            border.color: rtspPassField.activeFocus ? theme.accent : theme.border
+                            radius: 6
+                        }
+                    }
+                }
+
                 Text {
                     Layout.fillWidth: true
                     visible: rtspConfigError.length > 0
@@ -698,6 +797,9 @@ ApplicationWindow {
                             var changed = backend.resetRtspConfigToEnv()
                             rtspIpField.text = backend.rtspIp
                             rtspPortField.text = backend.rtspPort
+                            rtspAdvancedToggle.checked = false
+                            rtspUserField.text = ""
+                            rtspPassField.text = ""
                             if (changed) {
                                 startRtspConnectCheck(true)
                             } else {
@@ -755,6 +857,9 @@ ApplicationWindow {
                         onClicked: {
                             var ip = rtspIpField.text.trim()
                             var portText = rtspPortField.text.trim()
+                            var useCustomAuth = rtspAdvancedToggle.checked
+                            var authUser = rtspUserField.text.trim()
+                            var authPass = rtspPassField.text
 
                             if (ip.length === 0) {
                                 rtspConfigIsError = true
@@ -783,16 +888,13 @@ ApplicationWindow {
                                 }
                             }
 
-                            var normalizedPort = portText.length > 0
-                                                 ? String(parseInt(portText, 10))
-                                                 : backend.rtspPort
-                            if (ip === backend.rtspIp && normalizedPort === backend.rtspPort) {
-                                rtspConfigIsError = false
-                                rtspConfigError = "이미 연결된 RTSP 설정입니다."
+                            if (useCustomAuth && authUser.length === 0) {
+                                rtspConfigIsError = true
+                                rtspConfigError = "고급 설정 사용 시 RTSP 아이디를 입력해 주세요."
                                 return
                             }
 
-                            startRtspProbe(ip, portText)
+                            startRtspProbe(ip, portText, useCustomAuth, authUser, authPass)
                         }
                         background: Rectangle {
                             color: parent.down ? "#ea580c" : theme.accent

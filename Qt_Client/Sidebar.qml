@@ -12,7 +12,9 @@ Rectangle {
     property bool mapModeEnabled: false
     property bool supportZoom: true
     property bool supportFocus: true
-    property bool supportPreset: true
+    property bool horizontalFlipEnabled: false
+    property bool verticalFlipEnabled: false
+    signal mainCameraReconnectRequested(int cameraIndex)
     color: theme ? theme.bgSecondary : "#09090b"
 
     function selectedCameraTitle() {
@@ -30,13 +32,18 @@ Rectangle {
             root.cameraControlStatus = message
             root.cameraControlError = isError
             controlStatusTimer.restart()
+            if (!isError
+                    && root.selectedCameraIndex >= 0
+                    && message.indexOf("Flip/Rotate") === 0) {
+                // Reconnect only selected main camera after encoder params changed.
+                root.mainCameraReconnectRequested(root.selectedCameraIndex)
+            }
         }
         function onSunapiSupportedPtzActionsLoaded(cameraIndex, actions) {
             if (cameraIndex !== root.selectedCameraIndex)
                 return
             root.supportZoom = actions.zoom !== false
             root.supportFocus = actions.focus !== false
-            root.supportPreset = actions.preset !== false
         }
     }
 
@@ -60,7 +67,6 @@ Rectangle {
         if (showCameraControls && selectedCameraIndex >= 0) {
             supportZoom = true
             supportFocus = true
-            supportPreset = true
             backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
         }
     }
@@ -133,7 +139,7 @@ Rectangle {
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 360
+            Layout.preferredHeight: 420
 
             ColumnLayout {
                 anchors.fill: parent
@@ -211,56 +217,59 @@ Rectangle {
                     }
                 }
 
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: 6
-                    TextField {
-                        id: presetIdField
-                        Layout.fillWidth: true
-                        placeholderText: "프리셋 번호"
-                        inputMethodHints: Qt.ImhDigitsOnly
-                        enabled: root.selectedCameraIndex >= 0 && root.supportPreset
-                        onTextEdited: {
-                            var sanitized = text.replace(/[^0-9]/g, "")
-                            if (sanitized !== text) {
-                                text = sanitized
-                                cursorPosition = text.length
-                            }
-                        }
-                    }
-                    Button {
-                        text: "프리셋 이동"
-                        Layout.preferredWidth: 96
-                        enabled: root.selectedCameraIndex >= 0 && root.supportPreset
-                                 && presetIdField.text.length > 0
-                        onClicked: backend.sunapiMovePreset(root.selectedCameraIndex, parseInt(presetIdField.text, 10))
-                    }
+                    height: 1
+                    color: theme ? theme.border : "#27272a"
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
                     ComboBox {
-                        id: exposureModeCombo
-                        Layout.fillWidth: true
-                        model: ["Auto", "Manual"]
-                        enabled: root.selectedCameraIndex >= 0
-                    }
-                    ComboBox {
                         id: wbModeCombo
                         Layout.fillWidth: true
-                        model: ["Auto", "Manual"]
+                        model: ["ATW", "Indoor", "Outdoor", "Manual", "AWC"]
                         enabled: root.selectedCameraIndex >= 0
+                    }
+                    Button {
+                        text: "화이트밸런스 적용"
+                        Layout.preferredWidth: 120
+                        enabled: root.selectedCameraIndex >= 0
+                        onClicked: backend.sunapiSetWhiteBalanceMode(root.selectedCameraIndex, wbModeCombo.currentText)
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    CheckBox {
+                        id: hFlipCheck
+                        text: "좌우 반전"
+                        checked: root.horizontalFlipEnabled
+                        onToggled: root.horizontalFlipEnabled = checked
+                    }
+
+                    CheckBox {
+                        id: vFlipCheck
+                        text: "상하 반전"
+                        checked: root.verticalFlipEnabled
+                        onToggled: root.verticalFlipEnabled = checked
                     }
                 }
 
                 Button {
-                    text: "이미지 튜닝 적용"
+                    text: "반전 적용"
                     Layout.fillWidth: true
                     enabled: root.selectedCameraIndex >= 0
                     onClicked: {
-                        backend.sunapiSetExposureMode(root.selectedCameraIndex, exposureModeCombo.currentText)
-                        backend.sunapiSetWhiteBalanceMode(root.selectedCameraIndex, wbModeCombo.currentText)
+                        backend.sunapiSetFlipAndRotate(
+                            root.selectedCameraIndex,
+                            root.horizontalFlipEnabled,
+                            root.verticalFlipEnabled,
+                            0
+                        )
                     }
                 }
 

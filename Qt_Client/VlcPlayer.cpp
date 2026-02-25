@@ -402,12 +402,16 @@ void VlcPlayer::scheduleReconnect()
     }
 
     m_reconnectAttempt = std::min(m_reconnectAttempt + 1, 10);
-    const int delayMs = std::min(3000, 200 * m_reconnectAttempt);
+    const int expStep = std::min(m_reconnectAttempt - 1, 4);
+    const int expDelayMs = 500 * (1 << expStep); // 0.5s,1s,2s,4s,8s
+    const uint hash = qHash(m_url);
+    const int jitterMs = static_cast<int>((hash + static_cast<uint>(m_reconnectAttempt * 97)) % 350u);
+    const int delayMs = std::min(10000, expDelayMs + jitterMs);
     m_reconnectTimer->start(delayMs);
 
     // Keep LIVE for transient drops. Mark OFFLINE only after reconnect retries.
-    if (m_offlineDelayTimer && !m_offlineDelayTimer->isActive() && m_reconnectAttempt >= 2) {
-        m_offlineDelayTimer->start(5000);
+    if (m_offlineDelayTimer && !m_offlineDelayTimer->isActive() && m_reconnectAttempt >= 3) {
+        m_offlineDelayTimer->start(7000);
     }
 }
 
