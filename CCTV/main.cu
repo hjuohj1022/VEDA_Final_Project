@@ -117,7 +117,7 @@ int main() {
     // 3. 스트리밍 시작
     // --------------------------------------
     _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
-    VideoCapture cap(RTSP_URL, CAP_FFMPEG);
+    VideoCapture cap(GetSelectedRtspUrl(), CAP_FFMPEG);
     cap.set(CAP_PROP_BUFFERSIZE, 1);
     if (!cap.isOpened()) {
         std::cerr << "Error: Cannot open RTSP stream" << std::endl;
