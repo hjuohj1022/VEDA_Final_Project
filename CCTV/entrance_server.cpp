@@ -155,7 +155,7 @@ static bool StartDepthProcess(const std::string& exePath, const Request& req) {
         nullptr,
         nullptr,
         FALSE,
-        CREATE_NO_WINDOW,
+        CREATE_NEW_CONSOLE,
         nullptr,
         workdir.c_str(),
         &si,

@@ -12,10 +12,10 @@ const std::string ENGINE_PATH = "C:/path/to/your/model.engine";
 
 // RTSP 채널 목록 (0~3)
 const std::array<std::string, 4> RTSP_URLS = {
-    "rtsp://192.168.x.x:8554/0/main",
-    "rtsp://192.168.x.x:8554/1/main",
-    "rtsp://192.168.x.x:8554/2/main",
-    "rtsp://192.168.x.x:8554/3/main"
+    "rtsp://test:test@192.168.x.x:8554/0/main",
+    "rtsp://test:test@192.168.x.x:8554/1/main",
+    "rtsp://test:test@192.168.x.x:8554/2/main",
+    "rtsp://test:test@192.168.x.x:8554/3/main"
 };
 
 // 사용할 RTSP 채널 인덱스 (0~3)

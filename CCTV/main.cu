@@ -203,10 +203,11 @@ int main(int argc, char** argv) {
     // 3. 스트리밍 시작
     // --------------------------------------
     _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
-    VideoCapture cap(RTSP_URLS[channelOverride], CAP_FFMPEG);
+    const std::string& rtspUrl = RTSP_URLS[channelOverride];
+    VideoCapture cap(rtspUrl, CAP_FFMPEG);
     cap.set(CAP_PROP_BUFFERSIZE, 1);
     if (!cap.isOpened()) {
-        std::cerr << "Error: Cannot open RTSP stream" << std::endl;
+        std::cerr << "Error: Cannot open RTSP stream: " << rtspUrl << std::endl;
         return -1;
     }
     
@@ -222,12 +223,20 @@ int main(int argc, char** argv) {
 
     auto prevTime = std::chrono::high_resolution_clock::now();
 
+    int grabFailCount = 0;
+    const int grabFailLogEvery = 30;
     while (true) {
         if (!cap.grab()) {
+            grabFailCount++;
+            if (grabFailCount % grabFailLogEvery == 1) {
+                std::cerr << "[WARN] RTSP grab failed (" << grabFailCount
+                          << "x). url=" << rtspUrl << std::endl;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
         if (!cap.retrieve(frame)) continue;
+        grabFailCount = 0;
         frameIdx++;
         if (frame.empty()) {
             std::cerr << "[WARN] Empty frame at idx=" << frameIdx << std::endl;
