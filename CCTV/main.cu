@@ -89,29 +89,93 @@ int main() {
     std::unique_ptr<IExecutionContext> context{engine->createExecutionContext()};
 
     // --------------------------------------
-    // 2. 메모리 할당
+    // 2. 텐서 shape 확인 + 메모리 할당
     // --------------------------------------
-    size_t inputSize = 1 * 3 * INPUT_SIZE * INPUT_SIZE * sizeof(float);
-    size_t outputSize = 1 * INPUT_SIZE * INPUT_SIZE * sizeof(float);
-    size_t rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t); 
+    auto volume = [](const Dims& dims) {
+        size_t v = 1;
+        for (int i = 0; i < dims.nbDims; ++i) v *= static_cast<size_t>(dims.d[i]);
+        return v;
+    };
 
-    void *d_input, *d_output, *d_raw_img;
-    checkCudaErrors(cudaMalloc(&d_input, inputSize));
-    checkCudaErrors(cudaMalloc(&d_output, outputSize));
-    checkCudaErrors(cudaMalloc(&d_raw_img, rawInputSize)); 
+    const char* inputName = nullptr;
+    const char* outputName = nullptr;
 
-    // 동적 텐서 바인딩 (안전함)
     for (int i = 0; i < engine->getNbIOTensors(); ++i) {
         const char* name = engine->getIOTensorName(i);
         TensorIOMode mode = engine->getTensorIOMode(name);
         if (mode == TensorIOMode::kINPUT) {
+            inputName = name;
             std::cout << "[TRT] Found Input Tensor: " << name << std::endl;
-            context->setTensorAddress(name, d_input);
         } else if (mode == TensorIOMode::kOUTPUT) {
+            outputName = name;
             std::cout << "[TRT] Found Output Tensor: " << name << std::endl;
-            context->setTensorAddress(name, d_output);
         }
     }
+
+    if (!inputName || !outputName) {
+        std::cerr << "Error: Failed to find input/output tensor names." << std::endl;
+        return -1;
+    }
+
+    Dims inputDims = context->getTensorShape(inputName);
+    bool needSetInput = false;
+    for (int i = 0; i < inputDims.nbDims; ++i) {
+        if (inputDims.d[i] < 0) {
+            needSetInput = true;
+            break;
+        }
+    }
+    if (needSetInput || inputDims.nbDims == 0) {
+        Dims4 fixedInput{1, 3, INPUT_SIZE, INPUT_SIZE};
+        if (!context->setInputShape(inputName, fixedInput)) {
+            std::cerr << "Error: Failed to set input shape." << std::endl;
+            return -1;
+        }
+    }
+
+    inputDims = context->getTensorShape(inputName);
+    Dims outputDims = context->getTensorShape(outputName);
+
+    for (int i = 0; i < inputDims.nbDims; ++i) {
+        if (inputDims.d[i] < 0) {
+            std::cerr << "Error: Input dims unresolved after setInputShape." << std::endl;
+            return -1;
+        }
+    }
+    for (int i = 0; i < outputDims.nbDims; ++i) {
+        if (outputDims.d[i] < 0) {
+            std::cerr << "Error: Output dims unresolved." << std::endl;
+            return -1;
+        }
+    }
+
+    nvinfer1::DataType inputType = engine->getTensorDataType(inputName);
+    nvinfer1::DataType outputType = engine->getTensorDataType(outputName);
+    if (inputType != nvinfer1::DataType::kFLOAT || outputType != nvinfer1::DataType::kFLOAT) {
+        std::cerr << "Error: Expected FP32 tensors. Input type=" << static_cast<int>(inputType)
+                  << " Output type=" << static_cast<int>(outputType) << std::endl;
+        return -1;
+    }
+
+    size_t inputSize = volume(inputDims) * sizeof(float);
+    size_t outputElements = volume(outputDims);
+    size_t outputSize = outputElements * sizeof(float);
+
+    std::cout << "[TRT] Input Dims: ";
+    for (int i = 0; i < inputDims.nbDims; ++i) std::cout << inputDims.d[i] << (i + 1 < inputDims.nbDims ? "x" : "");
+    std::cout << " (" << inputSize << " bytes)" << std::endl;
+    std::cout << "[TRT] Output Dims: ";
+    for (int i = 0; i < outputDims.nbDims; ++i) std::cout << outputDims.d[i] << (i + 1 < outputDims.nbDims ? "x" : "");
+    std::cout << " (" << outputSize << " bytes)" << std::endl;
+    size_t rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t);
+
+    void *d_input, *d_output, *d_raw_img;
+    checkCudaErrors(cudaMalloc(&d_input, inputSize));
+    checkCudaErrors(cudaMalloc(&d_output, outputSize));
+    checkCudaErrors(cudaMalloc(&d_raw_img, rawInputSize));
+
+    context->setTensorAddress(inputName, d_input);
+    context->setTensorAddress(outputName, d_output);
 
     // --------------------------------------
     // 3. 스트리밍 시작
@@ -125,7 +189,7 @@ int main() {
     }
     
     Mat frame, resized;
-    std::vector<float> outputBuffer(INPUT_SIZE * INPUT_SIZE);
+    std::vector<float> outputBuffer(outputElements);
 
     std::cout << "Stream Started. Press 'q' to exit." << std::endl;
     
@@ -146,19 +210,58 @@ int main() {
         cv::resize(frame, resized, Size(INPUT_SIZE, INPUT_SIZE), 0, 0, INTER_LINEAR);
 
         // 2. Raw Image Copy (CPU -> GPU)
+        if (!resized.isContinuous()) {
+            resized = resized.clone();
+        }
         checkCudaErrors(cudaMemcpy(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice));
 
         // 3. CUDA Preprocess Kernel 실행 (Normalize & HWC->CHW)
         preprocess_kernel<<<grid, block>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
+        auto err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA kernel error: " << cudaGetErrorString(err) << std::endl;
+            break;
+        }
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA kernel sync error: " << cudaGetErrorString(err) << std::endl;
+            break;
+        }
 
         // 4. TensorRT 추론
-        context->enqueueV3(0);
+        if (!context->enqueueV3(0)) {
+            std::cerr << "enqueueV3 failed" << std::endl;
+            break;
+        }
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA post-enqueue error: " << cudaGetErrorString(err) << std::endl;
+            break;
+        }
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA enqueue sync error: " << cudaGetErrorString(err) << std::endl;
+            break;
+        }
 
         // 5. 결과 회수 (GPU -> CPU)
         checkCudaErrors(cudaMemcpy(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost));
         
         // 6. 시각화 (CPU)
-        Mat depthMat(INPUT_SIZE, INPUT_SIZE, CV_32F, outputBuffer.data());
+        int outH = INPUT_SIZE;
+        int outW = INPUT_SIZE;
+        if (outputDims.nbDims == 4) {
+            outH = outputDims.d[2];
+            outW = outputDims.d[3];
+        } else if (outputDims.nbDims == 3) {
+            outH = outputDims.d[1];
+            outW = outputDims.d[2];
+        } else if (outputDims.nbDims == 2) {
+            outH = outputDims.d[0];
+            outW = outputDims.d[1];
+        }
+
+        Mat depthMat(outH, outW, CV_32F, outputBuffer.data());
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
         
