@@ -201,6 +201,7 @@ pipeline {
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mariadb"
                     }
