@@ -89,14 +89,12 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
         authPrefix += "@";
     }
 
-    QString scheme = "rtsp";
-    if (m_rtspPort == "8555") {
-        scheme = "rtsps";
-    }
-
+    const QString schemeRaw = m_env.value("RTSP_SCHEME", "rtsps").trimmed().toLower();
+    const QString scheme = (schemeRaw == "rtsps") ? QString("rtsps") : QString("rtsp");
     return QString("%1://%2%3:%4%5").arg(scheme, authPrefix, m_rtspIp, m_rtspPort, path);
 }
 
+// 입력된 RTSP IP를 검증 후 반영한다.
 bool Backend::updateRtspIp(QString ip) {
     QString trimmed = ip.trimmed();
     if (trimmed.isEmpty()) {
