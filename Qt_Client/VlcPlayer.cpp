@@ -179,6 +179,7 @@ void VlcPlayer::play()
     m_mediaPlayer = libvlc_media_player_new(m_vlcInstance);
     libvlc_media_t *media = libvlc_media_new_location(m_vlcInstance, m_url.toUtf8().constData());
     libvlc_media_add_option(media, ":rtsp-tcp");
+    libvlc_media_add_option(media, ":gnutls-verify-trust=0"); //인증서 검증을 안하겠다.
     libvlc_media_add_option(media, ":rtsp-timeout=2");
     libvlc_media_add_option(media, ":network-caching=80");
     libvlc_media_add_option(media, ":live-caching=80");

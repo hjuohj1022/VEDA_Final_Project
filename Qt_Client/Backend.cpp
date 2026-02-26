@@ -33,7 +33,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
     setupMqtt();
 
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
-    const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
+    const QString envPort = m_env.value("RTSP_PORT", "8555").trimmed();
 
     // Always prefer .env values on app startup.
     m_useCustomRtspConfig = false;
@@ -71,7 +71,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
 
         QString ip = rtspIp();
         int port = rtspPort().toInt();
-        if (port == 0) port = 8554;
+        if (port == 0) port = 8555;
 
         auto finished = std::make_shared<bool>(false);
         auto finishProbe = [socket, timer, finished]() {
