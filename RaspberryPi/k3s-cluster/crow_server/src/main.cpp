@@ -51,6 +51,22 @@ bool verifyJWT(const std::string& token) {
 }
 
 // -------------------------------------------------------
+// 경로 보안 확인 헬퍼 함수 (추가됨)
+// -------------------------------------------------------
+std::string resolveSafeRecordingPath(const std::string& filename) {
+    const std::string base_path = "/app/recordings";
+    
+    // 1. 경로 조작 시도 차단 (.. 또는 / 포함 확인)
+    if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos || filename.find("\\") != std::string::npos) {
+        return "";
+    }
+
+    // 2. 최종 경로 생성
+    fs::path p = fs::path(base_path) / filename;
+    return p.string();
+}
+
+// -------------------------------------------------------
 // MariaDB에서 ID/PW 확인
 // -------------------------------------------------------
 bool checkUserFromDB(std::string inputId, std::string inputPw) {
