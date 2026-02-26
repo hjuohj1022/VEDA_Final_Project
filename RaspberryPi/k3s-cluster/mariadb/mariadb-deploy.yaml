@@ -50,10 +50,15 @@ spec:
         volumeMounts:
         - name: mariadb-storage
           mountPath: /var/lib/mysql
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
       volumes:
       - name: mariadb-storage
         persistentVolumeClaim:
           claimName: mariadb-pvc
+      - name: init-scripts
+        configMap:
+          name: mariadb-init-sql
 
 ---
 apiVersion: v1
