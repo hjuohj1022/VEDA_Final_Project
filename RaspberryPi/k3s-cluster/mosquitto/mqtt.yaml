@@ -59,14 +59,13 @@ spec:
           secretName: mqtt-certs
 
 ---
-# 3. 서비스 (Service) - MetalLB LoadBalancer
+# 3. 서비스 (Service) - 내부 접근용 ClusterIP
 apiVersion: v1
 kind: Service
 metadata:
   name: mqtt-service
 spec:
-  type: LoadBalancer
-  externalTrafficPolicy: Cluster
+  type: ClusterIP
   selector:
     app: mqtt
   ports:
