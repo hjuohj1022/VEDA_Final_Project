@@ -56,3 +56,5 @@ __pycache__/
 
 #memo
 *.md
+*.pdf
+*.png
