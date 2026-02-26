@@ -7,6 +7,7 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QLibrary>
 #include <QLineF>
 #include <QByteArray>
 #include <cmath>
@@ -18,6 +19,60 @@ int g_sharedVlcUsers = 0;
 
 void vlcSilentLogCallback(void *, int, const libvlc_log_t *, const char *, va_list)
 {
+}
+
+void stopMediaPlayerCompat(libvlc_media_player_t *player)
+{
+    if (!player) {
+        return;
+    }
+
+    using StopFn = void (*)(libvlc_media_player_t *);
+    static QLibrary libvlcLib("libvlc");
+    static bool symbolsResolved = false;
+    static StopFn stopAsyncFn = nullptr;
+    static StopFn stopFn = nullptr;
+
+    if (!symbolsResolved) {
+        libvlcLib.load();
+        stopAsyncFn = reinterpret_cast<StopFn>(libvlcLib.resolve("libvlc_media_player_stop_async"));
+        stopFn = reinterpret_cast<StopFn>(libvlcLib.resolve("libvlc_media_player_stop"));
+        symbolsResolved = true;
+    }
+
+    if (stopAsyncFn) {
+        stopAsyncFn(player);
+        return;
+    }
+
+    if (stopFn) {
+        stopFn(player);
+        return;
+    }
+
+    libvlc_media_player_set_pause(player, 1);
+}
+
+void setCropGeometryCompat(libvlc_media_player_t *player, const char *geometry)
+{
+    if (!player) {
+        return;
+    }
+
+    using CropFn = void (*)(libvlc_media_player_t *, const char *);
+    static QLibrary libvlcLib("libvlc");
+    static bool symbolsResolved = false;
+    static CropFn cropFn = nullptr;
+
+    if (!symbolsResolved) {
+        libvlcLib.load();
+        cropFn = reinterpret_cast<CropFn>(libvlcLib.resolve("libvlc_video_set_crop_geometry"));
+        symbolsResolved = true;
+    }
+
+    if (cropFn) {
+        cropFn(player, geometry);
+    }
 }
 }
 
@@ -99,11 +154,13 @@ VlcPlayer::~VlcPlayer()
     m_renderWindow = nullptr;
 }
 
+// 현재 재생 URL을 반환한다.
 QString VlcPlayer::url() const
 {
     return m_url;
 }
 
+// 재생 URL을 변경하고 필요 시 재생을 갱신한다.
 void VlcPlayer::setUrl(const QString &url)
 {
     if (m_url == url) {
@@ -122,6 +179,7 @@ void VlcPlayer::setUrl(const QString &url)
     }
 }
 
+// VLC 렌더링용 윈도우를 생성/연결한다.
 void VlcPlayer::attachWindow()
 {
     if (!m_renderWindow) {
@@ -141,6 +199,7 @@ void VlcPlayer::attachWindow()
     syncWindowPosition();
 }
 
+// QML 아이템 위치와 렌더 윈도우 위치를 동기화한다.
 void VlcPlayer::syncWindowPosition()
 {
     if (!m_renderWindow || !window()) {
@@ -155,6 +214,7 @@ void VlcPlayer::syncWindowPosition()
     m_renderWindow->setVisible(isVisible() && width() > 0 && height() > 0 && m_isPlaying && hasVout);
 }
 
+// VLC 플레이어를 초기화하고 재생을 시작한다.
 void VlcPlayer::play()
 {
     const bool isReconnectAttempt = (m_reconnectAttempt > 0);
@@ -177,9 +237,18 @@ void VlcPlayer::play()
     }
 
     m_mediaPlayer = libvlc_media_player_new(m_vlcInstance);
-    libvlc_media_t *media = libvlc_media_new_location(m_vlcInstance, m_url.toUtf8().constData());
+    m_activeMediaUrlUtf8 = m_url.toUtf8();
+    libvlc_media_t *media = libvlc_media_new_location(m_activeMediaUrlUtf8.constData());
+    if (!media) {
+        qWarning() << "libVLC failed to create media for URL:" << m_url;
+        if (m_mediaPlayer) {
+            libvlc_media_player_release(m_mediaPlayer);
+            m_mediaPlayer = nullptr;
+        }
+        scheduleReconnect();
+        return;
+    }
     libvlc_media_add_option(media, ":rtsp-tcp");
-    libvlc_media_add_option(media, ":gnutls-verify-trust=0"); //인증서 검증을 안하겠다.
     libvlc_media_add_option(media, ":rtsp-timeout=2");
     libvlc_media_add_option(media, ":network-caching=80");
     libvlc_media_add_option(media, ":live-caching=80");
@@ -189,6 +258,7 @@ void VlcPlayer::play()
     libvlc_media_add_option(media, ":drop-late-frames");
     libvlc_media_add_option(media, ":skip-frames");
     libvlc_media_add_option(media, ":no-audio");
+    libvlc_media_add_option(media, ":gnutls-verify-trust=0");
     libvlc_media_player_set_media(m_mediaPlayer, media);
     libvlc_media_release(media);
 
@@ -202,7 +272,7 @@ void VlcPlayer::play()
     libvlc_event_attach(eventManager, libvlc_MediaPlayerPlaying, &VlcPlayer::handleVlcEvent, this);
     libvlc_event_attach(eventManager, libvlc_MediaPlayerPaused, &VlcPlayer::handleVlcEvent, this);
     libvlc_event_attach(eventManager, libvlc_MediaPlayerStopped, &VlcPlayer::handleVlcEvent, this);
-    libvlc_event_attach(eventManager, libvlc_MediaPlayerEndReached, &VlcPlayer::handleVlcEvent, this);
+    libvlc_event_attach(eventManager, libvlc_MediaPlayerStopping, &VlcPlayer::handleVlcEvent, this);
     libvlc_event_attach(eventManager, libvlc_MediaPlayerEncounteredError, &VlcPlayer::handleVlcEvent, this);
     m_vlcEventsAttached = true;
 
@@ -215,6 +285,7 @@ void VlcPlayer::play()
     m_statsTimer->start();
 }
 
+// 디지털 줌 배율을 설정한다.
 void VlcPlayer::setVideoScale(double scale)
 {
     if (scale < 1.0) {
@@ -235,6 +306,7 @@ void VlcPlayer::setVideoScale(double scale)
     }
 }
 
+// 배율과 포커스 좌표를 함께 반영한다.
 void VlcPlayer::setDigitalZoom(double scale, double focusX, double focusY)
 {
     if (scale < 1.0) {
@@ -264,6 +336,7 @@ void VlcPlayer::setDigitalZoom(double scale, double focusX, double focusY)
     }
 }
 
+// 현재 배율/좌표 기준으로 VLC crop을 적용한다.
 void VlcPlayer::applyDigitalZoom()
 {
     if (!m_mediaPlayer) {
@@ -274,7 +347,7 @@ void VlcPlayer::applyDigitalZoom()
     updateVideoSize();
 
     if (m_videoScale <= 1.01) {
-        libvlc_video_set_crop_geometry(m_mediaPlayer, nullptr);
+        setCropGeometryCompat(m_mediaPlayer, nullptr);
         return;
     }
 
@@ -310,9 +383,10 @@ void VlcPlayer::applyDigitalZoom()
                                     .arg(cropX)
                                     .arg(cropY)
                                     .toUtf8();
-    libvlc_video_set_crop_geometry(m_mediaPlayer, geometry.constData());
+    setCropGeometryCompat(m_mediaPlayer, geometry.constData());
 }
 
+// 현재 비디오 해상도를 읽어 프로퍼티를 갱신한다.
 void VlcPlayer::updateVideoSize()
 {
     if (!m_mediaPlayer) {
@@ -336,11 +410,13 @@ void VlcPlayer::updateVideoSize()
     }
 }
 
+// 재생을 사용자 요청으로 중지한다.
 void VlcPlayer::stop()
 {
     stopInternal(true);
 }
 
+// 플레이어/타이머/상태를 내부적으로 정리한다.
 void VlcPlayer::stopInternal(bool manualStop)
 {
     if (manualStop) {
@@ -354,15 +430,16 @@ void VlcPlayer::stopInternal(bool manualStop)
             libvlc_event_detach(eventManager, libvlc_MediaPlayerPlaying, &VlcPlayer::handleVlcEvent, this);
             libvlc_event_detach(eventManager, libvlc_MediaPlayerPaused, &VlcPlayer::handleVlcEvent, this);
             libvlc_event_detach(eventManager, libvlc_MediaPlayerStopped, &VlcPlayer::handleVlcEvent, this);
-            libvlc_event_detach(eventManager, libvlc_MediaPlayerEndReached, &VlcPlayer::handleVlcEvent, this);
+            libvlc_event_detach(eventManager, libvlc_MediaPlayerStopping, &VlcPlayer::handleVlcEvent, this);
             libvlc_event_detach(eventManager, libvlc_MediaPlayerEncounteredError, &VlcPlayer::handleVlcEvent, this);
             m_vlcEventsAttached = false;
         }
 
-        libvlc_media_player_stop(m_mediaPlayer);
+        stopMediaPlayerCompat(m_mediaPlayer);
         libvlc_media_player_release(m_mediaPlayer);
         m_mediaPlayer = nullptr;
     }
+    m_activeMediaUrlUtf8.clear();
 
     if (m_renderWindow) {
         m_renderWindow->hide();
@@ -393,6 +470,7 @@ void VlcPlayer::stopInternal(bool manualStop)
     }
 }
 
+// 지수 백오프로 재연결을 예약한다.
 void VlcPlayer::scheduleReconnect()
 {
     if (m_manualStopRequested || m_url.isEmpty() || !m_reconnectTimer) {
@@ -416,6 +494,7 @@ void VlcPlayer::scheduleReconnect()
     }
 }
 
+// 예약된 재연결과 오프라인 지연 처리를 취소한다.
 void VlcPlayer::cancelReconnect()
 {
     m_reconnectAttempt = 0;
@@ -427,6 +506,7 @@ void VlcPlayer::cancelReconnect()
     }
 }
 
+// 재생 상태 플래그를 갱신한다.
 void VlcPlayer::setPlayingState(bool playing)
 {
     if (m_isPlaying == playing) {
@@ -436,6 +516,7 @@ void VlcPlayer::setPlayingState(bool playing)
     emit isPlayingChanged();
 }
 
+// VLC 이벤트를 Qt 시그널/상태로 변환한다.
 void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
 {
     auto *self = static_cast<VlcPlayer *>(userData);
@@ -445,6 +526,7 @@ void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
 
     switch (event->type) {
     case libvlc_MediaPlayerPlaying:
+        // UI 스레드에서 상태를 안전하게 반영한다.
         QMetaObject::invokeMethod(self, [self]() {
             self->cancelReconnect();
             self->m_manualStopRequested = false;
@@ -455,8 +537,9 @@ void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
         }, Qt::QueuedConnection);
         break;
     case libvlc_MediaPlayerStopped:
-    case libvlc_MediaPlayerEndReached:
+    case libvlc_MediaPlayerStopping:
     case libvlc_MediaPlayerEncounteredError:
+        // UI 스레드에서 상태를 안전하게 반영한다.
         QMetaObject::invokeMethod(self, [self]() {
             if (self->m_manualStopRequested || self->m_url.isEmpty()) {
                 if (self->m_renderWindow) {
@@ -478,23 +561,29 @@ void VlcPlayer::handleVlcEvent(const libvlc_event_t *event, void *userData)
     }
 }
 
+// 아이템 지오메트리 변경 시 렌더 윈도우를 갱신한다.
 void VlcPlayer::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
+    // 기본 동작 호출
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     syncWindowPosition();
 }
 
+// 씬/윈도우 변경 시 렌더 윈도우를 재연결한다.
 void VlcPlayer::itemChange(ItemChange change, const ItemChangeData &value)
 {
+    // 기본 동작 호출
     QQuickItem::itemChange(change, value);
     if (change == ItemSceneChange && value.window) {
         attachWindow();
     }
 }
 
+// 마우스/휠 이벤트를 받아 QML 시그널로 전달한다.
 bool VlcPlayer::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched != m_renderWindow || !event) {
+        // 기본 이벤트 필터 동작 사용
         return QQuickItem::eventFilter(watched, event);
     }
 
@@ -559,9 +648,11 @@ bool VlcPlayer::eventFilter(QObject *watched, QEvent *event)
         break;
     }
 
+    // 기본 이벤트 필터 동작 사용
     return QQuickItem::eventFilter(watched, event);
 }
 
+// VLC 통계를 읽어 FPS/비트레이트를 갱신한다.
 void VlcPlayer::updateStats()
 {
     if (!m_mediaPlayer) {
@@ -642,3 +733,4 @@ void VlcPlayer::updateStats()
 
     libvlc_media_release(media);
 }
+

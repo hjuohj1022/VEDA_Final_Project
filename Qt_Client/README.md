@@ -87,6 +87,19 @@ RTSP_PORT=8554
 2.  **VLC Media Player** 설치 (실행 시 라이브러리 필요)
 3.  **libVLC SDK** (헤더 파일 및 라이브러리 - `vlc/vlc.h`)
 
+### VLC Path Override (CMake)
+`CMakeLists.txt`는 SDK와 Runtime 경로를 분리해서 받습니다.
+
+- `VLC_SDK_PATH` (헤더/`libvlc.lib`) 기본값: `C:/vlc-3.0.23`
+- `VLC_RUNTIME_PATH` (DLL/plugins) 기본값: `C:/Program Files/VideoLAN/VLC`
+
+예시:
+```powershell
+cmake -S . -B build `
+  -DVLC_SDK_PATH="C:/vlc-3.0.23" `
+  -DVLC_RUNTIME_PATH="C:/Program Files/VideoLAN/VLC"
+```
+
 ### Windows Configuration (DLL 배치)
 빌드 후 실행 파일(`.exe`)이 있는 폴더에 다음 파일들이 있어야 합니다.
 1.  `libvlc.dll`

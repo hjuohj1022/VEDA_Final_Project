@@ -1,2 +1,58 @@
-build/
-*.user
+# Build outputs
+/build/
+/cmake-build-*/
+/out/
+/bin/
+/dist/
+
+# CMake/Ninja artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+build.ninja
+.ninja_deps
+.ninja_log
+Testing/
+CTestTestfile.cmake
+
+# Qt Creator / Qt tooling
+.qtcreator/
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qtc_clangd/
+.qtc/
+.qt/
+.rcc/
+qmltypes/
+meta_types/
+*_qmltyperegistrations.cpp
+qrc_*.cpp
+*_autogen/
+
+# Generated QML cache files
+*.qmlc
+*.jsc
+
+# Logs / temp
+*.log
+*.tmp
+_tmp*
+
+# Local environment / secrets
+.env
+!example.env
+
+# Local certificates and keys
+certs/*.key
+certs/*.pem
+certs/*.p12
+certs/*.pfx
+certs/*.csr
+certs/*.srl
+
+# Runtime copied beside exe (generated in build dir mostly)
+libvlc.dll
+libvlccore.dll
+plugins/

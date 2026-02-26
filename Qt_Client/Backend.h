@@ -102,8 +102,6 @@ public:
     Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
     Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
     Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
-    Q_INVOKABLE bool sunapiSetWhiteBalanceMode(int cameraIndex, QString mode);
-    Q_INVOKABLE bool sunapiSetFlipAndRotate(int cameraIndex, bool horizontalFlip, bool verticalFlip, int rotate);
     Q_INVOKABLE void sunapiLoadSupportedPtzActions(int cameraIndex);
 
 signals:
