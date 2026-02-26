@@ -7,8 +7,42 @@
 #include <fstream> // 파일 읽기용
 #include <sstream> // 버퍼용
 #include <sys/statvfs.h> // 리눅스 파일시스템 통계용
+#include <optional>
+#include <system_error>
+#include <algorithm>
+#include <cctype>
 
 namespace fs = std::filesystem;
+
+static const fs::path kRecordingsRoot = "/app/recordings";
+
+// 상대경로를 안전한 절대경로로 변환 (../ 탈출 방지)
+static std::optional<fs::path> resolveSafeRecordingPath(const std::string& userPath) {
+    if (userPath.empty()) return std::nullopt;
+
+    fs::path rel = fs::path(userPath).lexically_normal();
+    if (rel.is_absolute()) return std::nullopt;
+
+    for (const auto& part : rel) {
+        if (part == "..") return std::nullopt;
+    }
+
+    std::error_code ec;
+    fs::path canonRoot = fs::weakly_canonical(kRecordingsRoot, ec);
+    if (ec) return std::nullopt;
+
+    fs::path full = kRecordingsRoot / rel;
+    fs::path canonFull = fs::weakly_canonical(full, ec);
+    if (ec) return std::nullopt;
+
+    const std::string rootStr = canonRoot.generic_string();
+    const std::string fullStr = canonFull.generic_string();
+
+    if (fullStr.compare(0, rootStr.size(), rootStr) != 0) return std::nullopt;
+    if (fullStr.size() > rootStr.size() && fullStr[rootStr.size()] != '/') return std::nullopt;
+
+    return canonFull;
+}
 
 // -------------------------------------------------------
 // MariaDB에서 ID/PW 확인
@@ -105,24 +139,27 @@ int main()
     // ==========================================
     CROW_ROUTE(app, "/recordings")
     ([](){
-        std::string path = "/app/recordings"; 
         crow::json::wvalue result;
-        
-        // files 배열 초기화 (파일 없으면 빈 배열 반환)
-        result["files"] = std::vector<std::string>(); 
+        crow::json::wvalue::list files;
 
-        if (fs::exists(path) && fs::is_directory(path)) {
-            int i = 0;
-            for (const auto& entry : fs::directory_iterator(path)) {
-                if (entry.path().extension() == ".mp4") {
-                    // 파일명과 크기를 담음
-                    result["files"][i]["name"] = entry.path().filename().string();
-                    result["files"][i]["size"] = (long)entry.file_size(); 
-                    i++;
-                }
+        if (fs::exists(kRecordingsRoot) && fs::is_directory(kRecordingsRoot)) {
+            for (const auto& entry : fs::recursive_directory_iterator(kRecordingsRoot)) {
+                if (!entry.is_regular_file()) continue;
+
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(),
+                    [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                if (ext != ".mp4") continue;
+
+                crow::json::wvalue f;
+                f["name"] = fs::relative(entry.path(), kRecordingsRoot).generic_string(); // 예: 0/main_xxx.mp4
+                f["size"] = static_cast<uint64_t>(entry.file_size());
+                files.push_back(std::move(f));
             }
         }
-        return result; 
+
+        result["files"] = std::move(files);
+        return crow::response(result);
     });
 
     // ==========================================
@@ -132,34 +169,30 @@ int main()
     CROW_ROUTE(app, "/recordings").methods(crow::HTTPMethod::DELETE)
     ([](const crow::request& req){
         // 쿼리 파라미터(?file=...)에서 파일명 가져오기
-        char* file_param = req.url_params.get("file");
+        const char* file_param = req.url_params.get("file");
         
         if (!file_param) {
             return crow::response(400, "Missing file parameter");
         }
 
-        std::string filename = file_param;
-        
-        // 경로 조작 방지 (../ 같은 거 막기)
-        if (filename.find("..") != std::string::npos) {
-             return crow::response(403, "Invalid filename");
+        auto safePath = resolveSafeRecordingPath(file_param);
+        if (!safePath) {
+            return crow::response(403, "Invalid filename");
         }
 
-        // 파일 경로 설정 (/app/recordings에 마운트 됨)
-        std::string file_path = "/app/recordings/" + filename;
-
-        if (fs::exists(file_path)) {
-            try {
-                fs::remove(file_path); // 실제 파일 삭제
-                std::cout << "[Delete] Removed file: " << file_path << std::endl;
-                return crow::response(200, "File deleted");
-            } catch (const fs::filesystem_error& e) {
-                std::cerr << "[Delete Error] " << e.what() << std::endl;
-                return crow::response(500, "Failed to delete file");
-            }
-        } else {
+        if (!fs::exists(*safePath) || !fs::is_regular_file(*safePath)) {
             return crow::response(404, "File not found");
         }
+
+        std::error_code ec;
+        fs::remove(*safePath, ec);
+        if (ec) {
+            std::cerr << "[Delete Error] " << ec.message() << std::endl;
+            return crow::response(500, "Failed to delete file");
+        }
+
+        std::cout << "[Delete] Removed file: " << safePath->string() << std::endl;
+        return crow::response(200, "File deleted");
     });
 
     // ==========================================
@@ -169,7 +202,7 @@ int main()
     CROW_ROUTE(app, "/stream")
     ([](const crow::request& req, crow::response& res){
         // 쿼리 파라미터(?file=...)에서 파일명 가져오기
-        char* file_param = req.url_params.get("file");
+        const char* file_param = req.url_params.get("file");
         
         if (!file_param) {
             res.code = 400;
@@ -178,29 +211,25 @@ int main()
             return;
         }
 
-        std::string filename = file_param;
-        
-        // 경로 조작 방지 (../ 같은 거 막기)
-        if (filename.find("..") != std::string::npos) {
-             res.code = 403; 
-             res.end();
-             return;
+        auto safePath = resolveSafeRecordingPath(file_param);
+        if (!safePath) {
+            res.code = 403;
+            res.write("Invalid filename");
+            res.end();
+            return;
         }
 
-        // 파일 경로 설정 (/app/recordings에 마운트 됨)
-        std::string file_path = "/app/recordings/" + filename;
-
         // 파일 크기 확인 (Range Support를 위해 필요)
-        std::ifstream ifs(file_path, std::ios::binary | std::ios::ate);
+        std::ifstream ifs(*safePath, std::ios::binary | std::ios::ate);
         if (!ifs.is_open()) {
-            std::cerr << "[Error] Cannot open file: " << file_path << std::endl; // 에러 로그
+            std::cerr << "[Error] Cannot open file: " << safePath->string() << std::endl; // 에러 로그
             res.code = 404;
             res.write("File not found or cannot open");
             res.end();
             return; 
         }
         
-        long long file_size = ifs.tellg();
+        long long file_size = static_cast<long long>(ifs.tellg());
         ifs.seekg(0, std::ios::beg); // 다시 처음으로 돌림
 
         // Range 헤더 파싱
@@ -226,7 +255,7 @@ int main()
         }
 
         // 범위 유효성 검사
-        if (start > end || start >= file_size) {
+        if (start < 0 || start > end || start >= file_size) {
             res.code = 416; // Range Not Satisfiable
             res.end();
             return;
@@ -247,7 +276,7 @@ int main()
         }
         
         // 요청된 부분만 읽어서 전송
-        std::vector<char> buffer(content_length);
+        std::vector<char> buffer(static_cast<size_t>(content_length));
         ifs.seekg(start);
         ifs.read(buffer.data(), content_length);
 
@@ -275,42 +304,41 @@ int main()
         unsigned long long used = total - available;
         result["total_bytes"] = total;
         result["used_bytes"] = used;
-                result["available_bytes"] = available;
+        result["available_bytes"] = available;
                 
-                return crow::response(result);
-            });
+        return crow::response(result);
+    });
         
-            // ==========================================
-            // 시스템 헬스 체크 및 연결 정보 조회 (테스트용)
-            // ==========================================
-            CROW_ROUTE(app, "/health")
-            ([](const crow::request& req){
-                crow::json::wvalue result;
+    // ==========================================
+    // 시스템 헬스 체크 및 연결 정보 조회 (테스트용)
+    // ==========================================
+    CROW_ROUTE(app, "/health")
+    ([](const crow::request& req){
+        crow::json::wvalue result;
                 
-                // 1. Crow Server Status
-                result["crow_server"]["status"] = "OK";
-                result["crow_server"]["message"] = "Crow server is receiving requests successfully.";
+        // 1. Crow Server Status
+        result["crow_server"]["status"] = "OK";
+        result["crow_server"]["message"] = "Crow server is receiving requests successfully.";
         
-                // 2. Nginx mTLS Status
-                std::string device_id = req.get_header_value("X-Device-ID");
-                std::string device_verify = req.get_header_value("X-Device-Verify");
+        // 2. Nginx mTLS Status
+        std::string device_id = req.get_header_value("X-Device-ID");
+        std::string device_verify = req.get_header_value("X-Device-Verify");
                 
-                if (device_verify == "SUCCESS") {
-                    result["nginx_mtls"]["status"] = "VERIFIED";
-                    result["nginx_mtls"]["device_id"] = device_id;
-                } else {
-                    result["nginx_mtls"]["status"] = "UNVERIFIED/NOT_PRESENT";
-                    result["nginx_mtls"]["message"] = "Client certificate was not verified by Nginx.";
-                }
-        
-                // 3. 안내 정보 (클라이언트 테스트용 주소 가이드)
-                result["services_info"]["mqtt"] = "Port 8883 (MQTTS) is exposed via Nginx Gateway.";
-                result["services_info"]["mediamtx_rtsp"] = "Port 8554 (RTSP) / 8555 (RTSPS) are available.";
-                result["services_info"]["mediamtx_hls"] = "/hls/ path is available on port 443.";
-        
-                return crow::response(result);
-            });
-        
-            app.port(8080).multithreaded().run();
+        if (device_verify == "SUCCESS") {
+            result["nginx_mtls"]["status"] = "VERIFIED";
+            result["nginx_mtls"]["device_id"] = device_id;
+        } else {
+            result["nginx_mtls"]["status"] = "UNVERIFIED/NOT_PRESENT";
+            result["nginx_mtls"]["message"] = "Client certificate was not verified by Nginx.";
         }
         
+        // 3. 안내 정보 (클라이언트 테스트용 주소 가이드)
+        result["services_info"]["mqtt"] = "Port 8883 (MQTTS) is exposed via Nginx Gateway.";
+        result["services_info"]["mediamtx_rtsp"] = "Port 8554 (RTSP) / 8555 (RTSPS) are available.";
+        result["services_info"]["mediamtx_hls"] = "/hls/ path is available on port 443.";
+        
+        return crow::response(result);
+    });
+        
+    app.port(8080).multithreaded().run();
+}
