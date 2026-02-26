@@ -12,7 +12,7 @@ data:
     rtspAddress: 127.0.0.1:8554
     
     # RTSPS 보안 설정 (외부 노출용)
-    encryption: "yes"
+    encryption: strict
     rtspsAddress: :8555
     serverCert: /etc/mediamtx/certs/server.crt
     serverKey: /etc/mediamtx/certs/server.key
