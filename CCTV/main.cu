@@ -7,6 +7,8 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 // TensorRT & CUDA
 #include <NvInfer.h>
@@ -26,6 +28,7 @@ using namespace cv;
 // 설정 파일 포함 (.gitignore로 관리됨)
 #include "app_config.h"
 #include "logging.h"
+#include "pointcloud.h"
 #include "request.h"
 #include "runner.h"
 #include "server.h"
@@ -129,6 +132,38 @@ Request ParseRequest(const std::string& line) {
     auto tokens = SplitTokens(line);
     for (size_t i = 0; i < tokens.size(); ++i) {
         const std::string& t = tokens[i];
+        if (t == "depth_stream" || t == "stream_depth") {
+            req.depthStream = true;
+            continue;
+        }
+        if (t == "pc_stream" || t == "stream_pc") {
+            req.pcStream = true;
+            continue;
+        }
+        if (t == "pc_view" || t == "view_pc") {
+            req.pcView = true;
+            continue;
+        }
+        if (t.rfind("rx=", 0) == 0) {
+            req.rx = std::stof(t.substr(3));
+            req.rxSet = true;
+            continue;
+        }
+        if (t.rfind("ry=", 0) == 0) {
+            req.ry = std::stof(t.substr(3));
+            req.rySet = true;
+            continue;
+        }
+        if (t.rfind("rotX=", 0) == 0) {
+            req.rx = std::stof(t.substr(5));
+            req.rxSet = true;
+            continue;
+        }
+        if (t.rfind("rotY=", 0) == 0) {
+            req.ry = std::stof(t.substr(5));
+            req.rySet = true;
+            continue;
+        }
         if (t == "stop") {
             req.stop = true;
             continue;
@@ -199,6 +234,34 @@ struct CudaResources {
         if (d_output) cudaFree(d_output);
         if (d_raw_img) cudaFree(d_raw_img);
     }
+};
+
+struct DepthStreamBuffer {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::vector<float> data;
+    int width = 0;
+    int height = 0;
+    uint32_t frameIdx = 0;
+    bool hasFrame = false;
+    bool stop = false;
+};
+
+struct ImageStreamBuffer {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::vector<unsigned char> data;
+    int width = 0;
+    int height = 0;
+    uint32_t frameIdx = 0;
+    bool hasFrame = false;
+    bool stop = false;
+};
+
+struct ViewParams {
+    std::mutex mu;
+    float rotX = -20.0f;
+    float rotY = 35.0f;
 };
 
 static size_t Volume(const Dims& dims) {
@@ -334,7 +397,10 @@ static void ResolveOutputHW(const Dims& outputDims, int& outH, int& outW) {
     }
 }
 
-bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
+bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
+                    DepthStreamBuffer* streamBuf,
+                    ImageStreamBuffer* pcStreamBuf,
+                    ViewParams* viewParams) {
     LogInfo("Mode: " + std::string(headless ? "headless" : "gui") +
             " | Channel: " + std::to_string(channel));
 
@@ -465,6 +531,22 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
 
+        // Optional: dump point cloud or render a live point-cloud view.
+        const bool dumpPointCloud = false;
+        const bool showPointCloud = true;
+        const CameraIntrinsics Kfhd = MakeIntrinsicsFromFovDegrees(109.0f, 55.0f, 1920, 1080);
+        const CameraIntrinsics K = ScaleIntrinsics(Kfhd, outW, outH, 1920, 1080);
+        if (dumpPointCloud && (frameIdx % 60 == 0)) {
+            std::vector<cv::Vec3f> points;
+            DepthToPointCloud(depthMat.ptr<float>(), outW, outH, K, points, 2, 0.1f, 80.0f);
+            const std::string plyPath = "pointcloud_" + std::to_string(frameIdx) + ".ply";
+            if (SavePointCloudAsPly(plyPath, points)) {
+                LogInfo("Point cloud saved: " + plyPath + " (points=" + std::to_string(points.size()) + ")");
+            } else {
+                LogWarn("Failed to save point cloud: " + plyPath);
+            }
+        }
+
         Mat depthNorm;
         depthMat.convertTo(depthNorm, CV_8U, 255.0 / (maxVal - minVal + 1e-5),
                            -minVal * 255.0 / (maxVal - minVal + 1e-5));
@@ -475,6 +557,48 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
         Mat showFrame, showDepth;
         cv::resize(frame, showFrame, Size(640, 480));
         cv::resize(depthColor, showDepth, Size(640, 480));
+
+        if (streamBuf) {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->data.assign(outputBuffer.begin(), outputBuffer.end());
+            streamBuf->width = outW;
+            streamBuf->height = outH;
+            streamBuf->frameIdx = static_cast<uint32_t>(frameIdx);
+            streamBuf->hasFrame = true;
+            lock.unlock();
+            streamBuf->cv.notify_all();
+        }
+
+        if (pcStreamBuf) {
+            // Render lower-res projected view for streaming.
+            Mat colorForDepth;
+            if (frame.cols != outW || frame.rows != outH) {
+                cv::resize(frame, colorForDepth, Size(outW, outH));
+            } else {
+                colorForDepth = frame;
+            }
+            float rx = -20.0f;
+            float ry = 35.0f;
+            if (viewParams) {
+                std::lock_guard<std::mutex> lock(viewParams->mu);
+                rx = viewParams->rotX;
+                ry = viewParams->rotY;
+            }
+            Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
+                                              480, 360, 4, 0.1f, 80.0f, rx, ry);
+            std::vector<unsigned char> encoded;
+            std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 3};
+            if (cv::imencode(".png", pcv, encoded, params)) {
+                std::unique_lock<std::mutex> lock(pcStreamBuf->mu);
+                pcStreamBuf->data.swap(encoded);
+                pcStreamBuf->width = pcv.cols;
+                pcStreamBuf->height = pcv.rows;
+                pcStreamBuf->frameIdx = static_cast<uint32_t>(frameIdx);
+                pcStreamBuf->hasFrame = true;
+                lock.unlock();
+                pcStreamBuf->cv.notify_all();
+            }
+        }
 
         if (!headless) {
             Mat combined;
@@ -487,6 +611,16 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
             cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps),
                         Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
             cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
+            if (showPointCloud) {
+                Mat colorForDepth;
+                if (frame.cols != outW || frame.rows != outH) {
+                    cv::resize(frame, colorForDepth, Size(outW, outH));
+                } else {
+                    colorForDepth = frame;
+                }
+                Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth, 640, 480, 3);
+                cv::imshow("PointCloud (Projected)", pcv);
+            }
             cv::waitKey(1);
         }
     }
@@ -498,6 +632,88 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
 
     if (fatalError) return false;
     return true;
+}
+
+static void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::atomic<bool>* active) {
+    if (!streamBuf) {
+        closesocket(client);
+        return;
+    }
+
+    LogInfo("Depth stream client connected.");
+    if (active) active->store(true);
+    streamBuf->stop = false;
+
+    std::string ok = "OK depth_stream\n";
+    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+
+    while (true) {
+        std::vector<float> local;
+        int w = 0, h = 0;
+        uint32_t frameIdx = 0;
+        {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->cv.wait(lock, [&] { return streamBuf->hasFrame || streamBuf->stop; });
+            if (streamBuf->stop) break;
+            local = streamBuf->data;
+            w = streamBuf->width;
+            h = streamBuf->height;
+            frameIdx = streamBuf->frameIdx;
+            streamBuf->hasFrame = false;
+        }
+
+        const uint32_t payloadBytes = static_cast<uint32_t>(local.size() * sizeof(float));
+        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
+        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
+        if (sent <= 0) break;
+    }
+
+    LogWarn("Depth stream client disconnected.");
+    if (active) active->store(false);
+    closesocket(client);
+}
+
+static void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomic<bool>* active) {
+    if (!streamBuf) {
+        closesocket(client);
+        return;
+    }
+
+    LogInfo("PC image stream client connected.");
+    if (active) active->store(true);
+    streamBuf->stop = false;
+
+    std::string ok = "OK pc_stream fmt=png\n";
+    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+
+    while (true) {
+        std::vector<unsigned char> local;
+        int w = 0, h = 0;
+        uint32_t frameIdx = 0;
+        {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->cv.wait(lock, [&] { return streamBuf->hasFrame || streamBuf->stop; });
+            if (streamBuf->stop) break;
+            local = streamBuf->data;
+            w = streamBuf->width;
+            h = streamBuf->height;
+            frameIdx = streamBuf->frameIdx;
+            streamBuf->hasFrame = false;
+        }
+
+        const uint32_t payloadBytes = static_cast<uint32_t>(local.size());
+        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
+        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
+        if (sent <= 0) break;
+    }
+
+    LogWarn("PC image stream client disconnected.");
+    if (active) active->store(false);
+    closesocket(client);
 }
 
 int main(int argc, char** argv) {
@@ -544,10 +760,23 @@ int main(int argc, char** argv) {
     LogInfo("Listening on port " + std::to_string(port));
 
     std::thread worker;
+    std::thread streamThread;
     std::atomic<bool> workerStop{false};
+    DepthStreamBuffer depthStream;
     bool workerRunning = false;
+    std::atomic<bool> streamActive{false};
+    std::thread pcStreamThread;
+    ImageStreamBuffer pcStream;
+    std::atomic<bool> pcStreamActive{false};
+    ViewParams viewParams;
 
     while (true) {
+        if (streamThread.joinable() && !streamActive.load()) {
+            streamThread.join();
+        }
+        if (pcStreamThread.joinable() && !pcStreamActive.load()) {
+            pcStreamThread.join();
+        }
         sockaddr_in clientAddr{};
         int clientLen = sizeof(clientAddr);
         SOCKET client = accept(server, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
@@ -578,6 +807,49 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        if (req.depthStream) {
+            if (streamThread.joinable()) {
+                {
+                    std::unique_lock<std::mutex> lock(depthStream.mu);
+                    depthStream.stop = true;
+                    lock.unlock();
+                }
+                depthStream.cv.notify_all();
+                streamThread.join();
+            }
+            streamThread = std::thread([client, &depthStream, &streamActive]() {
+                DepthStreamWorker(client, &depthStream, &streamActive);
+            });
+            continue;
+        }
+
+        if (req.pcStream) {
+            if (pcStreamThread.joinable()) {
+                {
+                    std::unique_lock<std::mutex> lock(pcStream.mu);
+                    pcStream.stop = true;
+                    lock.unlock();
+                }
+                pcStream.cv.notify_all();
+                pcStreamThread.join();
+            }
+            pcStreamThread = std::thread([client, &pcStream, &pcStreamActive]() {
+                PcImageStreamWorker(client, &pcStream, &pcStreamActive);
+            });
+            continue;
+        }
+
+        if (req.pcView) {
+            if (req.rxSet || req.rySet) {
+                std::lock_guard<std::mutex> lock(viewParams.mu);
+                if (req.rxSet) viewParams.rotX = req.rx;
+                if (req.rySet) viewParams.rotY = req.ry;
+            }
+            SendResponse(client, "OK pc_view\n");
+            closesocket(client);
+            continue;
+        }
+
         if (workerRunning) {
             workerStop.store(true);
             if (worker.joinable()) worker.join();
@@ -596,8 +868,8 @@ int main(int argc, char** argv) {
         if (req.gui) headless = false;
 
         workerStop.store(false);
-        worker = std::thread([channel, headless, &workerStop]() {
-            bool ok = RunDepthWorker(channel, headless, workerStop);
+        worker = std::thread([channel, headless, &workerStop, &depthStream, &pcStream, &viewParams]() {
+            bool ok = RunDepthWorker(channel, headless, workerStop, &depthStream, &pcStream, &viewParams);
             if (!ok) LogError("Worker exited with errors.");
         });
         workerRunning = true;
@@ -605,11 +877,33 @@ int main(int argc, char** argv) {
         std::string modeStr = headless ? "headless" : "gui";
         SendResponse(client, "OK started channel=" + std::to_string(channel) + " mode=" + modeStr + "\n");
         closesocket(client);
+
+        if (streamThread.joinable() && !streamActive.load()) {
+            streamThread.join();
+        }
     }
 
     if (workerRunning) {
         workerStop.store(true);
         if (worker.joinable()) worker.join();
+    }
+    if (streamThread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lock(depthStream.mu);
+            depthStream.stop = true;
+            lock.unlock();
+        }
+        depthStream.cv.notify_all();
+        streamThread.join();
+    }
+    if (pcStreamThread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lock(pcStream.mu);
+            pcStream.stop = true;
+            lock.unlock();
+        }
+        pcStream.cv.notify_all();
+        pcStreamThread.join();
     }
     closesocket(server);
     WSACleanup();

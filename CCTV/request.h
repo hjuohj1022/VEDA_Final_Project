@@ -9,6 +9,13 @@ struct Request {
     bool headlessSet = false;
     bool gui = false;
     bool stop = false;
+    bool depthStream = false;
+    bool pcStream = false;
+    bool pcView = false;
+    bool rxSet = false;
+    bool rySet = false;
+    float rx = -20.0f;
+    float ry = 35.0f;
 };
 
 std::vector<std::string> SplitTokens(const std::string& line);
