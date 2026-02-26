@@ -3,6 +3,7 @@
 
 #include <QQuickItem>
 #include <QWindow>
+#include <QByteArray>
 #include <vlc/vlc.h>
 
 class QTimer;
@@ -85,6 +86,7 @@ private:
     QTimer *m_offlineDelayTimer = nullptr;
     bool m_manualStopRequested = false;
     int m_reconnectAttempt = 0;
+    QByteArray m_activeMediaUrlUtf8;
 
     libvlc_instance_t *m_vlcInstance = nullptr;
     libvlc_media_player_t *m_mediaPlayer = nullptr;

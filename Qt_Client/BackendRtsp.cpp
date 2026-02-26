@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 
 #include <QRegularExpression>
 #include <QSettings>
@@ -7,6 +7,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+// RTSP IP를 설정하고 사용자 설정으로 저장한다.
 void Backend::setRtspIp(const QString &ip) {
     QString trimmed = ip.trimmed();
     if (trimmed.isEmpty()) return;
@@ -20,6 +21,7 @@ void Backend::setRtspIp(const QString &ip) {
     emit rtspIpChanged();
 }
 
+// RTSP 포트를 설정하고 사용자 설정으로 저장한다.
 void Backend::setRtspPort(const QString &port) {
     QString trimmed = port.trimmed();
     if (trimmed.isEmpty()) return;
@@ -33,6 +35,7 @@ void Backend::setRtspPort(const QString &port) {
     emit rtspPortChanged();
 }
 
+// 카메라 인덱스와 스트림 타입으로 RTSP URL을 조합한다.
 QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
     if (cameraIndex < 0) {
         return QString();
@@ -104,6 +107,7 @@ bool Backend::updateRtspIp(QString ip) {
     return true;
 }
 
+// RTSP IP/포트(선택적으로 URL 경로) 설정을 갱신한다.
 bool Backend::updateRtspConfig(QString ip, QString port) {
     QString inputTrimmed = ip.trimmed();
     QString portTrimmed = port.trimmed();
@@ -219,6 +223,7 @@ bool Backend::updateRtspConfig(QString ip, QString port) {
     return true;
 }
 
+// RTSP 설정을 .env 기본값으로 되돌린다.
 bool Backend::resetRtspConfigToEnv() {
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
     const QString envPort = m_env.value("RTSP_PORT", "8555").trimmed();
@@ -253,6 +258,7 @@ bool Backend::resetRtspConfigToEnv() {
     return changed;
 }
 
+// RTSP 인증 정보를 런타임 오버라이드로 설정한다.
 bool Backend::updateRtspCredentials(QString username, QString password) {
     const QString nextUser = username.trimmed();
     const QString nextPass = password;
@@ -266,12 +272,14 @@ bool Backend::updateRtspCredentials(QString username, QString password) {
     return true;
 }
 
+// RTSP 인증 정보를 .env 값으로 되돌린다.
 void Backend::useEnvRtspCredentials() {
     m_useCustomRtspAuth = false;
     m_rtspUsernameOverride.clear();
     m_rtspPasswordOverride.clear();
 }
 
+// RTSP TCP 포트 연결 가능 여부를 빠르게 확인한다.
 void Backend::probeRtspEndpoint(QString ip, QString port, int timeoutMs) {
     const QString ipTrimmed = ip.trimmed();
     if (ipTrimmed.isEmpty()) {
@@ -319,3 +327,4 @@ void Backend::probeRtspEndpoint(QString ip, QString port, int timeoutMs) {
     timer->start();
     socket->connectToHost(ipTrimmed, static_cast<quint16>(portNum));
 }
+
