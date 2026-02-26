@@ -86,7 +86,12 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
         authPrefix += "@";
     }
 
-    return QString("rtsps://%1%2:%3%4").arg(authPrefix, m_rtspIp, m_rtspPort, path);
+    QString scheme = "rtsp";
+    if (m_rtspPort == "8555") {
+        scheme = "rtsps";
+    }
+
+    return QString("%1://%2%3:%4%5").arg(scheme, authPrefix, m_rtspIp, m_rtspPort, path);
 }
 
 bool Backend::updateRtspIp(QString ip) {
