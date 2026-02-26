@@ -44,7 +44,6 @@ Item {
         dptzScale = 1.0
         dptzPanX = 0
         dptzPanY = 0
-        vlc.setDigitalZoom(dptzScale, 0.5, 0.5)
     }
 
     function dptzClampPan() {
@@ -72,42 +71,13 @@ Item {
         if (Math.abs(newScale - oldScale) < 0.0001) return
 
         dptzScale = newScale
-
-        var viewW = Math.max(1, videoViewport.width)
-        var viewH = Math.max(1, videoViewport.height)
-        var srcW = vlc.videoWidth > 0 ? vlc.videoWidth : 1920
-        var srcH = vlc.videoHeight > 0 ? vlc.videoHeight : 1080
-        var srcAspect = srcW / Math.max(1, srcH)
-        var viewAspect = viewW / Math.max(1, viewH)
-
-        var contentX = 0
-        var contentY = 0
-        var contentW = viewW
-        var contentH = viewH
-
-        if (viewAspect > srcAspect) {
-            contentW = viewH * srcAspect
-            contentX = (viewW - contentW) / 2
-        } else if (viewAspect < srcAspect) {
-            contentH = viewW / srcAspect
-            contentY = (viewH - contentH) / 2
-        }
-
-        var nx = (focusX - contentX) / Math.max(1, contentW)
-        var ny = (focusY - contentY) / Math.max(1, contentH)
-        nx = Math.max(0, Math.min(1, nx))
-        ny = Math.max(0, Math.min(1, ny))
         if (dptzDebugLog) {
             console.log("[DPTZ][QML]",
                         "step=", step,
                         "scale=", newScale,
-                        "focus=", focusX, focusY,
-                        "view=", viewW, viewH,
-                        "src=", srcW, srcH,
-                        "content=", contentX, contentY, contentW, contentH,
-                        "norm=", nx, ny)
+                        "focus=", focusX, focusY)
         }
-        vlc.setDigitalZoom(dptzScale, nx, ny)
+        root.dptzClampPan()
     }
 
     onDptzEnabledChanged: {
@@ -194,26 +164,141 @@ Item {
                 Layout.fillHeight: true
                 clip: true
 
-                VlcPlayer {
+                Item {
                     id: vlc
-                    width: videoViewport.width
-                    height: videoViewport.height
-                    x: 0
-                    y: 0
+                    anchors.fill: parent
+                    property string url: ""
+                    property bool isPlaying: false
+                    property real fps: 0
+                    property int videoWidth: (videoOutput.videoSink && videoOutput.videoSink.videoSize.width > 0) ? videoOutput.videoSink.videoSize.width : 0
+                    property int videoHeight: (videoOutput.videoSink && videoOutput.videoSink.videoSize.height > 0) ? videoOutput.videoSink.videoSize.height : 0
+                    property int frameCounter: 0
+                    property int reconnectAttempt: 0
+                    property int maxReconnectAttempt: 6
+
+                    function play() {
+                        if (url === "")
+                            return
+                        reconnectTimer.stop()
+                        reconnectAttempt = 0
+                        mediaPlayer.stop()
+                        mediaPlayer.source = ""
+                        mediaPlayer.source = url
+                        mediaPlayer.play()
+                    }
+
+                    function stop() {
+                        reconnectTimer.stop()
+                        mediaPlayer.stop()
+                        mediaPlayer.source = ""
+                        reconnectAttempt = 0
+                        frameCounter = 0
+                        fps = 0
+                    }
+
+                    function scheduleReconnect() {
+                        if (url === "")
+                            return
+                        if (reconnectAttempt >= maxReconnectAttempt)
+                            return
+                        reconnectAttempt += 1
+                        reconnectTimer.interval = Math.min(2000, 250 * reconnectAttempt)
+                        reconnectTimer.restart()
+                    }
+
+                    function setDigitalZoom(scale, focusX, focusY) {
+                        // No-op: zoom is implemented in QML transform.
+                    }
 
                     onIsPlayingChanged: {
-                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying)
-                        if (!vlc.isPlaying) root.cameraFpsChanged(root.cameraIndex, 0)
-                    }
-                    onFpsChanged: {
-                        var roundedFps = Math.max(0, Math.round(vlc.fps))
-                        root.cameraFpsChanged(root.cameraIndex, roundedFps)
-                        root.cameraStateChanged(root.cameraIndex, vlc.isPlaying)
+                        root.cameraStateChanged(root.cameraIndex, isPlaying)
+                        if (!isPlaying) {
+                            root.cameraFpsChanged(root.cameraIndex, 0)
+                            frameCounter = 0
+                            fps = 0
+                        }
                     }
 
-                    onVideoDrag: function(dx, dy) {
-                        // Native VLC window mode: drag-pan is intentionally disabled to keep
-                        // zoom strictly inside the camera frame.
+                    onFpsChanged: {
+                        root.cameraFpsChanged(root.cameraIndex, Math.max(0, Math.round(fps)))
+                        root.cameraStateChanged(root.cameraIndex, isPlaying)
+                    }
+
+                    MediaPlayer {
+                        id: mediaPlayer
+                        audioOutput: null
+                        videoOutput: videoOutput
+                        onPlaybackStateChanged: {
+                            vlc.isPlaying = (playbackState === MediaPlayer.PlayingState)
+                            if (vlc.isPlaying) {
+                                vlc.reconnectAttempt = 0
+                                reconnectTimer.stop()
+                            }
+                        }
+                        onErrorOccurred: function(error, errorString) {
+                            vlc.isPlaying = false
+                            console.warn("MediaPlayer error:", error, errorString)
+                            vlc.scheduleReconnect()
+                        }
+                    }
+
+                    VideoOutput {
+                        id: videoOutput
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectFit
+
+                        transform: [
+                            Scale {
+                                origin.x: videoViewport.width / 2
+                                origin.y: videoViewport.height / 2
+                                xScale: root.dptzEnabled ? root.dptzScale : 1.0
+                                yScale: root.dptzEnabled ? root.dptzScale : 1.0
+                            },
+                            Translate {
+                                x: root.dptzEnabled ? root.dptzPanX : 0
+                                y: root.dptzEnabled ? root.dptzPanY : 0
+                            }
+                        ]
+                    }
+
+                    Connections {
+                        target: videoOutput.videoSink
+                        ignoreUnknownSignals: true
+                        function onVideoFrameChanged(frame) {
+                            if (!vlc.isPlaying)
+                                return
+                            vlc.frameCounter += 1
+                        }
+                    }
+
+                    Timer {
+                        interval: 1000
+                        running: true
+                        repeat: true
+                        onTriggered: {
+                            if (!vlc.isPlaying) {
+                                if (vlc.fps !== 0)
+                                    vlc.fps = 0
+                                vlc.frameCounter = 0
+                                return
+                            }
+                            vlc.fps = vlc.frameCounter
+                            vlc.frameCounter = 0
+                        }
+                    }
+
+                    Timer {
+                        id: reconnectTimer
+                        interval: 250
+                        repeat: false
+                        onTriggered: {
+                            if (vlc.url === "")
+                                return
+                            mediaPlayer.stop()
+                            mediaPlayer.source = ""
+                            mediaPlayer.source = vlc.url
+                            mediaPlayer.play()
+                        }
                     }
                 }
 

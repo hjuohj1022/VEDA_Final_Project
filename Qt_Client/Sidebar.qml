@@ -122,11 +122,12 @@ Rectangle {
         Rectangle {
             visible: root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 150 : 0
+            Layout.maximumHeight: root.showCameraControls ? 150 : 0
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 150
 
             ColumnLayout {
                 anchors.fill: parent
@@ -215,11 +216,12 @@ Rectangle {
         Rectangle {
             visible: root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 260 : 0
+            Layout.maximumHeight: root.showCameraControls ? 260 : 0
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 260
 
             ColumnLayout {
                 anchors.fill: parent
@@ -310,13 +312,15 @@ Rectangle {
                     wrapMode: Text.WordWrap
                 }
 
-                Item { Layout.fillHeight: true }
             }
         }
 
         // 시스템 메트릭 차트 영역
         ColumnLayout {
             visible: !root.showCameraControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : implicitHeight
+            Layout.maximumHeight: root.showCameraControls ? 0 : 16777215
             spacing: 8
             
             component SystemChart : Rectangle {
@@ -451,6 +455,9 @@ Rectangle {
 
         GridLayout {
             visible: !root.showCameraControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : implicitHeight
+            Layout.maximumHeight: root.showCameraControls ? 0 : 16777215
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
@@ -514,6 +521,8 @@ Rectangle {
         Rectangle {
             visible: !root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : 50
+            Layout.maximumHeight: root.showCameraControls ? 0 : 50
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
             radius: 8
@@ -543,6 +552,10 @@ Rectangle {
                     font.pixelSize: 10
                 }
             }
+        }
+
+        Item {
+            Layout.fillHeight: true
         }
     }
 }
