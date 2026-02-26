@@ -5,7 +5,6 @@
 #include <QQuickStyle>
 
 #include "Backend.h"
-#include "VlcPlayer.h"
 
 // 프로그램 진입점
 int main(int argc, char *argv[])
@@ -19,9 +18,6 @@ int main(int argc, char *argv[])
     app.setOrganizationName("Team3");
     app.setOrganizationDomain("team3.com");
     app.setApplicationName("Team3VideoReceiver");
-
-    // QML에서 VLC 플레이어 타입을 사용할 수 있도록 등록
-    qmlRegisterType<VlcPlayer>("Team3VideoReceiver", 1, 0, "VlcPlayer");
 
     // 기본 Qt Quick Controls 스타일 지정
     QQuickStyle::setStyle("Basic");

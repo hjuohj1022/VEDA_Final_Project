@@ -471,7 +471,7 @@ ApplicationWindow {
                                                     cameraIndex: window.inlineMainCameraIndex
                                                     dptzEnabled: true
                                                     locationName: window.cameraLocationName(window.inlineMainCameraIndex)
-                                                    startDelayMs: 0
+                                                    startDelayMs: 150
                                                     source: (backend.isLoggedIn && window.inlineMainCameraIndex >= 0)
                                                             ? ((backend.rtspIp, backend.rtspPort),
                                                                backend.buildRtspUrl(window.inlineMainCameraIndex, false))
