@@ -254,96 +254,96 @@ pipeline {
             }
         }
 
-        // 🖥️ 6. Qt Client (Windows)
-        stage('Qt Client (Windows CMake)') {
-            agent { label 'windows-qt' } 
+        // // 🖥️ 6. Qt Client (Windows)
+        // stage('Qt Client (Windows CMake)') {
+        //     agent { label 'windows-qt' } 
             
-            // Qt 폴더 내 변경사항이 있을 때
-            when { 
-                anyOf {
-                    changeset 'Qt_Client/**'
-                    triggeredBy 'UserIdCause'
-                }
-            }
+        //     // Qt 폴더 내 변경사항이 있을 때
+        //     when { 
+        //         anyOf {
+        //             changeset 'Qt_Client/**'
+        //             triggeredBy 'UserIdCause'
+        //         }
+        //     }
 
-            environment {
-                QT_ROOT = "C:\\Qt\\6.10.2\\mingw_64"
-                MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
-                CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
-                PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
+        //     environment {
+        //         QT_ROOT = "C:\\Qt\\6.10.2\\mingw_64"
+        //         MINGW_BIN = "C:\\Qt\\Tools\\mingw1310_64\\bin" 
+        //         CMAKE_BIN = "C:\\Qt\\Tools\\CMake_64\\bin"
+        //         PATH = "${QT_ROOT}\\bin;${MINGW_BIN};${CMAKE_BIN};C:\\Windows\\System32;${PATH}"
                 
-                BUILD_DIR = "build_cmake"
-                OUTPUT_DIR = "deploy_output_new"
-            }
+        //         BUILD_DIR = "build_cmake"
+        //         OUTPUT_DIR = "deploy_output_new"
+        //     }
 
-            steps {
-                echo "🔨 CMake 기반 MinGW 빌드 시작..."
-                git branch: 'develop', url: GIT_URL
+        //     steps {
+        //         echo "🔨 CMake 기반 MinGW 빌드 시작..."
+        //         git branch: 'develop', url: GIT_URL
 
-                dir('Qt_Client') {
-                    script {
-                        bat "taskkill /F /IM Team3VideoReceiver.exe /T || exit 0"
-                        bat "taskkill /F /IM ld.exe /T || exit 0"
-                        bat "taskkill /F /IM g++.exe /T || exit 0"
-                        bat "taskkill /F /IM cmake.exe /T || exit 0"
+        //         dir('Qt_Client') {
+        //             script {
+        //                 bat "taskkill /F /IM Team3VideoReceiver.exe /T || exit 0"
+        //                 bat "taskkill /F /IM ld.exe /T || exit 0"
+        //                 bat "taskkill /F /IM g++.exe /T || exit 0"
+        //                 bat "taskkill /F /IM cmake.exe /T || exit 0"
                         
-                        sleep 3
+        //                 sleep 3
                         
-                        // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
-                        bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
-                        bat "mkdir ${OUTPUT_DIR}"
-                        bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
+        //                 // 1. 배포 폴더(OUTPUT_DIR) 초기화 및 생성
+        //                 bat "if exist ${OUTPUT_DIR} rmdir /s /q ${OUTPUT_DIR}"
+        //                 bat "mkdir ${OUTPUT_DIR}"
+        //                 bat "if not exist ${BUILD_DIR} mkdir ${BUILD_DIR}"
 
-                        // 2. 필수 의존성 파일(VLC, .env, 인증서)을 '미리' 배포 폴더로 복사
-                        echo "🚚 라이브러리 및 설정 파일 복사..."
+        //                 // 2. 필수 의존성 파일(VLC, .env, 인증서)을 '미리' 배포 폴더로 복사
+        //                 echo "🚚 라이브러리 및 설정 파일 복사..."
                         
-                        unstash 'certs-stash' // 보관된 인증서 가져오기
-                        bat "copy RaspberryPi\\k3s-cluster\\security\\certs\\rootCA.crt ${OUTPUT_DIR}\\"
+        //                 unstash 'certs-stash' // 보관된 인증서 가져오기
+        //                 bat "copy RaspberryPi\\k3s-cluster\\security\\certs\\rootCA.crt ${OUTPUT_DIR}\\"
                         
-                        bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
-                        bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
-                        bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
+        //                 bat "if exist libvlc.dll copy /Y libvlc.dll ${OUTPUT_DIR}\\"
+        //                 bat "if exist libvlccore.dll copy /Y libvlccore.dll ${OUTPUT_DIR}\\"
+        //                 bat "if exist plugins xcopy /E /I /Y plugins ${OUTPUT_DIR}\\plugins"
 
-                        // Jenkins Secret File(.env) 처리
-                        withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
-                             // 실행 시 필요하므로 배포 폴더에 바로 복사
-                            bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
-                        }
+        //                 // Jenkins Secret File(.env) 처리
+        //                 withCredentials([file(credentialsId: 'qt-client-env', variable: 'SECRET_ENV')]) {
+        //                      // 실행 시 필요하므로 배포 폴더에 바로 복사
+        //                     bat "copy /Y \"%SECRET_ENV%\" ${OUTPUT_DIR}\\.env"
+        //                 }
 
-                        // 3. CMake 설정 및 빌드 (결과물이 deploy_output_new로 직행)
-                        dir(BUILD_DIR) {
-                            bat """
-                                cmake -G "MinGW Makefiles" ^
-                                -DCMAKE_BUILD_TYPE=Release ^
-                                -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
-                                -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
-                                -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
-                                -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
-                                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="../${OUTPUT_DIR}" ^
-                                ..
-                            """
+        //                 // 3. CMake 설정 및 빌드 (결과물이 deploy_output_new로 직행)
+        //                 dir(BUILD_DIR) {
+        //                     bat """
+        //                         cmake -G "MinGW Makefiles" ^
+        //                         -DCMAKE_BUILD_TYPE=Release ^
+        //                         -DCMAKE_PREFIX_PATH="${QT_ROOT}" ^
+        //                         -DCMAKE_MAKE_PROGRAM="${MINGW_BIN}\\mingw32-make.exe" ^
+        //                         -DCMAKE_C_COMPILER="${MINGW_BIN}\\gcc.exe" ^
+        //                         -DCMAKE_CXX_COMPILER="${MINGW_BIN}\\g++.exe" ^
+        //                         -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="../${OUTPUT_DIR}" ^
+        //                         ..
+        //                     """
                             
-                            // 병렬 빌드
-                            bat "cmake --build . --parallel 4"
-                        }
+        //                     // 병렬 빌드
+        //                     bat "cmake --build . --parallel 4"
+        //                 }
                         
-                        // 4. 패키징 (windeployqt)
-                        // 이미 EXE와 DLL이 OUTPUT_DIR에 다 모여 있으므로 바로 실행
-                        dir(OUTPUT_DIR) {
-                            echo "📦 Qt 의존성 주입 (windeployqt)..."
-                            bat "windeployqt --release --no-translations --verbose 2 --qmldir .. Team3VideoReceiver.exe"
-                        }
+        //                 // 4. 패키징 (windeployqt)
+        //                 // 이미 EXE와 DLL이 OUTPUT_DIR에 다 모여 있으므로 바로 실행
+        //                 dir(OUTPUT_DIR) {
+        //                     echo "📦 Qt 의존성 주입 (windeployqt)..."
+        //                     bat "windeployqt --release --no-translations --verbose 2 --qmldir .. Team3VideoReceiver.exe"
+        //                 }
 
-                        // 5. 압축 (deploy_output_new 전체를 압축)
-                        echo "🗜️ 압축 중..."
-                        powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_VMS.zip -Force"
-                    }
-                }
+        //                 // 5. 압축 (deploy_output_new 전체를 압축)
+        //                 echo "🗜️ 압축 중..."
+        //                 powershell "Compress-Archive -Path ${OUTPUT_DIR}\\* -DestinationPath QtClient_Windows_VMS.zip -Force"
+        //             }
+        //         }
                 
-                // 6. Jenkins에 산출물 보관
-                archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_VMS.zip', fingerprint: true
-            }
-        }
+        //         // 6. Jenkins에 산출물 보관
+        //         archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_VMS.zip', fingerprint: true
+        //     }
+        // }
     }
     post {
         success {

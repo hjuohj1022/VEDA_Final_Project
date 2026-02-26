@@ -86,7 +86,7 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
         authPrefix += "@";
     }
 
-    return QString("rtsp://%1%2:%3%4").arg(authPrefix, m_rtspIp, m_rtspPort, path);
+    return QString("rtsps://%1%2:%3%4").arg(authPrefix, m_rtspIp, m_rtspPort, path);
 }
 
 bool Backend::updateRtspIp(QString ip) {
@@ -165,7 +165,7 @@ bool Backend::updateRtspConfig(QString ip, QString port) {
     if (portNum == 0) {
         portNum = m_rtspPort.trimmed().toInt(&ok);
         if (!ok || portNum < 1 || portNum > 65535) {
-            portNum = 8554;
+            portNum = 8555;
         }
     }
 
@@ -216,10 +216,10 @@ bool Backend::updateRtspConfig(QString ip, QString port) {
 
 bool Backend::resetRtspConfigToEnv() {
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
-    const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
+    const QString envPort = m_env.value("RTSP_PORT", "8555").trimmed();
 
     const QString nextIp = envIp.isEmpty() ? QString("127.0.0.1") : envIp;
-    const QString nextPort = envPort.isEmpty() ? QString("8554") : envPort;
+    const QString nextPort = envPort.isEmpty() ? QString("8555") : envPort;
 
     QSettings settings;
     settings.setValue("network/use_custom_rtsp", false);
@@ -277,7 +277,7 @@ void Backend::probeRtspEndpoint(QString ip, QString port, int timeoutMs) {
     bool ok = false;
     int portNum = port.trimmed().toInt(&ok);
     if (!ok || portNum < 1 || portNum > 65535) {
-        portNum = 8554;
+        portNum = 8555;
     }
 
     const int safeTimeoutMs = qBound(300, timeoutMs, 5000);
