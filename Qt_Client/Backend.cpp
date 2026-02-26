@@ -99,7 +99,6 @@ Backend::Backend(QObject *parent) : QObject(parent)
 
         connect(socket, &QTcpSocket::errorOccurred, this, [this, finishProbe](QAbstractSocket::SocketError socketError) {
             Q_UNUSED(socketError);
-            setLatency(999);
             finishProbe();
         });
 

@@ -7,15 +7,17 @@
 #include <QNetworkRequest>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QDebug>
+#include <QFileInfo>
+#include <QElapsedTimer>
 
 // 서버에서 녹화 목록을 조회한다.
 void Backend::refreshRecordings() {
-    QString urlStr = QString("%1/recordings?user=%2").arg(serverUrl(), m_userId);
-    QUrl url(urlStr);
+    QUrl url(serverUrl() + "/recordings");
     QNetworkRequest request(url);
     applySslIfNeeded(request);
-    qDebug() << "Refreshing recordings for user:" << m_userId << "from:" << url.toString();
+    qDebug() << "Refreshing recordings from:" << url.toString();
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "RECORDINGS_LIST");
     connect(reply, &QNetworkReply::finished, this, [=](){
@@ -30,11 +32,19 @@ void Backend::refreshRecordings() {
 
                 QVariantList fileList;
                 for (const QJsonValue &val : arr) {
-                    const QJsonObject obj = val.toObject();
                     QVariantMap fileMap;
-                    fileMap["name"] = obj["name"].toString();
-                    fileMap["size"] = obj["size"].toVariant().toLongLong();
-                    fileList.append(fileMap);
+                    if (val.isObject()) {
+                        const QJsonObject obj = val.toObject();
+                        fileMap["name"] = obj.value("name").toString();
+                        fileMap["size"] = obj.value("size").toVariant().toLongLong();
+                    } else if (val.isString()) {
+                        fileMap["name"] = val.toString();
+                        fileMap["size"] = 0;
+                    }
+
+                    if (!fileMap.value("name").toString().isEmpty()) {
+                        fileList.append(fileMap);
+                    }
                 }
                 emit recordingsLoaded(fileList);
             } else {
@@ -51,7 +61,10 @@ void Backend::refreshRecordings() {
 
 // 선택한 녹화 파일을 삭제한다.
 void Backend::deleteRecording(QString name) {
-    QUrl url(serverUrl() + "/recordings?file=" + name);
+    QUrl url(serverUrl() + "/recordings");
+    QUrlQuery query;
+    query.addQueryItem("file", name);
+    url.setQuery(query);
     QNetworkRequest request(url);
     applySslIfNeeded(request);
     QNetworkReply *reply = m_manager->deleteResource(request);
@@ -93,7 +106,11 @@ void Backend::renameRecording(QString oldName, QString newName) {
 
 // 녹화 파일 스트림 URL을 만든다.
 QString Backend::getStreamUrl(QString fileName) {
-    return QString("%1/stream?file=%2").arg(serverUrl(), fileName);
+    QUrl url(serverUrl() + "/stream");
+    QUrlQuery query;
+    query.addQueryItem("file", fileName);
+    url.setQuery(query);
+    return url.toString();
 }
 
 // 녹화 파일을 임시 저장 후 재생한다.
@@ -105,7 +122,8 @@ void Backend::downloadAndPlay(QString fileName) {
         m_downloadReply = nullptr;
     }
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    m_tempFilePath = tempDir + "/" + fileName;
+    const QString localName = QFileInfo(fileName).fileName();
+    m_tempFilePath = tempDir + "/" + (localName.isEmpty() ? QString("recording.mp4") : localName);
     if (QFile::exists(m_tempFilePath)) {
         // 기존 임시 파일이 있으면 먼저 삭제한다.
         QFile::remove(m_tempFilePath);
@@ -197,9 +215,17 @@ void Backend::checkStorage() {
     QUrl url(serverUrl() + "/system/storage");
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    QElapsedTimer timer;
+    timer.start();
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "STORAGE_CHECK");
-    connect(reply, &QNetworkReply::finished, this, [=](){ onStorageReply(reply); });
+    connect(reply, &QNetworkReply::finished, this, [=]() {
+        const int elapsedMs = static_cast<int>(timer.elapsed());
+        if (reply->error() == QNetworkReply::NoError) {
+            setLatency(elapsedMs);
+        }
+        onStorageReply(reply);
+    });
 }
 
 // 스토리지 API 응답을 파싱해 상태를 갱신한다.

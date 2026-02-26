@@ -319,8 +319,8 @@ Rectangle {
         ColumnLayout {
             visible: !root.showCameraControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : implicitHeight
-            Layout.maximumHeight: root.showCameraControls ? 0 : 16777215
+            Layout.preferredHeight: root.showCameraControls ? 0 : 208
+            Layout.maximumHeight: root.showCameraControls ? 0 : 208
             spacing: 8
             
             component SystemChart : Rectangle {
@@ -440,7 +440,7 @@ Rectangle {
                 value: backend.currentFps
                 valueColor: theme ? theme.textPrimary : "white"
                 graphColor: "#0d9488"
-                dataHistory: [30, 29, 30, 31, 30, 28, 29, 30, 30, 29, 30, 31, 29, 30, 30]
+                dataHistory: []
             }
             
             SystemChart {
@@ -449,15 +449,15 @@ Rectangle {
                 value: backend.latency
                 valueColor: theme ? theme.textPrimary : "white"
                 graphColor: theme ? theme.accent : "#f97316"
-                dataHistory: [40, 42, 45, 41, 39, 40, 42, 44, 45, 43, 41, 40, 42, 41]
+                dataHistory: []
             }
         }
 
         GridLayout {
             visible: !root.showCameraControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : implicitHeight
-            Layout.maximumHeight: root.showCameraControls ? 0 : 16777215
+            Layout.preferredHeight: root.showCameraControls ? 0 : 168
+            Layout.maximumHeight: root.showCameraControls ? 0 : 168
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
