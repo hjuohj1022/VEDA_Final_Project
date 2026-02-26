@@ -1,12 +1,14 @@
 #include "../include/crow_all.h"
+#include <jwt-cpp/jwt.h> 
 #include <filesystem>
 #include <iostream>
 #include <vector>
-#include <cstdlib> // getenv 사용
-#include <mysql/mysql.h> // MariaDB C Connector
-#include <fstream> // 파일 읽기용
-#include <sstream> // 버퍼용
-#include <sys/statvfs.h> // 리눅스 파일시스템 통계용
+#include <cstdlib> 
+#include <mysql/mysql.h> 
+#include <fstream> 
+#include <sstream> 
+#include <sys/statvfs.h> 
+#include <chrono>
 #include <optional>
 #include <system_error>
 #include <algorithm>
@@ -14,34 +16,38 @@
 
 namespace fs = std::filesystem;
 
-static const fs::path kRecordingsRoot = "/app/recordings";
+// -------------------------------------------------------
+// JWT 관련 설정 및 함수
+// -------------------------------------------------------
+std::string getJwtSecret() {
+    const char* secret = std::getenv("JWT_SECRET");
+    return secret ? std::string(secret) : "default_veda_secret_key_2024";
+}
 
-// 상대경로를 안전한 절대경로로 변환 (../ 탈출 방지)
-static std::optional<fs::path> resolveSafeRecordingPath(const std::string& userPath) {
-    if (userPath.empty()) return std::nullopt;
+std::string generateJWT(const std::string& userId) {
+    auto token = jwt::create()
+        .set_issuer("veda_auth_server")
+        .set_type("JWS")
+        .set_payload_claim("user_id", jwt::claim(userId))
+        .set_issued_at(std::chrono::system_clock::now())
+        .set_expires_at(std::chrono::system_clock::now() + std::chrono::hours{24})
+        .sign(jwt::algorithm::hs256{getJwtSecret()});
+    return token;
+}
 
-    fs::path rel = fs::path(userPath).lexically_normal();
-    if (rel.is_absolute()) return std::nullopt;
-
-    for (const auto& part : rel) {
-        if (part == "..") return std::nullopt;
+bool verifyJWT(const std::string& token) {
+    try {
+        auto decoded = jwt::decode(token);
+        auto verifier = jwt::verify()
+            .allow_algorithm(jwt::algorithm::hs256{getJwtSecret()})
+            .with_issuer("veda_auth_server");
+        
+        verifier.verify(decoded);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[JWT Verify Error] " << e.what() << std::endl;
+        return false;
     }
-
-    std::error_code ec;
-    fs::path canonRoot = fs::weakly_canonical(kRecordingsRoot, ec);
-    if (ec) return std::nullopt;
-
-    fs::path full = kRecordingsRoot / rel;
-    fs::path canonFull = fs::weakly_canonical(full, ec);
-    if (ec) return std::nullopt;
-
-    const std::string rootStr = canonRoot.generic_string();
-    const std::string fullStr = canonFull.generic_string();
-
-    if (fullStr.compare(0, rootStr.size(), rootStr) != 0) return std::nullopt;
-    if (fullStr.size() > rootStr.size() && fullStr[rootStr.size()] != '/') return std::nullopt;
-
-    return canonFull;
 }
 
 // -------------------------------------------------------
@@ -103,31 +109,27 @@ int main()
     crow::SimpleApp app;
 
     // ==========================================
-    // 로그인 API (DB 연동)
+    // 로그인 API (실제 JWT 발급)
     // ==========================================
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
         auto x = crow::json::load(req.body);
-        if (!x) return crow::response(400);
+        if (!x) return crow::response(400, "Invalid JSON");
 
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
 
-        // mTLS를 통해 Nginx가 전달한 기기 정보 확인
+        // mTLS 정보 확인 (로깅용)
         std::string device_id = req.get_header_value("X-Device-ID");
-        std::string device_verify = req.get_header_value("X-Device-Verify");
+        if (!device_id.empty()) std::cout << "[mTLS Device] " << device_id << std::endl;
 
-        if (!device_id.empty() && device_verify == "SUCCESS") {
-            std::cout << "[mTLS Verified Device] " << device_id << std::endl;
-        } else {
-            std::cout << "[Public Client] ID: " << id << std::endl;
-        }
-
-        // DB 확인 함수 호출
+        // DB 확인 후 토큰 생성
         if (checkUserFromDB(id, pw)) {
+            std::string token = generateJWT(id);
+            
             crow::json::wvalue res;
             res["status"] = "success";
-            res["token"] = "valid-token-123"; 
+            res["token"] = token;
             return crow::response(res);
         } else {
             return crow::response(401, "Login Failed: Check ID or Password");
@@ -135,39 +137,51 @@ int main()
     });
 
     // ==========================================
-    // 녹화된 파일 목록 조회
+    // 토큰 검증 헬퍼 (캡처를 위해 람다로 정의)
     // ==========================================
-    CROW_ROUTE(app, "/recordings")
-    ([](){
-        crow::json::wvalue result;
-        crow::json::wvalue::list files;
-
-        if (fs::exists(kRecordingsRoot) && fs::is_directory(kRecordingsRoot)) {
-            for (const auto& entry : fs::recursive_directory_iterator(kRecordingsRoot)) {
-                if (!entry.is_regular_file()) continue;
-
-                std::string ext = entry.path().extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(),
-                    [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-                if (ext != ".mp4") continue;
-
-                crow::json::wvalue f;
-                f["name"] = fs::relative(entry.path(), kRecordingsRoot).generic_string(); // 예: 0/main_xxx.mp4
-                f["size"] = static_cast<uint64_t>(entry.file_size());
-                files.push_back(std::move(f));
-            }
+    auto is_authorized = [](const crow::request& req) {
+        std::string auth_header = req.get_header_value("Authorization");
+        if (auth_header.length() < 7 || auth_header.substr(0, 7) != "Bearer ") {
+            return false;
         }
+        return verifyJWT(auth_header.substr(7));
+    };
 
-        result["files"] = std::move(files);
-        return crow::response(result);
-    });
+        // ==========================================
+        // 녹화된 파일 목록 조회 (보호됨)
+        // ==========================================
+        CROW_ROUTE(app, "/recordings")
+        ([&is_authorized](const crow::request& req){
+            if (!is_authorized(req)) return crow::response(401, "Unauthorized");
+    
+            std::string path = "/app/recordings"; 
+            crow::json::wvalue result;
+            
+            // files 배열 초기화 (파일 없으면 빈 배열 반환)
+            result["files"] = std::vector<std::string>(); 
+    
+            if (fs::exists(path) && fs::is_directory(path)) {
+                int i = 0;
+                for (const auto& entry : fs::directory_iterator(path)) {
+                    if (entry.path().extension() == ".mp4") {
+                        // 파일명과 크기를 담음
+                        result["files"][i]["name"] = entry.path().filename().string();
+                        result["files"][i]["size"] = (long)entry.file_size(); 
+                        i++;
+                    }
+                }
+            }
+            return crow::response(result); 
+        });
+    
 
     // ==========================================
-    // 파일 삭제 API (DELETE /recordings?file=...)
-    // Qt 앱이 이 주소로 삭제 요청을 보냄
+    // 파일 삭제 API (보호됨)
     // ==========================================
     CROW_ROUTE(app, "/recordings").methods(crow::HTTPMethod::DELETE)
-    ([](const crow::request& req){
+    ([&is_authorized](const crow::request& req){
+        if (!is_authorized(req)) return crow::response(401, "Unauthorized");
+
         // 쿼리 파라미터(?file=...)에서 파일명 가져오기
         const char* file_param = req.url_params.get("file");
         
@@ -196,11 +210,17 @@ int main()
     });
 
     // ==========================================
-    // 파일 다운로드/재생 (Qt 요청: /stream?file=...)
-    // 수동으로 파일 읽어서 전송 (404 해결 + Range Support 추가)
+    // 파일 다운로드/재생 (보호됨)
     // ==========================================
     CROW_ROUTE(app, "/stream")
-    ([](const crow::request& req, crow::response& res){
+    ([&is_authorized](const crow::request& req, crow::response& res){
+        if (!is_authorized(req)) {
+            res.code = 401;
+            res.write("Unauthorized");
+            res.end();
+            return;
+        }
+
         // 쿼리 파라미터(?file=...)에서 파일명 가져오기
         const char* file_param = req.url_params.get("file");
         
@@ -285,10 +305,12 @@ int main()
     });
     
     // ==========================================
-    // 시스템 저장소 용량 조회 (Qt 앱 요청)
+    // 시스템 저장소 용량 조회 (보호됨)
     // ==========================================
     CROW_ROUTE(app, "/system/storage")
-    ([](){
+    ([&is_authorized](const crow::request& req){
+        if (!is_authorized(req)) return crow::response(401, "Unauthorized");
+
         struct statvfs stat;
         std::string path = "/app/recordings"; // 마운트된 경로 확인 필요
         crow::json::wvalue result;
