@@ -9,6 +9,16 @@ build/
 *.tlog
 *.log
 
+build-vs143/
+*.exe
+*.obj
+*.lib
+*.dll
+*.pdb
+*.ilk
+*.tlog
+*.log
+
 # Ignore VS/Code settings
 .vscode/
 .vs/
@@ -43,3 +53,6 @@ __pycache__/
 
 # Backups
 *.bak
+
+#memo
+*.md
