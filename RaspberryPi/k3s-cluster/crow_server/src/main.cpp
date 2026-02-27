@@ -206,22 +206,22 @@ int main()
         }
 
         auto safePath = resolveSafeRecordingPath(file_param);
-        if (!safePath) {
+        if (safePath.empty()) {
             return crow::response(403, "Invalid filename");
         }
 
-        if (!fs::exists(*safePath) || !fs::is_regular_file(*safePath)) {
+        if (!fs::exists(safePath) || !fs::is_regular_file(safePath)) {
             return crow::response(404, "File not found");
         }
 
         std::error_code ec;
-        fs::remove(*safePath, ec);
+        fs::remove(safePath, ec);
         if (ec) {
             std::cerr << "[Delete Error] " << ec.message() << std::endl;
             return crow::response(500, "Failed to delete file");
         }
 
-        std::cout << "[Delete] Removed file: " << safePath->string() << std::endl;
+        std::cout << "[Delete] Removed file: " << safePath << std::endl;
         return crow::response(200, "File deleted");
     });
 
@@ -248,7 +248,7 @@ int main()
         }
 
         auto safePath = resolveSafeRecordingPath(file_param);
-        if (!safePath) {
+        if (safePath.empty()) {
             res.code = 403;
             res.write("Invalid filename");
             res.end();
@@ -256,9 +256,9 @@ int main()
         }
 
         // 파일 크기 확인 (Range Support를 위해 필요)
-        std::ifstream ifs(*safePath, std::ios::binary | std::ios::ate);
+        std::ifstream ifs(safePath, std::ios::binary | std::ios::ate);
         if (!ifs.is_open()) {
-            std::cerr << "[Error] Cannot open file: " << safePath->string() << std::endl; // 에러 로그
+            std::cerr << "[Error] Cannot open file: " << safePath << std::endl; // 에러 로그
             res.code = 404;
             res.write("File not found or cannot open");
             res.end();
@@ -376,6 +376,35 @@ int main()
         result["services_info"]["mediamtx_hls"] = "/hls/ path is available on port 443.";
         
         return crow::response(result);
+    });
+        
+    // ==========================================
+    // Swagger API 문서 서빙
+    // ==========================================
+    CROW_ROUTE(app, "/docs")
+    ([](){
+        std::ifstream ifs("/app/swagger/index.html");
+        if (!ifs.is_open()) return crow::response(404, "Swagger UI file not found");
+        
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        
+        crow::response res(buffer.str());
+        res.add_header("Content-Type", "text/html; charset=utf-8");
+        return res;
+    });
+
+    CROW_ROUTE(app, "/swagger.yaml")
+    ([](){
+        std::ifstream ifs("/app/swagger/swagger.yaml");
+        if (!ifs.is_open()) return crow::response(404, "Swagger YAML file not found");
+        
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        
+        crow::response res(buffer.str());
+        res.add_header("Content-Type", "text/yaml; charset=utf-8");
+        return res;
     });
         
     app.port(8080).multithreaded().run();
