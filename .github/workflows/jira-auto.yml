@@ -1,0 +1,62 @@
+name: Jira Auto Issue
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  create-jira-issue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Changed Files
+        id: files
+        run: |
+          FILES=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
+            | jq -r '.[].filename')
+
+          echo "FILES<<EOF" >> $GITHUB_ENV
+          echo "$FILES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create Jira Issue
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          BODY="${{ github.event.pull_request.body }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+
+          DESCRIPTION="PR 링크: $PR_URL
+
+작업 내용:
+$BODY
+
+변경 파일:
+$FILES"
+
+          curl -X POST \
+            -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
+            -H "Content-Type: application/json" \
+            https://${{ secrets.JIRA_DOMAIN }}/rest/api/3/issue \
+            --data "{
+              \"fields\": {
+                \"project\": { \"key\": \"${{ secrets.JIRA_PROJECT }}\" },
+                \"summary\": \"$TITLE\",
+                \"issuetype\": { \"name\": \"Task\" },
+                \"description\": {
+                  \"type\": \"doc\",
+                  \"version\": 1,
+                  \"content\": [{
+                    \"type\": \"paragraph\",
+                    \"content\": [{
+                      \"type\": \"text\",
+                      \"text\": \"$DESCRIPTION\"
+                    }]
+                  }]
+                }
+              }
+            }"
