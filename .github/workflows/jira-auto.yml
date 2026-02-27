@@ -33,13 +33,7 @@ jobs:
           BODY="${{ github.event.pull_request.body }}"
           PR_URL="${{ github.event.pull_request.html_url }}"
 
-          DESCRIPTION="PR 링크: $PR_URL
-
-작업 내용:
-$BODY
-
-변경 파일:
-$FILES"
+          DESCRIPTION=$(printf "PR 링크: %s\n\n작업 내용:\n%s\n\n변경 파일:\n%s" "$PR_URL" "$BODY" "$FILES")
 
           RESPONSE=$(curl -s -X POST \
             -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
