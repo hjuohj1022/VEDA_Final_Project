@@ -23,6 +23,9 @@ void app_main(void){
 //    uartInit();
 //    xTaskCreate(uartTask, "uart_task", 2048, NULL, 5, NULL);
 
+    spiMasterInit();
+    xTaskCreate(spiTask, "spi_task", 4096, NULL, 5, NULL);
+    
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = WIFI_SSID,
@@ -33,6 +36,4 @@ void app_main(void){
 
     wifiConnect(&wifi_config);
 
-    spiMasterInit();
-    xTaskCreate(spiTask, "spi_task", 4096, NULL, 5, NULL);
 }

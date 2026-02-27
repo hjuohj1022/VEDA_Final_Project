@@ -4,65 +4,53 @@
 
 esp_mqtt_client_handle_t client;
 
-void mqttEventHandler(void *handler_args,esp_event_base_t base, int32_t event_id, void *event_data){
+void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
     switch ((esp_mqtt_event_id_t)event_id) {
 
-        case MQTT_EVENT_CONNECTED:
-			printf("MQTT Connected\n");
+    case MQTT_EVENT_CONNECTED:
+        printf("MQTT Connected\n");
+        esp_mqtt_client_subscribe(client, "test/topic", 0);
+        break;
 
-			esp_mqtt_client_subscribe(client, "test/topic", 0);
+    case MQTT_EVENT_DATA: {
+        esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+        printf("Topic: %.*s\n", event->topic_len, event->topic);
+        printf("Data: %.*s\n", event->data_len, event->data);
 
-			esp_mqtt_client_publish(
-				client,
-				"test/topic",
-				"Hello from ESP32-C3",
-				0,      // length (0이면 strlen 자동 계산)
-				1,      // QoS
-				0       // retain
-			);
+        /* 수신 즉시 SPI 큐로 전달 */
+        if (spi_cmd_queue != NULL) {
+            spi_cmd_t cmd = {0};
+            cmd.len = (event->data_len > MAX_SPI_DATA_LEN)
+                      ? MAX_SPI_DATA_LEN
+                      : (uint8_t)event->data_len;
+            memcpy(cmd.data, event->data, cmd.len);
 
-			break;
-			
-		case MQTT_EVENT_DATA: {
-            esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
-            printf("Topic: %.*s\n", event->topic_len, event->topic);
-            printf("Data: %.*s\n", event->data_len, event->data);
-
-            // 특정 토픽("test/topic")으로 들어온 명령만 처리하도록 필터링 (선택 사항)
-            if (strncmp(event->topic, "test/topic", event->topic_len) == 0) {
-                if (spi_cmd_queue != NULL) {
-                    spi_cmd_t cmd = {0};
-                    
-                    // SPI 패킷 데이터 영역이 최대 5바이트이므로 길이 제한
-                    cmd.len = (event->data_len > MAX_SPI_CMD_LEN) ? MAX_SPI_CMD_LEN : event->data_len;
-                    memcpy(cmd.data, event->data, cmd.len);
-
-                    // 큐에 명령어 삽입 (대기 시간 0)
-                    if (xQueueSend(spi_cmd_queue, &cmd, 0) != pdPASS) {
-                        printf("MQTT Event: SPI command queue is full!\n");
-                    }
-                }
+            if (xQueueSend(spi_cmd_queue, &cmd, 0) != pdPASS) {
+                printf("SPI queue full!\n");
+            } else {
+                printf("Queued to SPI: '%.*s'\n", cmd.len, cmd.data);
             }
-            break;
         }
-			
-		case MQTT_EVENT_DISCONNECTED:
-			printf("MQTT Disconnected\n");
-			esp_mqtt_client_reconnect(client);
-			break;
+        break;
+    }
 
-        case MQTT_EVENT_ERROR:
-            printf("MQTT Error\n");
-            break;
+    case MQTT_EVENT_DISCONNECTED:
+        printf("MQTT Disconnected\n");
+        esp_mqtt_client_reconnect(client);
+        break;
 
-        default:
-            break;
+    case MQTT_EVENT_ERROR:
+        printf("MQTT Error\n");
+        break;
+
+    default:
+        break;
     }
 }
 
-//mqtt 연결 wrapper 함수
-esp_mqtt_client_handle_t mqttClient(){
-
+esp_mqtt_client_handle_t mqttClient(void)
+{
     if (client != NULL) {
         printf("MQTT already initialized\n");
         return client;
@@ -77,14 +65,7 @@ esp_mqtt_client_handle_t mqttClient(){
         .credentials.authentication.key = client_key_pem,
     };
     client = esp_mqtt_client_init(&cfg);
-
-    esp_mqtt_client_register_event(
-        client,
-        ESP_EVENT_ANY_ID,
-        mqttEventHandler,
-        NULL
-    );
-
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqttEventHandler, NULL);
     esp_mqtt_client_start(client);
 
     return client;
