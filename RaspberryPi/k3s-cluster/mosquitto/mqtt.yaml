@@ -5,13 +5,17 @@ metadata:
   name: mosquitto-config
 data:
   mosquitto.conf: |
+    # 비보안 연결 (내부 Nginx 중계용)
+    listener 1883
+    allow_anonymous true
+
+    # 보안 연결 (직접 접속용)
     listener 8883
     cafile /mosquitto/certs/ca.crt
     certfile /mosquitto/certs/server.crt
     keyfile /mosquitto/certs/server.key
     require_certificate true
     use_identity_as_username true
-    allow_anonymous false
     persistence true
     persistence_location /mosquitto/data/
     log_dest stdout
@@ -37,6 +41,7 @@ spec:
         image: hjuohj/mqtt-broker:latest
         imagePullPolicy: Always
         ports:
+        - containerPort: 1883
         - containerPort: 8883
         volumeMounts:
         - name: config-volume
@@ -54,16 +59,21 @@ spec:
           secretName: mqtt-certs
 
 ---
-# 3. 내부 전용 서비스 (Service)
+# 3. 서비스 (Service) - 내부 접근용 ClusterIP
 apiVersion: v1
 kind: Service
 metadata:
   name: mqtt-service
 spec:
-  type: ClusterIP  # 내부 IP만 사용
+  type: ClusterIP
   selector:
     app: mqtt
   ports:
-    - protocol: TCP
+    - name: mqtt-tcp
+      protocol: TCP
+      port: 1883
+      targetPort: 1883
+    - name: mqtt-ssl
+      protocol: TCP
       port: 8883
       targetPort: 8883

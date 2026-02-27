@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 
 #include <QAuthenticator>
 #include <QDebug>
@@ -33,7 +33,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
     setupMqtt();
 
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
-    const QString envPort = m_env.value("RTSP_PORT", "8554").trimmed();
+    const QString envPort = m_env.value("RTSP_PORT", "8555").trimmed();
 
     // Always prefer .env values on app startup.
     m_useCustomRtspConfig = false;
@@ -59,6 +59,12 @@ Backend::Backend(QObject *parent) : QObject(parent)
     QTimer *simTimer = new QTimer(this);
     simTimer->setInterval(5000);
     connect(simTimer, &QTimer::timeout, this, [this]() {
+        // Avoid plain TCP probing against RTSPS port, which creates noisy EOF/TLS warnings on server.
+        const QString rtspScheme = m_env.value("RTSP_SCHEME", "rtsp").trimmed().toLower();
+        if (rtspScheme == "rtsps") {
+            return;
+        }
+
         static bool probeInFlight = false;
         if (probeInFlight) {
             return;
@@ -71,7 +77,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
 
         QString ip = rtspIp();
         int port = rtspPort().toInt();
-        if (port == 0) port = 8554;
+        if (port == 0) port = 8555;
 
         auto finished = std::make_shared<bool>(false);
         auto finishProbe = [socket, timer, finished]() {
@@ -93,11 +99,11 @@ Backend::Backend(QObject *parent) : QObject(parent)
 
         connect(socket, &QTcpSocket::errorOccurred, this, [this, finishProbe](QAbstractSocket::SocketError socketError) {
             Q_UNUSED(socketError);
-            setLatency(999);
             finishProbe();
         });
 
         QPointer<QTcpSocket> socketGuard(socket);
+        // 연결 지연이 길어지면 프로브를 중단한다.
         QTimer::singleShot(1200, this, [socketGuard, finishProbe]() {
             if (socketGuard && socketGuard->state() == QAbstractSocket::ConnectingState) {
                 socketGuard->abort();
@@ -112,7 +118,11 @@ Backend::Backend(QObject *parent) : QObject(parent)
 
 Backend::~Backend() {}
 
+// 로그인 상태를 반환한다.
 bool Backend::isLoggedIn() const { return m_isLoggedIn; }
+// API 서버 주소를 반환한다.
 QString Backend::serverUrl() const { return m_env.value("API_URL", "http://localhost:8080"); }
+// 현재 RTSP IP를 반환한다.
 QString Backend::rtspIp() const { return m_rtspIp; }
+// 현재 RTSP 포트를 반환한다.
 QString Backend::rtspPort() const { return m_rtspPort; }

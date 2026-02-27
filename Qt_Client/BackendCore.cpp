@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -13,6 +13,7 @@
 #include <QSslSocket>
 #include <QTextStream>
 
+// 실행 경로 기준으로 .env를 찾아 로드한다.
 void Backend::loadEnv() {
     m_env.clear();
 
@@ -60,6 +61,7 @@ void Backend::loadEnv() {
     }
 }
 
+// HTTPS 요청용 SSL 설정을 초기화한다.
 void Backend::setupSslConfiguration() {
     auto resolvePath = [](const QString &rawPath) {
         QFileInfo info(rawPath);
@@ -137,6 +139,7 @@ void Backend::setupSslConfiguration() {
             << "ignoreErrors=" << m_sslIgnoreErrors;
 }
 
+// HTTPS 요청일 때만 SSL 설정을 적용한다.
 void Backend::applySslIfNeeded(QNetworkRequest &request) const {
     const QUrl url = request.url();
     if (url.scheme().compare("https", Qt::CaseInsensitive) != 0) {
@@ -147,6 +150,7 @@ void Backend::applySslIfNeeded(QNetworkRequest &request) const {
     }
 }
 
+// 필요 시 SSL 에러 무시 핸들러를 연결한다.
 void Backend::attachIgnoreSslErrors(QNetworkReply *reply, const QString &tag) const {
     if (!reply) return;
     connect(reply, &QNetworkReply::sslErrors, reply, [reply, tag, this](const QList<QSslError> &errors) {
@@ -159,6 +163,7 @@ void Backend::attachIgnoreSslErrors(QNetworkReply *reply, const QString &tag) co
     });
 }
 
+// MQTT 연결/구독을 초기화한다.
 void Backend::setupMqtt() {
     const bool mqttEnabled = (m_env.value("MQTT_ENABLED", "1").trimmed() == "1");
     if (!mqttEnabled) {
@@ -375,6 +380,7 @@ void Backend::setupMqtt() {
     m_mqttClient->connectToHost();
 }
 
+// 활성 카메라 수를 갱신한다.
 void Backend::setActiveCameras(int count) {
     if (m_activeCameras != count) {
         m_activeCameras = count;
@@ -382,6 +388,7 @@ void Backend::setActiveCameras(int count) {
     }
 }
 
+// 평균 FPS 값을 갱신한다.
 void Backend::setCurrentFps(int fps) {
     if (m_currentFps != fps) {
         m_currentFps = fps;
@@ -389,6 +396,7 @@ void Backend::setCurrentFps(int fps) {
     }
 }
 
+// 지연 시간(ms)을 갱신한다.
 void Backend::setLatency(int ms) {
     if (m_latency != ms) {
         m_latency = ms;

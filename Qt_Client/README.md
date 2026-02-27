@@ -83,27 +83,18 @@ RTSP_PORT=8554
 ## Build & Run (빌드 및 실행 방법)
 
 ### Prerequisites (필수 요구 사항)
-1.  **Qt 6 SDK** 설치 (Qt Multimedia, Qt Network 모듈 포함)
-2.  **VLC Media Player** 설치 (실행 시 라이브러리 필요)
-3.  **libVLC SDK** (헤더 파일 및 라이브러리 - `vlc/vlc.h`)
-
-### Windows Configuration (DLL 배치)
-빌드 후 실행 파일(`.exe`)이 있는 폴더에 다음 파일들이 있어야 합니다.
-1.  `libvlc.dll`
-2.  `libvlccore.dll`
-3.  `plugins/` 폴더 (VLC 설치 경로에서 복사)
+1.  **Qt 6 SDK** 설치 (Qt Multimedia, Qt Network, Qt Quick, Qt Mqtt 모듈 포함)
+2.  **CMake 3.19+**
+3.  **MinGW 64-bit** (Qt Kit와 동일 버전)
 
 ### RTSP URL Rule (주소 규칙)
 MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소를 생성합니다.
-`rtsp://{RTSP_IP}:{RTSP_PORT}/{Channel_Number}`
-(예: `rtsp://192.168.xxx.xxx:xxxx/0`)
+`{RTSP_SCHEME}://{RTSP_IP}:{RTSP_PORT}/{index}/{main|sub}`
+(예: `rtsps://192.168.xxx.xxx:8555/0/sub`)
 
 ---
 
 ## Troubleshooting (트러블슈팅)
-
-**Q. "VLC 인스턴스 생성 실패! DLL 파일을 확인하세요." 메시지가 뜹니다.**
-> A. 실행 파일 경로에 `libvlc.dll`, `libvlccore.dll` 및 `plugins` 폴더가 올바르게 복사되었는지 확인하세요.
 
 **Q. 라이브 뷰가 "BUFFERING"이나 "ERROR" 상태에서 멈춥니다.**
 > A. `.env` 파일의 `RTSP_IP`와 `RTSP_PORT`가 정확한지 확인하세요. 방화벽이 8554 포트를 차단하고 있는지 확인하세요.

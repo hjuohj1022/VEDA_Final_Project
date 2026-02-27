@@ -2,12 +2,6 @@
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
-# =========================================================================
-# VLC SDK 경로 설정
-# =========================================================================
-set(VLC_PATH "C:/vlc-3.0.23")
-set(VLC_CACHE_GEN "${VLC_PATH}/vlc-cache-gen.exe")
-
 # Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt)
 
@@ -21,8 +15,6 @@ qt_policy(SET QTP0001 NEW)
 qt_add_executable(Team3VideoReceiver
     WIN32 MACOSX_BUNDLE
     main.cpp
-    VlcPlayer.cpp
-    VlcPlayer.h
     Backend.cpp
     BackendCore.cpp
     BackendAuth.cpp
@@ -50,14 +42,6 @@ qt_add_qml_module(Team3VideoReceiver
         VideoPlayer.qml
 )
 
-# =========================================================================
-# VLC 헤더 파일 경로 추가 (include)
-# =========================================================================
-target_include_directories(Team3VideoReceiver PRIVATE ${VLC_PATH}/sdk/include)
-
-# =========================================================================
-# VLC 라이브러리 연결 (lib)
-# =========================================================================
 target_link_libraries(Team3VideoReceiver
     PRIVATE
         Qt::Core
@@ -69,8 +53,6 @@ target_link_libraries(Team3VideoReceiver
         Qt::Qml
         Qt::QuickControls2
         Qt::Mqtt
-        ${VLC_PATH}/sdk/lib/libvlc.lib
-        ${VLC_PATH}/sdk/lib/libvlccore.lib
         dwmapi
 )
 
@@ -82,19 +64,9 @@ install(TARGETS Team3VideoReceiver
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# =========================================================================
-# 빌드 후 DLL 및 플러그인 자동 복사 (실행 오류 방지)
-# 빌드가 끝나면 자동으로 실행 파일 옆에 libvlc.dll 등을 복사해줌
-# =========================================================================
 add_custom_command(TARGET Team3VideoReceiver POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/.env
-        $<TARGET_FILE_DIR:Team3VideoReceiver>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${VLC_PATH}/libvlc.dll
-        $<TARGET_FILE_DIR:Team3VideoReceiver>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${VLC_PATH}/libvlccore.dll
         $<TARGET_FILE_DIR:Team3VideoReceiver>
     COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:Team3VideoReceiver>/certs
@@ -107,12 +79,7 @@ add_custom_command(TARGET Team3VideoReceiver POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/certs/client-qt.key
         $<TARGET_FILE_DIR:Team3VideoReceiver>/certs/client-qt.key
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${VLC_PATH}/plugins
-        $<TARGET_FILE_DIR:Team3VideoReceiver>/plugins
-    COMMAND ${VLC_CACHE_GEN}
-        $<TARGET_FILE_DIR:Team3VideoReceiver>/plugins
-    COMMENT "Copying VLC DLLs and Plugins to build directory..."
+    COMMENT "Copying runtime configuration and certificates..."
 )
 
 qt_generate_deploy_app_script(

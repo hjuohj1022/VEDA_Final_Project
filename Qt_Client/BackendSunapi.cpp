@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 
 #include <QDebug>
 #include <QNetworkRequest>
@@ -6,6 +6,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+// SUNAPI GET 요청을 만들고 공통 응답 처리를 수행한다.
 bool Backend::sendSunapiCommand(const QString &cgiName,
                                 const QMap<QString, QString> &params,
                                 int cameraIndex,
@@ -126,6 +127,7 @@ bool Backend::sendSunapiCommand(const QString &cgiName,
     return true;
 }
 
+// 줌 인 명령을 전송한다.
 bool Backend::sunapiZoomIn(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -134,6 +136,7 @@ bool Backend::sunapiZoomIn(int cameraIndex) {
         "Zoom In");
 }
 
+// 줌 아웃 명령을 전송한다.
 bool Backend::sunapiZoomOut(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -142,6 +145,7 @@ bool Backend::sunapiZoomOut(int cameraIndex) {
         "Zoom Out");
 }
 
+// 줌 동작을 정지한다.
 bool Backend::sunapiZoomStop(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -150,6 +154,7 @@ bool Backend::sunapiZoomStop(int cameraIndex) {
         "Zoom Stop");
 }
 
+// 포커스를 Near 방향으로 이동한다.
 bool Backend::sunapiFocusNear(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -158,6 +163,7 @@ bool Backend::sunapiFocusNear(int cameraIndex) {
         "Focus Near");
 }
 
+// 포커스를 Far 방향으로 이동한다.
 bool Backend::sunapiFocusFar(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -166,6 +172,7 @@ bool Backend::sunapiFocusFar(int cameraIndex) {
         "Focus Far");
 }
 
+// 포커스 동작을 정지한다.
 bool Backend::sunapiFocusStop(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -174,6 +181,7 @@ bool Backend::sunapiFocusStop(int cameraIndex) {
         "Focus Stop");
 }
 
+// 오토포커스 명령을 전송한다.
 bool Backend::sunapiSimpleAutoFocus(int cameraIndex) {
     return sendSunapiCommand(
         "image.cgi",
@@ -182,48 +190,7 @@ bool Backend::sunapiSimpleAutoFocus(int cameraIndex) {
         "Auto Focus");
 }
 
-bool Backend::sunapiSetWhiteBalanceMode(int cameraIndex, QString mode) {
-    QString normalized = mode.trimmed();
-    if (normalized.isEmpty()) {
-        emit cameraControlMessage("White balance mode is empty", true);
-        return false;
-    }
-
-    // Common SUNAPI values: ATW / Indoor / Outdoor / Manual / AWC
-    if (normalized.compare("auto", Qt::CaseInsensitive) == 0) {
-        normalized = "ATW";
-    }
-
-    return sendSunapiCommand(
-        "image.cgi",
-        {{"msubmenu", "whitebalance"}, {"action", "set"}, {"WhiteBalanceMode", normalized}},
-        cameraIndex,
-        QString("WhiteBalance %1").arg(normalized));
-}
-
-bool Backend::sunapiSetFlipAndRotate(int cameraIndex, bool horizontalFlip, bool verticalFlip, int rotate) {
-    int normalizedRotate = rotate;
-    if (normalizedRotate < 0) normalizedRotate = 0;
-    if (normalizedRotate > 270) normalizedRotate = 270;
-    // Force 90-degree steps expected by flip submenu.
-    normalizedRotate = (normalizedRotate / 90) * 90;
-
-    return sendSunapiCommand(
-        "image.cgi",
-        {
-            {"msubmenu", "flip"},
-            {"action", "set"},
-            {"HorizontalFlipEnable", horizontalFlip ? "True" : "False"},
-            {"VerticalFlipEnable", verticalFlip ? "True" : "False"},
-            {"Rotate", QString::number(normalizedRotate)}
-        },
-        cameraIndex,
-        QString("Flip/Rotate H:%1 V:%2 R:%3")
-            .arg(horizontalFlip ? "On" : "Off")
-            .arg(verticalFlip ? "On" : "Off")
-            .arg(normalizedRotate));
-}
-
+// 카메라별 지원 PTZ 액션을 조회한다.
 void Backend::sunapiLoadSupportedPtzActions(int cameraIndex) {
     if (cameraIndex < 0) {
         emit cameraControlMessage("PTZ capability query failed: invalid camera index", true);

@@ -307,6 +307,27 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
+                    flickableDirection: Flickable.VerticalFlick
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {
+                        id: recordingsScrollBar
+                        policy: ScrollBar.AsNeeded
+                        width: 14
+                        minimumSize: 0.12
+                        contentItem: Rectangle {
+                            implicitWidth: 14
+                            radius: 7
+                            color: parent.pressed
+                                   ? (theme ? theme.accent : "#f97316")
+                                   : (theme ? theme.border : "#52525b")
+                        }
+                        background: Rectangle {
+                            implicitWidth: 14
+                            radius: 7
+                            color: theme ? theme.bgSecondary : "#0f172a"
+                            opacity: 0.9
+                        }
+                    }
                     
                     model: ListModel { id: filesModel }
                     
@@ -331,20 +352,41 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                preventStealing: false
+                                propagateComposedEvents: true
+                                property real pressX: 0
+                                property real pressY: 0
+                                property bool dragDetected: false
                                 
                                 
                                 onPressed: (mouse) => {
+                                    pressX = mouse.x
+                                    pressY = mouse.y
+                                    dragDetected = false
                                     if (mouse.button === Qt.LeftButton) {
                                         recordList.currentIndex = index
                                     }
                                 }
+                                onPositionChanged: (mouse) => {
+                                    if (!pressed || dragDetected)
+                                        return
+                                    if (Math.abs(mouse.x - pressX) > 8 || Math.abs(mouse.y - pressY) > 8) {
+                                        dragDetected = true
+                                        // Let ListView handle drag-flick scrolling.
+                                        mouse.accepted = false
+                                    }
+                                }
                                 onClicked: (mouse) => {
+                                    if (dragDetected)
+                                        return
                                     if (mouse.button === Qt.RightButton) {
                                         recordList.currentIndex = index
                                         contextMenu.popup()
                                     }
                                 }
                                 onDoubleClicked: {
+                                    if (dragDetected)
+                                        return
                                     console.log("Double click detected for:", model.fileName)
                                     root.playVideo(model.fileName)
                                 }
@@ -380,12 +422,7 @@ Item {
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            
-                            Text {
-                                text: "F"
-                                font.pixelSize: 14
-                            }
+                            anchors.rightMargin: (recordingsScrollBar.visible ? (recordingsScrollBar.width + 10) : 8)
                             Text {
                                 text: model.fileName
                                 color: recordList.currentIndex === index ? "white" : (theme ? theme.textPrimary : "white")

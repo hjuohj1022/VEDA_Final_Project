@@ -5,6 +5,7 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     property var theme
+    property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
     property bool showCameraControls: false
     property int selectedCameraIndex: -1
     property string cameraControlStatus: ""
@@ -12,16 +13,13 @@ Rectangle {
     property bool mapModeEnabled: false
     property bool supportZoom: true
     property bool supportFocus: true
-    property bool horizontalFlipEnabled: false
-    property bool verticalFlipEnabled: false
-    signal mainCameraReconnectRequested(int cameraIndex)
+    signal requestCameraNameChange(int cameraIndex, string name)
     color: theme ? theme.bgSecondary : "#09090b"
 
     function selectedCameraTitle() {
-        var names = ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
-        if (selectedCameraIndex < 0 || selectedCameraIndex >= names.length)
+        if (selectedCameraIndex < 0 || selectedCameraIndex >= cameraNames.length)
             return "Camera"
-        return "Cam " + (selectedCameraIndex + 1) + " - " + names[selectedCameraIndex]
+        return "Cam " + (selectedCameraIndex + 1) + " - " + cameraNames[selectedCameraIndex]
     }
 
     Connections {
@@ -32,12 +30,6 @@ Rectangle {
             root.cameraControlStatus = message
             root.cameraControlError = isError
             controlStatusTimer.restart()
-            if (!isError
-                    && root.selectedCameraIndex >= 0
-                    && message.indexOf("Flip/Rotate") === 0) {
-                // Reconnect only selected main camera after encoder params changed.
-                root.mainCameraReconnectRequested(root.selectedCameraIndex)
-            }
         }
         function onSunapiSupportedPtzActionsLoaded(cameraIndex, actions) {
             if (cameraIndex !== root.selectedCameraIndex)
@@ -57,9 +49,44 @@ Rectangle {
         }
     }
 
+    component ControlButton: Button {
+        id: controlBtn
+        property bool accentStyle: false
+        property bool compact: false
+        implicitHeight: compact ? 30 : 40
+        hoverEnabled: enabled
+
+        background: Rectangle {
+            radius: 6
+            border.width: 1
+            border.color: controlBtn.accentStyle
+                          ? (controlBtn.enabled ? (controlBtn.hovered ? "#fb923c" : theme.accent) : theme.border)
+                          : (controlBtn.hovered ? "#3f3f46" : theme.border)
+            color: !controlBtn.enabled
+                   ? (theme ? theme.bgComponent : "#18181b")
+                   : controlBtn.down
+                     ? (controlBtn.accentStyle ? "#ea580c" : (theme ? theme.bgSecondary : "#09090b"))
+                     : controlBtn.accentStyle
+                       ? (theme ? theme.accent : "#f97316")
+                       : (theme ? theme.bgSecondary : "#09090b")
+        }
+
+        contentItem: Text {
+            text: controlBtn.text
+            color: !controlBtn.enabled
+                   ? (theme ? theme.textSecondary : "#71717a")
+                   : (controlBtn.accentStyle ? "white" : (theme ? theme.textPrimary : "white"))
+            font.pixelSize: compact ? 12 : 13
+            font.bold: true
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
     onShowCameraControlsChanged: {
         if (showCameraControls && selectedCameraIndex >= 0) {
             backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
+            cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
     }
 
@@ -68,10 +95,10 @@ Rectangle {
             supportZoom = true
             supportFocus = true
             backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
+            cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
     }
     
-    // ?쇱そ ?뚮몢由?
     Rectangle {
         anchors.left: parent.left
         width: 1
@@ -81,25 +108,26 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 8 // p-2
-        spacing: 8 // space-y-2
+        anchors.margins: 8
+        spacing: 8
 
-        // ?쒖뒪??硫뷀듃由??쒕ぉ
+        // 우측 패널 상단 제목
         Text {
             text: root.showCameraControls ? "Camera Controls" : "System Metrics"
             color: theme ? theme.textPrimary : "white"
             font.bold: true
-            font.pixelSize: 14 // text-sm
+            font.pixelSize: 14
         }
 
         Rectangle {
             visible: root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 150 : 0
+            Layout.maximumHeight: root.showCameraControls ? 150 : 0
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 150
 
             ColumnLayout {
                 anchors.fill: parent
@@ -124,10 +152,63 @@ Rectangle {
                     font.pixelSize: 10
                 }
 
-                Button {
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    TextField {
+                        id: cameraNameField
+                        Layout.fillWidth: true
+                        placeholderText: "위치 이름"
+                        color: theme ? theme.textPrimary : "white"
+                        placeholderTextColor: theme ? theme.textSecondary : "#71717a"
+                        enabled: root.selectedCameraIndex >= 0
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: cameraNameField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onAccepted: {
+                            if (root.selectedCameraIndex < 0)
+                                return
+                            var trimmed = text.trim()
+                            if (trimmed.length === 0)
+                                return
+                            root.requestCameraNameChange(root.selectedCameraIndex, trimmed)
+                            root.cameraControlStatus = "카메라 이름이 변경되었습니다."
+                            root.cameraControlError = false
+                            controlStatusTimer.restart()
+                        }
+                    }
+                    ControlButton {
+                        text: "저장"
+                        compact: true
+                        Layout.preferredWidth: 56
+                        enabled: root.selectedCameraIndex >= 0
+                        onClicked: {
+                            if (root.selectedCameraIndex < 0)
+                                return
+                            var trimmed = cameraNameField.text.trim()
+                            if (trimmed.length === 0)
+                                return
+                            root.requestCameraNameChange(root.selectedCameraIndex, trimmed)
+                            root.cameraControlStatus = "카메라 이름이 변경되었습니다."
+                            root.cameraControlError = false
+                            controlStatusTimer.restart()
+                        }
+                    }
+                }
+
+                ControlButton {
                     text: root.mapModeEnabled ? "3D Map 모드 ON (미구현)" : "3D Map 모드 OFF (미구현)"
                     Layout.fillWidth: true
-                    onClicked: root.mapModeEnabled = !root.mapModeEnabled
+                    compact: true
+                    onClicked: {
+                        root.mapModeEnabled = !root.mapModeEnabled
+                        if (root.mapModeEnabled && root.selectedCameraIndex >= 0) {
+                            backend.sunapiSimpleAutoFocus(root.selectedCameraIndex)
+                        }
+                    }
                 }
             }
         }
@@ -135,83 +216,82 @@ Rectangle {
         Rectangle {
             visible: root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 260 : 0
+            Layout.maximumHeight: root.showCameraControls ? 260 : 0
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
-            Layout.preferredHeight: 420
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 12
                 spacing: 6
 
-                Button {
-                    text: "줌 +"
-                    Layout.fillWidth: true
-                    enabled: root.selectedCameraIndex >= 0 && root.supportZoom
-                    onClicked: backend.sunapiZoomIn(root.selectedCameraIndex)
-                    background: Rectangle {
-                        color: theme ? theme.bgSecondary : "#09090b"
-                        border.color: theme ? theme.border : "#27272a"
-                        border.width: 1
-                        radius: 6
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: theme ? theme.textSecondary : "#71717a"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
-                }
-
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
-                    Button {
+                    ControlButton {
+                        text: "줌 +"
+                        Layout.fillWidth: true
+                        compact: true
+                        enabled: root.selectedCameraIndex >= 0 && root.supportZoom
+                        onClicked: backend.sunapiZoomIn(root.selectedCameraIndex)
+                    }
+                    ControlButton {
                         text: "줌 -"
                         Layout.fillWidth: true
+                        compact: true
                         enabled: root.selectedCameraIndex >= 0 && root.supportZoom
                         onClicked: backend.sunapiZoomOut(root.selectedCameraIndex)
                     }
-                    Button {
+                    ControlButton {
                         text: "줌 정지"
                         Layout.fillWidth: true
+                        compact: true
                         enabled: root.selectedCameraIndex >= 0 && root.supportZoom
                         onClicked: backend.sunapiZoomStop(root.selectedCameraIndex)
                     }
                 }
 
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: 6
-                    Button {
+                    height: 1
+                    color: theme ? theme.border : "#27272a"
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 6
+                    rowSpacing: 6
+
+                    ControlButton {
                         text: "포커스 Near"
                         Layout.fillWidth: true
+                        compact: true
                         enabled: root.selectedCameraIndex >= 0 && root.supportFocus
                         onClicked: backend.sunapiFocusNear(root.selectedCameraIndex)
                     }
-                    Button {
+                    ControlButton {
                         text: "포커스 Far"
                         Layout.fillWidth: true
+                        compact: true
                         enabled: root.selectedCameraIndex >= 0 && root.supportFocus
                         onClicked: backend.sunapiFocusFar(root.selectedCameraIndex)
                     }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Button {
+                    ControlButton {
                         text: "포커스 정지"
                         Layout.fillWidth: true
+                        compact: true
                         enabled: root.selectedCameraIndex >= 0 && root.supportFocus
                         onClicked: backend.sunapiFocusStop(root.selectedCameraIndex)
                     }
-                    Button {
+                    ControlButton {
                         text: "오토포커스"
                         Layout.fillWidth: true
+                        compact: true
+                        accentStyle: root.mapModeEnabled
                         enabled: root.selectedCameraIndex >= 0 && root.supportFocus
                         onClicked: backend.sunapiSimpleAutoFocus(root.selectedCameraIndex)
                     }
@@ -223,56 +303,6 @@ Rectangle {
                     color: theme ? theme.border : "#27272a"
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    ComboBox {
-                        id: wbModeCombo
-                        Layout.fillWidth: true
-                        model: ["ATW", "Indoor", "Outdoor", "Manual", "AWC"]
-                        enabled: root.selectedCameraIndex >= 0
-                    }
-                    Button {
-                        text: "화이트밸런스 적용"
-                        Layout.preferredWidth: 120
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: backend.sunapiSetWhiteBalanceMode(root.selectedCameraIndex, wbModeCombo.currentText)
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    CheckBox {
-                        id: hFlipCheck
-                        text: "좌우 반전"
-                        checked: root.horizontalFlipEnabled
-                        onToggled: root.horizontalFlipEnabled = checked
-                    }
-
-                    CheckBox {
-                        id: vFlipCheck
-                        text: "상하 반전"
-                        checked: root.verticalFlipEnabled
-                        onToggled: root.verticalFlipEnabled = checked
-                    }
-                }
-
-                Button {
-                    text: "반전 적용"
-                    Layout.fillWidth: true
-                    enabled: root.selectedCameraIndex >= 0
-                    onClicked: {
-                        backend.sunapiSetFlipAndRotate(
-                            root.selectedCameraIndex,
-                            root.horizontalFlipEnabled,
-                            root.verticalFlipEnabled,
-                            0
-                        )
-                    }
-                }
-
                 Text {
                     Layout.fillWidth: true
                     visible: root.cameraControlStatus.length > 0
@@ -281,15 +311,18 @@ Rectangle {
                     font.pixelSize: 10
                     wrapMode: Text.WordWrap
                 }
+
             }
         }
 
-        // 李⑦듃 ?곸뿭
+        // 시스템 메트릭 차트 영역
         ColumnLayout {
             visible: !root.showCameraControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : 208
+            Layout.maximumHeight: root.showCameraControls ? 0 : 208
             spacing: 8
             
-            // ?ъ궗??媛?ν븳 李⑦듃 援ъ꽦 ?붿냼 (?몃씪??
             component SystemChart : Rectangle {
                 id: chartRoot
                 property string title: "Metric"
@@ -319,7 +352,7 @@ Rectangle {
                         if(v > max) max = v
                         sum += v
                     }
-                    chartRoot.calculatedMax = max > 0 ? max : 100 // 0 ?ㅼ???諛⑹?
+                    chartRoot.calculatedMax = max > 0 ? max : 100
                     chartRoot.calculatedAvg = Math.round(sum / len)
                 }
 
@@ -331,7 +364,6 @@ Rectangle {
                         if (arr.length > 20) arr.shift()
                         arr.push(newVal)
                         
-                        // 理쒕?媛?諛??됯퇏媛?怨꾩궛
                         var max = 0
                         var sum = 0
                         for(var i=0; i<arr.length; i++) {
@@ -369,8 +401,7 @@ Rectangle {
                             
                             var data = chartRoot.dataHistory
                             if (data.length < 2) return
-                            
-                            var maxVal = chartRoot.calculatedMax * 1.2 // ?쎄컙???щ갚
+                            var maxVal = chartRoot.calculatedMax * 1.2
                             
                             ctx.beginPath()
                             ctx.lineWidth = 1.5
@@ -379,7 +410,6 @@ Rectangle {
                             
                             var stepX = width / (data.length - 1)
                             
-                            // ??洹몃━湲?
                             ctx.moveTo(0, height - (data[0] / maxVal) * height)
                             for (var i = 1; i < data.length; i++) {
                                 ctx.lineTo(i * stepX, height - (data[i] / maxVal) * height)
@@ -404,30 +434,30 @@ Rectangle {
                 }
             }
             
-            // FPS 李⑦듃 ?몄뒪?댁뒪
             SystemChart {
                 title: "FPS"
                 unit: "FPS"
                 value: backend.currentFps
                 valueColor: theme ? theme.textPrimary : "white"
                 graphColor: "#0d9488"
-                dataHistory: [30, 29, 30, 31, 30, 28, 29, 30, 30, 29, 30, 31, 29, 30, 30]
+                dataHistory: []
             }
             
-            // 吏???쒓컙 李⑦듃 ?몄뒪?댁뒪
             SystemChart {
                 title: "LATENCY"
                 unit: "ms"
                 value: backend.latency
                 valueColor: theme ? theme.textPrimary : "white"
                 graphColor: theme ? theme.accent : "#f97316"
-                dataHistory: [40, 42, 45, 41, 39, 40, 42, 44, 45, 43, 41, 40, 42, 41]
+                dataHistory: []
             }
         }
 
-        // ?듦퀎 洹몃━??
         GridLayout {
             visible: !root.showCameraControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : 168
+            Layout.maximumHeight: root.showCameraControls ? 0 : 168
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
@@ -487,16 +517,16 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillHeight: true } // ?ㅽ럹?댁꽌
 
-            // AI ?곹깭 移대뱶
         Rectangle {
             visible: !root.showCameraControls
             Layout.fillWidth: true
+            Layout.preferredHeight: root.showCameraControls ? 0 : 50
+            Layout.maximumHeight: root.showCameraControls ? 0 : 50
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
             radius: 8
-            border.color: "#4e2c0e" // ?곹깭??二쇳솴???댄듃 ?좎?? ?꾨땲硫?theme.accent ?ъ슜? 濡쒖쭅???꾪빐 怨좎젙 ?좎?
+            border.color: "#4e2c0e"
             border.width: 1
             
             ColumnLayout {
@@ -523,6 +553,11 @@ Rectangle {
                 }
             }
         }
+
+        Item {
+            Layout.fillHeight: true
+        }
     }
 }
+
 

@@ -33,11 +33,11 @@ ApplicationWindow {
     property bool streamPrewarmEnabled: true
     property int inlineMainCameraIndex: -1
     property bool inlineMainViewVisible: false
+    property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
 
     function cameraLocationName(index) {
-        var names = ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
-        if (index < 0 || index >= names.length) return "Camera"
-        return names[index]
+        if (index < 0 || index >= cameraNames.length) return "Camera"
+        return cameraNames[index]
     }
 
     function startRtspConnectCheck(resetStats) {
@@ -425,9 +425,9 @@ ApplicationWindow {
                                 VideoGrid {
                                     id: videoGrid
                                     theme: window.appTheme
-                                    // In inline main view, stop hidden grid players to avoid 4-channel reconnect storms.
-                                    isActive: (!window.inlineMainViewVisible)
-                                              && (backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn))
+                                    cameraNames: window.cameraNames
+                                    // Keep sub streams running even while inline main view is open.
+                                    isActive: (backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn))
                                     visible: stackLayout.currentIndex === 0
                                     onOpenMainViewRequested: function(cameraIndex) {
                                         window.inlineMainCameraIndex = cameraIndex
@@ -471,7 +471,7 @@ ApplicationWindow {
                                                     cameraIndex: window.inlineMainCameraIndex
                                                     dptzEnabled: true
                                                     locationName: window.cameraLocationName(window.inlineMainCameraIndex)
-                                                    startDelayMs: 0
+                                                    startDelayMs: 150
                                                     source: (backend.isLoggedIn && window.inlineMainCameraIndex >= 0)
                                                             ? ((backend.rtspIp, backend.rtspPort),
                                                                backend.buildRtspUrl(window.inlineMainCameraIndex, false))
@@ -499,12 +499,13 @@ ApplicationWindow {
                 visible: backend.isLoggedIn
                 showCameraControls: window.inlineMainViewVisible
                 selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
-                onMainCameraReconnectRequested: function(cameraIndex) {
-                    if (!window.inlineMainViewVisible)
+                cameraNames: window.cameraNames
+                onRequestCameraNameChange: function(cameraIndex, name) {
+                    if (cameraIndex < 0 || cameraIndex >= window.cameraNames.length)
                         return
-                    if (cameraIndex !== window.inlineMainCameraIndex)
-                        return
-                    inlineMainPlayer.restartStream()
+                    var next = window.cameraNames.slice(0)
+                    next[cameraIndex] = name
+                    window.cameraNames = next
                 }
             }
         }

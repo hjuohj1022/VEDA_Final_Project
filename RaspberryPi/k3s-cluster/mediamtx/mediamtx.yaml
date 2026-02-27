@@ -7,7 +7,16 @@ metadata:
   name: mediamtx-config
 data:
   mediamtx.yml: |
-  
+    # RTSP 설정 (외부 접속 허용)
+    rtsp: yes
+    rtspAddress: :8554
+    
+    # RTSPS 보안 설정 (외부 노출용)
+    encryption: optional
+    rtspsAddress: :8555
+    serverCert: /etc/mediamtx/certs/server.crt
+    serverKey: /etc/mediamtx/certs/server.key
+
     # 공통 인증 설정 (모든 path에 적용)
     # Jenkins에서 ${MTX_READ_USER}, ${MTX_READ_PASS 실제 값으로 치환됨}
     pathDefaults:
@@ -124,6 +133,7 @@ spec:
 
         ports:
         - containerPort: 8554
+        - containerPort: 8555
         - containerPort: 1935
         - containerPort: 8888
         - containerPort: 8889
@@ -137,6 +147,10 @@ spec:
           mountPath: /mediamtx.yml
           subPath: mediamtx.yml
 
+        - name: certs
+          mountPath: /etc/mediamtx/certs
+          readOnly: true
+
         - name: recordings
           mountPath: /recordings
 
@@ -144,6 +158,10 @@ spec:
       - name: config-volume
         configMap:
           name: mediamtx-config
+
+      - name: certs
+        secret:
+          secretName: nginx-certs
 
       - name: recordings
         # PVC 대신 호스트 경로 직접 사용
@@ -169,6 +187,11 @@ spec:
       protocol: TCP
       port: 8554
       targetPort: 8554
+
+    - name: rtsps
+      protocol: TCP
+      port: 8555
+      targetPort: 8555
 
     - name: rtmp
       protocol: TCP

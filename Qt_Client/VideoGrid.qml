@@ -6,6 +6,7 @@ Item {
     id: root
     property int gridColumns: 2
     property var theme
+    property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
     property bool isActive: true
     property var cameraStates: [false, false, false, false]
     property var cameraFpsValues: [0, 0, 0, 0]
@@ -64,7 +65,9 @@ Item {
                 tileIndex: index
                 cameraIndex: index
                 startDelayMs: 0
-                locationName: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"][index]
+                locationName: (root.cameraNames && index >= 0 && index < root.cameraNames.length)
+                              ? root.cameraNames[index]
+                              : ("Cam " + (index + 1))
 
                 source: root.isActive
                         ? ((backend.rtspIp, backend.rtspPort),
