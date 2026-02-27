@@ -12,6 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 1️⃣ 변경 파일 목록 가져오기
       - name: Get Changed Files
         id: files
         run: |
@@ -24,7 +25,9 @@ jobs:
           echo "$FILES" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
+      # 2️⃣ Jira 이슈 생성
       - name: Create Jira Issue
+        id: jira
         run: |
           TITLE="${{ github.event.pull_request.title }}"
           BODY="${{ github.event.pull_request.body }}"
@@ -38,7 +41,7 @@ $BODY
 변경 파일:
 $FILES"
 
-          curl -X POST \
+          RESPONSE=$(curl -s -X POST \
             -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
             -H "Content-Type: application/json" \
             https://${{ secrets.JIRA_DOMAIN }}/rest/api/3/issue \
@@ -58,5 +61,23 @@ $FILES"
                     }]
                   }]
                 }
+              }
+            }")
+
+          ISSUE_KEY=$(echo $RESPONSE | jq -r '.key')
+          echo "ISSUE_KEY=$ISSUE_KEY" >> $GITHUB_ENV
+
+      # 3️⃣ summary에 KAN-XXX 자동 포함
+      - name: Update Summary With Issue Key
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+
+          curl -s -X PUT \
+            -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
+            -H "Content-Type: application/json" \
+            https://${{ secrets.JIRA_DOMAIN }}/rest/api/3/issue/${{ env.ISSUE_KEY }} \
+            --data "{
+              \"fields\": {
+                \"summary\": \"${{ env.ISSUE_KEY }} $TITLE\"
               }
             }"
