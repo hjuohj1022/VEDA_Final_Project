@@ -7,6 +7,8 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 // TensorRT & CUDA
 #include <NvInfer.h>
@@ -25,14 +27,25 @@ using namespace cv;
 
 // 설정 파일 포함 (.gitignore로 관리됨)
 #include "app_config.h"
+#include "logging.h"
+#include "pointcloud.h"
+#include "request.h"
+#include "runner.h"
+#include "server.h"
 
-#define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
-void check(cudaError_t result, char const* const func, const char* const file, int const line) {
-    if (result) {
-        std::cerr << "CUDA error at " << file << ":" << line << " code=" << static_cast<int>(result) << " \"" << func << "\" \n";
-        exit(EXIT_FAILURE);
+static bool CheckCuda(cudaError_t result, char const* const func, const char* const file, int const line) {
+    if (result != cudaSuccess) {
+        LogError("CUDA error at " + std::string(file) + ":" + std::to_string(line) +
+                 " code=" + std::to_string(static_cast<int>(result)) + " \"" + func + "\"");
+        return false;
     }
+    return true;
 }
+
+#define CHECK_CUDA_OR_RETURN(val)                                      \
+    do {                                                               \
+        if (!CheckCuda((val), #val, __FILE__, __LINE__)) return false; \
+    } while (0)
 
 // ==========================================
 // [CUDA 커널] 전처리 (Resize + Normalize + CHW)
@@ -71,19 +84,34 @@ __global__ void preprocess_kernel(const uint8_t* src, float* dst, int width, int
 
 class Logger : public ILogger {
     void log(Severity severity, const char* msg) noexcept override {
-        if (severity <= Severity::kWARNING) std::cout << "[TRT] " << msg << std::endl;
+        if (severity <= Severity::kWARNING) LogInfo(std::string("[TRT] ") + msg);
     }
 } gLogger;
 
-struct Request {
-    int channel = -1;
-    bool headless = false;
-    bool headlessSet = false;
-    bool gui = false;
-    bool stop = false;
+void LogInfo(const std::string& msg) {
+    std::cout << "[INFO] " << msg << std::endl;
+}
+
+void LogWarn(const std::string& msg) {
+    std::cout << "[WARN] " << msg << std::endl;
+}
+
+void LogError(const std::string& msg) {
+    std::cerr << "[ERR] " << msg << std::endl;
+}
+
+struct TrtDeleter {
+    template <typename T>
+    void operator()(T* obj) const noexcept {
+        delete obj;
+    }
 };
 
-static std::vector<std::string> SplitTokens(const std::string& line) {
+using TrtRuntime = std::unique_ptr<IRuntime, TrtDeleter>;
+using TrtEngine = std::unique_ptr<ICudaEngine, TrtDeleter>;
+using TrtContextPtr = std::unique_ptr<IExecutionContext, TrtDeleter>;
+
+std::vector<std::string> SplitTokens(const std::string& line) {
     std::istringstream iss(line);
     std::vector<std::string> tokens;
     std::string tok;
@@ -91,7 +119,7 @@ static std::vector<std::string> SplitTokens(const std::string& line) {
     return tokens;
 }
 
-static bool ParseInt(const std::string& s, int& out) {
+bool ParseInt(const std::string& s, int& out) {
     char* end = nullptr;
     long val = std::strtol(s.c_str(), &end, 10);
     if (end == s.c_str() || *end != '\0') return false;
@@ -99,11 +127,43 @@ static bool ParseInt(const std::string& s, int& out) {
     return true;
 }
 
-static Request ParseRequest(const std::string& line) {
+Request ParseRequest(const std::string& line) {
     Request req;
     auto tokens = SplitTokens(line);
     for (size_t i = 0; i < tokens.size(); ++i) {
         const std::string& t = tokens[i];
+        if (t == "depth_stream" || t == "stream_depth") {
+            req.depthStream = true;
+            continue;
+        }
+        if (t == "pc_stream" || t == "stream_pc") {
+            req.pcStream = true;
+            continue;
+        }
+        if (t == "pc_view" || t == "view_pc") {
+            req.pcView = true;
+            continue;
+        }
+        if (t.rfind("rx=", 0) == 0) {
+            req.rx = std::stof(t.substr(3));
+            req.rxSet = true;
+            continue;
+        }
+        if (t.rfind("ry=", 0) == 0) {
+            req.ry = std::stof(t.substr(3));
+            req.rySet = true;
+            continue;
+        }
+        if (t.rfind("rotX=", 0) == 0) {
+            req.rx = std::stof(t.substr(5));
+            req.rxSet = true;
+            continue;
+        }
+        if (t.rfind("rotY=", 0) == 0) {
+            req.ry = std::stof(t.substr(5));
+            req.rySet = true;
+            continue;
+        }
         if (t == "stop") {
             req.stop = true;
             continue;
@@ -144,19 +204,78 @@ static Request ParseRequest(const std::string& line) {
     return req;
 }
 
-static void SendResponse(SOCKET client, const std::string& msg) {
+void SendResponse(SOCKET client, const std::string& msg) {
     send(client, msg.c_str(), static_cast<int>(msg.size()), 0);
 }
 
-static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag) {
-    std::cout << "[APP] Mode: " << (headless ? "headless" : "gui")
-              << " | Channel: " << channel << std::endl;
+struct TrtContextData {
+    TrtRuntime runtime;
+    TrtEngine engine;
+    TrtContextPtr context;
+    const char* inputName = nullptr;
+    const char* outputName = nullptr;
+    Dims inputDims{};
+    Dims outputDims{};
+    size_t inputSize = 0;
+    size_t outputElements = 0;
+    size_t outputSize = 0;
+    size_t rawInputSize = 0;
+};
 
-    std::cout << "🚀 Loading Engine (CUDA Optimized Version)..." << std::endl;
+struct CudaResources {
+    void* d_input = nullptr;
+    void* d_output = nullptr;
+    void* d_raw_img = nullptr;
+    cudaStream_t stream = nullptr;
+
+    ~CudaResources() {
+        if (stream) cudaStreamDestroy(stream);
+        if (d_input) cudaFree(d_input);
+        if (d_output) cudaFree(d_output);
+        if (d_raw_img) cudaFree(d_raw_img);
+    }
+};
+
+struct DepthStreamBuffer {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::vector<float> data;
+    int width = 0;
+    int height = 0;
+    uint32_t frameIdx = 0;
+    bool hasFrame = false;
+    bool stop = false;
+};
+
+struct ImageStreamBuffer {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::vector<unsigned char> data;
+    int width = 0;
+    int height = 0;
+    uint32_t frameIdx = 0;
+    bool hasFrame = false;
+    bool stop = false;
+};
+
+struct ViewParams {
+    std::mutex mu;
+    float rotX = -20.0f;
+    float rotY = 35.0f;
+};
+
+static size_t Volume(const Dims& dims) {
+    size_t v = 1;
+    for (int i = 0; i < dims.nbDims; ++i) v *= static_cast<size_t>(dims.d[i]);
+    return v;
+}
+
+static bool InitTrt(TrtContextData& trt) {
+    LogInfo("Loading Engine (CUDA Optimized Version)...");
     std::ifstream file(ENGINE_PATH, std::ios::binary | std::ios::ate);
     if (!file.good()) {
-        std::cerr << "Error: Cannot find engine file at " << ENGINE_PATH << std::endl;
-        return;
+        LogError("Cannot find engine file at " + ENGINE_PATH);
+        return false;
     }
     size_t size = file.tellg();
     file.seekg(0, std::ios::beg);
@@ -164,98 +283,132 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
     file.read(engineData.data(), size);
     file.close();
 
-    std::unique_ptr<IRuntime> runtime{createInferRuntime(gLogger)};
-    std::unique_ptr<ICudaEngine> engine{runtime->deserializeCudaEngine(engineData.data(), size)};
-    std::unique_ptr<IExecutionContext> context{engine->createExecutionContext()};
+    trt.runtime.reset(createInferRuntime(gLogger));
+    if (!trt.runtime) {
+        LogError("Failed to create TensorRT runtime.");
+        return false;
+    }
+    trt.engine.reset(trt.runtime->deserializeCudaEngine(engineData.data(), size));
+    if (!trt.engine) {
+        LogError("Failed to deserialize TensorRT engine.");
+        return false;
+    }
+    trt.context.reset(trt.engine->createExecutionContext());
+    if (!trt.context) {
+        LogError("Failed to create TensorRT execution context.");
+        return false;
+    }
 
-    auto volume = [](const Dims& dims) {
-        size_t v = 1;
-        for (int i = 0; i < dims.nbDims; ++i) v *= static_cast<size_t>(dims.d[i]);
-        return v;
-    };
-
-    const char* inputName = nullptr;
-    const char* outputName = nullptr;
-
-    for (int i = 0; i < engine->getNbIOTensors(); ++i) {
-        const char* name = engine->getIOTensorName(i);
-        TensorIOMode mode = engine->getTensorIOMode(name);
+    for (int i = 0; i < trt.engine->getNbIOTensors(); ++i) {
+        const char* name = trt.engine->getIOTensorName(i);
+        TensorIOMode mode = trt.engine->getTensorIOMode(name);
         if (mode == TensorIOMode::kINPUT) {
-            inputName = name;
-            std::cout << "[TRT] Found Input Tensor: " << name << std::endl;
+            trt.inputName = name;
+            LogInfo(std::string("[TRT] Found Input Tensor: ") + name);
         } else if (mode == TensorIOMode::kOUTPUT) {
-            outputName = name;
-            std::cout << "[TRT] Found Output Tensor: " << name << std::endl;
+            trt.outputName = name;
+            LogInfo(std::string("[TRT] Found Output Tensor: ") + name);
         }
     }
 
-    if (!inputName || !outputName) {
-        std::cerr << "Error: Failed to find input/output tensor names." << std::endl;
-        return;
+    if (!trt.inputName || !trt.outputName) {
+        LogError("Failed to find input/output tensor names.");
+        return false;
     }
 
-    Dims inputDims = context->getTensorShape(inputName);
+    trt.inputDims = trt.context->getTensorShape(trt.inputName);
     bool needSetInput = false;
-    for (int i = 0; i < inputDims.nbDims; ++i) {
-        if (inputDims.d[i] < 0) {
+    for (int i = 0; i < trt.inputDims.nbDims; ++i) {
+        if (trt.inputDims.d[i] < 0) {
             needSetInput = true;
             break;
         }
     }
-    if (needSetInput || inputDims.nbDims == 0) {
+    if (needSetInput || trt.inputDims.nbDims == 0) {
         Dims4 fixedInput{1, 3, INPUT_SIZE, INPUT_SIZE};
-        if (!context->setInputShape(inputName, fixedInput)) {
-            std::cerr << "Error: Failed to set input shape." << std::endl;
-            return;
+        if (!trt.context->setInputShape(trt.inputName, fixedInput)) {
+            LogError("Failed to set input shape.");
+            return false;
         }
     }
 
-    inputDims = context->getTensorShape(inputName);
-    Dims outputDims = context->getTensorShape(outputName);
+    trt.inputDims = trt.context->getTensorShape(trt.inputName);
+    trt.outputDims = trt.context->getTensorShape(trt.outputName);
 
-    for (int i = 0; i < inputDims.nbDims; ++i) {
-        if (inputDims.d[i] < 0) {
-            std::cerr << "Error: Input dims unresolved after setInputShape." << std::endl;
-            return;
+    for (int i = 0; i < trt.inputDims.nbDims; ++i) {
+        if (trt.inputDims.d[i] < 0) {
+            LogError("Input dims unresolved after setInputShape.");
+            return false;
         }
     }
-    for (int i = 0; i < outputDims.nbDims; ++i) {
-        if (outputDims.d[i] < 0) {
-            std::cerr << "Error: Output dims unresolved." << std::endl;
-            return;
+    for (int i = 0; i < trt.outputDims.nbDims; ++i) {
+        if (trt.outputDims.d[i] < 0) {
+            LogError("Output dims unresolved.");
+            return false;
         }
     }
 
-    nvinfer1::DataType inputType = engine->getTensorDataType(inputName);
-    nvinfer1::DataType outputType = engine->getTensorDataType(outputName);
+    nvinfer1::DataType inputType = trt.engine->getTensorDataType(trt.inputName);
+    nvinfer1::DataType outputType = trt.engine->getTensorDataType(trt.outputName);
     if (inputType != nvinfer1::DataType::kFLOAT || outputType != nvinfer1::DataType::kFLOAT) {
-        std::cerr << "Error: Expected FP32 tensors. Input type=" << static_cast<int>(inputType)
-                  << " Output type=" << static_cast<int>(outputType) << std::endl;
-        return;
+        LogError("Expected FP32 tensors. Input type=" + std::to_string(static_cast<int>(inputType)) +
+                 " Output type=" + std::to_string(static_cast<int>(outputType)));
+        return false;
     }
 
-    size_t inputSize = volume(inputDims) * sizeof(float);
-    size_t outputElements = volume(outputDims);
-    size_t outputSize = outputElements * sizeof(float);
+    trt.inputSize = Volume(trt.inputDims) * sizeof(float);
+    trt.outputElements = Volume(trt.outputDims);
+    trt.outputSize = trt.outputElements * sizeof(float);
+    trt.rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t);
 
     std::cout << "[TRT] Input Dims: ";
-    for (int i = 0; i < inputDims.nbDims; ++i) std::cout << inputDims.d[i] << (i + 1 < inputDims.nbDims ? "x" : "");
-    std::cout << " (" << inputSize << " bytes)" << std::endl;
+    for (int i = 0; i < trt.inputDims.nbDims; ++i) std::cout << trt.inputDims.d[i] << (i + 1 < trt.inputDims.nbDims ? "x" : "");
+    std::cout << " (" << trt.inputSize << " bytes)" << std::endl;
     std::cout << "[TRT] Output Dims: ";
-    for (int i = 0; i < outputDims.nbDims; ++i) std::cout << outputDims.d[i] << (i + 1 < outputDims.nbDims ? "x" : "");
-    std::cout << " (" << outputSize << " bytes)" << std::endl;
-    size_t rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t);
+    for (int i = 0; i < trt.outputDims.nbDims; ++i) std::cout << trt.outputDims.d[i] << (i + 1 < trt.outputDims.nbDims ? "x" : "");
+    std::cout << " (" << trt.outputSize << " bytes)" << std::endl;
 
-    void *d_input, *d_output, *d_raw_img;
-    checkCudaErrors(cudaMalloc(&d_input, inputSize));
-    checkCudaErrors(cudaMalloc(&d_output, outputSize));
-    checkCudaErrors(cudaMalloc(&d_raw_img, rawInputSize));
+    return true;
+}
 
-    context->setTensorAddress(inputName, d_input);
-    context->setTensorAddress(outputName, d_output);
+static bool InitCudaResources(const TrtContextData& trt, CudaResources& cudaRes) {
+    CHECK_CUDA_OR_RETURN(cudaMalloc(&cudaRes.d_input, trt.inputSize));
+    CHECK_CUDA_OR_RETURN(cudaMalloc(&cudaRes.d_output, trt.outputSize));
+    CHECK_CUDA_OR_RETURN(cudaMalloc(&cudaRes.d_raw_img, trt.rawInputSize));
+    CHECK_CUDA_OR_RETURN(cudaStreamCreate(&cudaRes.stream));
 
-    cudaStream_t trtStream;
-    checkCudaErrors(cudaStreamCreate(&trtStream));
+    if (!trt.context->setTensorAddress(trt.inputName, cudaRes.d_input)) return false;
+    if (!trt.context->setTensorAddress(trt.outputName, cudaRes.d_output)) return false;
+    return true;
+}
+
+static void ResolveOutputHW(const Dims& outputDims, int& outH, int& outW) {
+    outH = INPUT_SIZE;
+    outW = INPUT_SIZE;
+    if (outputDims.nbDims == 4) {
+        outH = outputDims.d[2];
+        outW = outputDims.d[3];
+    } else if (outputDims.nbDims == 3) {
+        outH = outputDims.d[1];
+        outW = outputDims.d[2];
+    } else if (outputDims.nbDims == 2) {
+        outH = outputDims.d[0];
+        outW = outputDims.d[1];
+    }
+}
+
+bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
+                    DepthStreamBuffer* streamBuf,
+                    ImageStreamBuffer* pcStreamBuf,
+                    ViewParams* viewParams) {
+    LogInfo("Mode: " + std::string(headless ? "headless" : "gui") +
+            " | Channel: " + std::to_string(channel));
+
+    TrtContextData trt;
+    if (!InitTrt(trt)) return false;
+
+    CudaResources cudaRes;
+    if (!InitCudaResources(trt, cudaRes)) return false;
 
     _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000|rw_timeout;5000000");
     const std::string& rtspUrl = RTSP_URLS[channel];
@@ -264,19 +417,15 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
     cap.set(CAP_PROP_OPEN_TIMEOUT_MSEC, 3000);
     cap.set(CAP_PROP_READ_TIMEOUT_MSEC, 3000);
     if (!cap.isOpened()) {
-        std::cerr << "Error: Cannot open RTSP stream: " << rtspUrl << std::endl;
-        cudaStreamDestroy(trtStream);
-        cudaFree(d_input);
-        cudaFree(d_output);
-        cudaFree(d_raw_img);
-        return;
+        LogError("Cannot open RTSP stream: " + rtspUrl);
+        return false;
     }
 
     Mat frame, resized;
-    std::vector<float> outputBuffer(outputElements);
+    std::vector<float> outputBuffer(trt.outputElements);
     uint64_t frameIdx = 0;
 
-    std::cout << "Stream Started. Press 'q' to exit." << std::endl;
+    LogInfo("Stream started.");
 
     dim3 block(16, 16);
     dim3 grid((INPUT_SIZE + block.x - 1) / block.x, (INPUT_SIZE + block.y - 1) / block.y);
@@ -285,12 +434,13 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
 
     int grabFailCount = 0;
     const int grabFailLogEvery = 30;
+    bool fatalError = false;
     while (!stopFlag.load()) {
         if (!cap.grab()) {
             grabFailCount++;
             if (grabFailCount % grabFailLogEvery == 1) {
-                std::cerr << "[WARN] RTSP grab failed (" << grabFailCount
-                          << "x). url=" << rtspUrl << std::endl;
+                LogWarn("RTSP grab failed (" + std::to_string(grabFailCount) +
+                        "x). url=" + rtspUrl);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
@@ -299,84 +449,107 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
         grabFailCount = 0;
         frameIdx++;
         if (frame.empty()) {
-            std::cerr << "[WARN] Empty frame at idx=" << frameIdx << std::endl;
+            LogWarn("Empty frame at idx=" + std::to_string(frameIdx));
             continue;
         }
         if (frame.channels() != 3) {
-            std::cerr << "[WARN] Unexpected channels=" << frame.channels()
-                      << " at idx=" << frameIdx << std::endl;
+            LogWarn("Unexpected channels=" + std::to_string(frame.channels()) +
+                    " at idx=" + std::to_string(frameIdx));
             continue;
         }
 
         cv::resize(frame, resized, Size(INPUT_SIZE, INPUT_SIZE), 0, 0, INTER_LINEAR);
         if (resized.empty() || resized.cols != INPUT_SIZE || resized.rows != INPUT_SIZE) {
-            std::cerr << "[WARN] Resize failed or size mismatch at idx=" << frameIdx << std::endl;
+            LogWarn("Resize failed or size mismatch at idx=" + std::to_string(frameIdx));
             continue;
         }
         if (resized.type() != CV_8UC3) {
-            std::cerr << "[WARN] Unexpected resized type=" << resized.type()
-                      << " at idx=" << frameIdx << std::endl;
+            LogWarn("Unexpected resized type=" + std::to_string(resized.type()) +
+                    " at idx=" + std::to_string(frameIdx));
             continue;
         }
 
         if (!resized.isContinuous()) {
             resized = resized.clone();
         }
-        checkCudaErrors(cudaMemcpyAsync(d_raw_img, resized.data, rawInputSize, cudaMemcpyHostToDevice, trtStream));
-
-        preprocess_kernel<<<grid, block, 0, trtStream>>>((uint8_t*)d_raw_img, (float*)d_input, INPUT_SIZE, INPUT_SIZE);
-        auto err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA kernel error: " << cudaGetErrorString(err)
-                      << " (frame=" << frameIdx << ")" << std::endl;
+        if (!CheckCuda(cudaMemcpyAsync(cudaRes.d_raw_img, resized.data, trt.rawInputSize,
+                                        cudaMemcpyHostToDevice, cudaRes.stream),
+                       "cudaMemcpyAsync(d_raw_img)", __FILE__, __LINE__)) {
+            fatalError = true;
             break;
         }
 
-        if (!context->enqueueV3(trtStream)) {
-            std::cerr << "enqueueV3 failed (frame=" << frameIdx << ")" << std::endl;
+        preprocess_kernel<<<grid, block, 0, cudaRes.stream>>>((uint8_t*)cudaRes.d_raw_img,
+                                                               (float*)cudaRes.d_input,
+                                                               INPUT_SIZE, INPUT_SIZE);
+        auto err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            LogError(std::string("CUDA kernel error: ") + cudaGetErrorString(err) +
+                     " (frame=" + std::to_string(frameIdx) + ")");
+            fatalError = true;
+            break;
+        }
+
+        if (!trt.context->enqueueV3(cudaRes.stream)) {
+            LogError("enqueueV3 failed (frame=" + std::to_string(frameIdx) + ")");
+            fatalError = true;
             break;
         }
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            std::cerr << "CUDA post-enqueue error: " << cudaGetErrorString(err)
-                      << " (frame=" << frameIdx << ")" << std::endl;
+            LogError(std::string("CUDA post-enqueue error: ") + cudaGetErrorString(err) +
+                     " (frame=" + std::to_string(frameIdx) + ")");
+            fatalError = true;
             break;
         }
 
-        checkCudaErrors(cudaMemcpyAsync(outputBuffer.data(), d_output, outputSize, cudaMemcpyDeviceToHost, trtStream));
-        err = cudaStreamSynchronize(trtStream);
+        if (!CheckCuda(cudaMemcpyAsync(outputBuffer.data(), cudaRes.d_output, trt.outputSize,
+                                        cudaMemcpyDeviceToHost, cudaRes.stream),
+                       "cudaMemcpyAsync(output)", __FILE__, __LINE__)) {
+            fatalError = true;
+            break;
+        }
+        err = cudaStreamSynchronize(cudaRes.stream);
         if (err != cudaSuccess) {
-            std::cerr << "CUDA stream sync error: " << cudaGetErrorString(err)
-                      << " (frame=" << frameIdx << ")" << std::endl;
+            LogError(std::string("CUDA stream sync error: ") + cudaGetErrorString(err) +
+                     " (frame=" + std::to_string(frameIdx) + ")");
+            fatalError = true;
             break;
         }
 
         int outH = INPUT_SIZE;
         int outW = INPUT_SIZE;
-        if (outputDims.nbDims == 4) {
-            outH = outputDims.d[2];
-            outW = outputDims.d[3];
-        } else if (outputDims.nbDims == 3) {
-            outH = outputDims.d[1];
-            outW = outputDims.d[2];
-        } else if (outputDims.nbDims == 2) {
-            outH = outputDims.d[0];
-            outW = outputDims.d[1];
-        }
-
-        if (static_cast<size_t>(outH) * static_cast<size_t>(outW) > outputElements) {
-            std::cerr << "[WARN] Output size mismatch outH*outW="
-                      << (static_cast<size_t>(outH) * static_cast<size_t>(outW))
-                      << " > outputElements=" << outputElements
-                      << " (frame=" << frameIdx << ")" << std::endl;
+        ResolveOutputHW(trt.outputDims, outH, outW);
+        if (static_cast<size_t>(outH) * static_cast<size_t>(outW) > trt.outputElements) {
+            LogWarn("Output size mismatch outH*outW=" +
+                    std::to_string(static_cast<size_t>(outH) * static_cast<size_t>(outW)) +
+                    " > outputElements=" + std::to_string(trt.outputElements) +
+                    " (frame=" + std::to_string(frameIdx) + ")");
             continue;
         }
         Mat depthMat(outH, outW, CV_32F, outputBuffer.data());
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
 
+        // Optional: dump point cloud or render a live point-cloud view.
+        const bool dumpPointCloud = false;
+        const bool showPointCloud = true;
+        const CameraIntrinsics Kfhd = MakeIntrinsicsFromFovDegrees(109.0f, 55.0f, 1920, 1080);
+        const CameraIntrinsics K = ScaleIntrinsics(Kfhd, outW, outH, 1920, 1080);
+        if (dumpPointCloud && (frameIdx % 60 == 0)) {
+            std::vector<cv::Vec3f> points;
+            DepthToPointCloud(depthMat.ptr<float>(), outW, outH, K, points, 2, 0.1f, 80.0f);
+            const std::string plyPath = "pointcloud_" + std::to_string(frameIdx) + ".ply";
+            if (SavePointCloudAsPly(plyPath, points)) {
+                LogInfo("Point cloud saved: " + plyPath + " (points=" + std::to_string(points.size()) + ")");
+            } else {
+                LogWarn("Failed to save point cloud: " + plyPath);
+            }
+        }
+
         Mat depthNorm;
-        depthMat.convertTo(depthNorm, CV_8U, 255.0 / (maxVal - minVal + 1e-5), -minVal * 255.0 / (maxVal - minVal + 1e-5));
+        depthMat.convertTo(depthNorm, CV_8U, 255.0 / (maxVal - minVal + 1e-5),
+                           -minVal * 255.0 / (maxVal - minVal + 1e-5));
 
         Mat depthColor;
         cv::applyColorMap(depthNorm, depthColor, COLORMAP_INFERNO);
@@ -384,6 +557,48 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
         Mat showFrame, showDepth;
         cv::resize(frame, showFrame, Size(640, 480));
         cv::resize(depthColor, showDepth, Size(640, 480));
+
+        if (streamBuf) {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->data.assign(outputBuffer.begin(), outputBuffer.end());
+            streamBuf->width = outW;
+            streamBuf->height = outH;
+            streamBuf->frameIdx = static_cast<uint32_t>(frameIdx);
+            streamBuf->hasFrame = true;
+            lock.unlock();
+            streamBuf->cv.notify_all();
+        }
+
+        if (pcStreamBuf) {
+            // Render lower-res projected view for streaming.
+            Mat colorForDepth;
+            if (frame.cols != outW || frame.rows != outH) {
+                cv::resize(frame, colorForDepth, Size(outW, outH));
+            } else {
+                colorForDepth = frame;
+            }
+            float rx = -20.0f;
+            float ry = 35.0f;
+            if (viewParams) {
+                std::lock_guard<std::mutex> lock(viewParams->mu);
+                rx = viewParams->rotX;
+                ry = viewParams->rotY;
+            }
+            Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
+                                              480, 360, 4, 0.1f, 80.0f, rx, ry);
+            std::vector<unsigned char> encoded;
+            std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 3};
+            if (cv::imencode(".png", pcv, encoded, params)) {
+                std::unique_lock<std::mutex> lock(pcStreamBuf->mu);
+                pcStreamBuf->data.swap(encoded);
+                pcStreamBuf->width = pcv.cols;
+                pcStreamBuf->height = pcv.rows;
+                pcStreamBuf->frameIdx = static_cast<uint32_t>(frameIdx);
+                pcStreamBuf->hasFrame = true;
+                lock.unlock();
+                pcStreamBuf->cv.notify_all();
+            }
+        }
 
         if (!headless) {
             Mat combined;
@@ -393,10 +608,20 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
             double fps = 1.0 / std::chrono::duration<double>(currTime - prevTime).count();
             prevTime = currTime;
 
-            cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+            cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps),
+                        Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
             cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
-
-            if (cv::waitKey(1) == 'q') break;
+            if (showPointCloud) {
+                Mat colorForDepth;
+                if (frame.cols != outW || frame.rows != outH) {
+                    cv::resize(frame, colorForDepth, Size(outW, outH));
+                } else {
+                    colorForDepth = frame;
+                }
+                Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth, 640, 480, 3);
+                cv::imshow("PointCloud (Projected)", pcv);
+            }
+            cv::waitKey(1);
         }
     }
 
@@ -405,10 +630,90 @@ static void RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFl
         cv::destroyAllWindows();
     }
 
-    cudaStreamDestroy(trtStream);
-    cudaFree(d_input);
-    cudaFree(d_output);
-    cudaFree(d_raw_img);
+    if (fatalError) return false;
+    return true;
+}
+
+static void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::atomic<bool>* active) {
+    if (!streamBuf) {
+        closesocket(client);
+        return;
+    }
+
+    LogInfo("Depth stream client connected.");
+    if (active) active->store(true);
+    streamBuf->stop = false;
+
+    std::string ok = "OK depth_stream\n";
+    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+
+    while (true) {
+        std::vector<float> local;
+        int w = 0, h = 0;
+        uint32_t frameIdx = 0;
+        {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->cv.wait(lock, [&] { return streamBuf->hasFrame || streamBuf->stop; });
+            if (streamBuf->stop) break;
+            local = streamBuf->data;
+            w = streamBuf->width;
+            h = streamBuf->height;
+            frameIdx = streamBuf->frameIdx;
+            streamBuf->hasFrame = false;
+        }
+
+        const uint32_t payloadBytes = static_cast<uint32_t>(local.size() * sizeof(float));
+        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
+        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
+        if (sent <= 0) break;
+    }
+
+    LogWarn("Depth stream client disconnected.");
+    if (active) active->store(false);
+    closesocket(client);
+}
+
+static void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomic<bool>* active) {
+    if (!streamBuf) {
+        closesocket(client);
+        return;
+    }
+
+    LogInfo("PC image stream client connected.");
+    if (active) active->store(true);
+    streamBuf->stop = false;
+
+    std::string ok = "OK pc_stream fmt=png\n";
+    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+
+    while (true) {
+        std::vector<unsigned char> local;
+        int w = 0, h = 0;
+        uint32_t frameIdx = 0;
+        {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->cv.wait(lock, [&] { return streamBuf->hasFrame || streamBuf->stop; });
+            if (streamBuf->stop) break;
+            local = streamBuf->data;
+            w = streamBuf->width;
+            h = streamBuf->height;
+            frameIdx = streamBuf->frameIdx;
+            streamBuf->hasFrame = false;
+        }
+
+        const uint32_t payloadBytes = static_cast<uint32_t>(local.size());
+        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
+        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
+        if (sent <= 0) break;
+    }
+
+    LogWarn("PC image stream client disconnected.");
+    if (active) active->store(false);
+    closesocket(client);
 }
 
 int main(int argc, char** argv) {
@@ -452,13 +757,26 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "[APP] Listening on port " << port << std::endl;
+    LogInfo("Listening on port " + std::to_string(port));
 
     std::thread worker;
+    std::thread streamThread;
     std::atomic<bool> workerStop{false};
+    DepthStreamBuffer depthStream;
     bool workerRunning = false;
+    std::atomic<bool> streamActive{false};
+    std::thread pcStreamThread;
+    ImageStreamBuffer pcStream;
+    std::atomic<bool> pcStreamActive{false};
+    ViewParams viewParams;
 
     while (true) {
+        if (streamThread.joinable() && !streamActive.load()) {
+            streamThread.join();
+        }
+        if (pcStreamThread.joinable() && !pcStreamActive.load()) {
+            pcStreamThread.join();
+        }
         sockaddr_in clientAddr{};
         int clientLen = sizeof(clientAddr);
         SOCKET client = accept(server, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
@@ -467,7 +785,7 @@ int main(int argc, char** argv) {
         char buf[1024];
         int len = recv(client, buf, sizeof(buf) - 1, 0);
         if (len <= 0) {
-            std::cout << "[APP] Client connected but sent no data" << std::endl;
+            LogWarn("Client connected but sent no data");
             closesocket(client);
             continue;
         }
@@ -477,14 +795,57 @@ int main(int argc, char** argv) {
         {
             char ip[64] = {0};
             inet_ntop(AF_INET, &clientAddr.sin_addr, ip, sizeof(ip));
-            std::cout << "[APP] Request from " << ip << ":" << ntohs(clientAddr.sin_port)
-                      << " -> " << line << std::endl;
+            LogInfo(std::string("Request from ") + ip + ":" +
+                    std::to_string(ntohs(clientAddr.sin_port)) + " -> " + line);
         }
         Request req = ParseRequest(line);
 
         if (req.channel < -1 || req.channel > 3) {
-            std::cout << "[APP] Invalid channel request" << std::endl;
+            LogWarn("Invalid channel request");
             SendResponse(client, "ERR invalid channel\n");
+            closesocket(client);
+            continue;
+        }
+
+        if (req.depthStream) {
+            if (streamThread.joinable()) {
+                {
+                    std::unique_lock<std::mutex> lock(depthStream.mu);
+                    depthStream.stop = true;
+                    lock.unlock();
+                }
+                depthStream.cv.notify_all();
+                streamThread.join();
+            }
+            streamThread = std::thread([client, &depthStream, &streamActive]() {
+                DepthStreamWorker(client, &depthStream, &streamActive);
+            });
+            continue;
+        }
+
+        if (req.pcStream) {
+            if (pcStreamThread.joinable()) {
+                {
+                    std::unique_lock<std::mutex> lock(pcStream.mu);
+                    pcStream.stop = true;
+                    lock.unlock();
+                }
+                pcStream.cv.notify_all();
+                pcStreamThread.join();
+            }
+            pcStreamThread = std::thread([client, &pcStream, &pcStreamActive]() {
+                PcImageStreamWorker(client, &pcStream, &pcStreamActive);
+            });
+            continue;
+        }
+
+        if (req.pcView) {
+            if (req.rxSet || req.rySet) {
+                std::lock_guard<std::mutex> lock(viewParams.mu);
+                if (req.rxSet) viewParams.rotX = req.rx;
+                if (req.rySet) viewParams.rotY = req.ry;
+            }
+            SendResponse(client, "OK pc_view\n");
             closesocket(client);
             continue;
         }
@@ -496,7 +857,7 @@ int main(int argc, char** argv) {
         }
 
         if (req.stop) {
-            std::cout << "[APP] Stop request processed" << std::endl;
+            LogInfo("Stop request processed");
             SendResponse(client, "OK stopped\n");
             closesocket(client);
             continue;
@@ -507,19 +868,42 @@ int main(int argc, char** argv) {
         if (req.gui) headless = false;
 
         workerStop.store(false);
-        worker = std::thread([channel, headless, &workerStop]() {
-            RunDepthWorker(channel, headless, workerStop);
+        worker = std::thread([channel, headless, &workerStop, &depthStream, &pcStream, &viewParams]() {
+            bool ok = RunDepthWorker(channel, headless, workerStop, &depthStream, &pcStream, &viewParams);
+            if (!ok) LogError("Worker exited with errors.");
         });
         workerRunning = true;
 
         std::string modeStr = headless ? "headless" : "gui";
         SendResponse(client, "OK started channel=" + std::to_string(channel) + " mode=" + modeStr + "\n");
         closesocket(client);
+
+        if (streamThread.joinable() && !streamActive.load()) {
+            streamThread.join();
+        }
     }
 
     if (workerRunning) {
         workerStop.store(true);
         if (worker.joinable()) worker.join();
+    }
+    if (streamThread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lock(depthStream.mu);
+            depthStream.stop = true;
+            lock.unlock();
+        }
+        depthStream.cv.notify_all();
+        streamThread.join();
+    }
+    if (pcStreamThread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lock(pcStream.mu);
+            pcStream.stop = true;
+            lock.unlock();
+        }
+        pcStream.cv.notify_all();
+        pcStreamThread.join();
     }
     closesocket(server);
     WSACleanup();
