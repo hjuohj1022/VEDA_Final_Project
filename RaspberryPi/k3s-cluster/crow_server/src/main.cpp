@@ -383,15 +383,26 @@ int main()
     // ==========================================
     CROW_ROUTE(app, "/docs")
     ([](){
-        crow::response res;
-        res.set_static_file_info("/app/swagger/index.html");
+        std::ifstream ifs("/app/swagger/index.html");
+        if (!ifs.is_open()) return crow::response(404, "Swagger UI file not found");
+        
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        
+        crow::response res(buffer.str());
+        res.add_header("Content-Type", "text/html; charset=utf-8");
         return res;
     });
 
     CROW_ROUTE(app, "/swagger.yaml")
     ([](){
-        crow::response res;
-        res.set_static_file_info("/app/swagger/swagger.yaml");
+        std::ifstream ifs("/app/swagger/swagger.yaml");
+        if (!ifs.is_open()) return crow::response(404, "Swagger YAML file not found");
+        
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        
+        crow::response res(buffer.str());
         res.add_header("Content-Type", "text/yaml; charset=utf-8");
         return res;
     });
