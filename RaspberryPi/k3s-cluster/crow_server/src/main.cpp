@@ -384,14 +384,14 @@ int main()
     CROW_ROUTE(app, "/docs")
     ([](){
         crow::response res;
-        res.set_static_file_info("swagger/index.html");
+        res.set_static_file_info("/app/swagger/index.html");
         return res;
     });
 
     CROW_ROUTE(app, "/swagger.yaml")
     ([](){
         crow::response res;
-        res.set_static_file_info("swagger/swagger.yaml");
+        res.set_static_file_info("/app/swagger/swagger.yaml");
         res.add_header("Content-Type", "text/yaml; charset=utf-8");
         return res;
     });
