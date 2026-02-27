@@ -22,59 +22,78 @@ jobs:
           FILES=$(curl -s \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
-            | jq -r '.[].filename')
+            | jq -r '.[].filename' | tr '\n' ', ' | sed 's/, $//')
 
-          echo "FILES<<EOF" >> $GITHUB_ENV
-          echo "$FILES" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "FILES=$FILES" >> $GITHUB_ENV
 
       # 2️⃣ Jira 이슈 생성
       - name: Create Jira Issue
         id: jira
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
-          BODY="${{ github.event.pull_request.body }}"
-          PR_URL="${{ github.event.pull_request.html_url }}"
-
-          DESCRIPTION=$(printf "PR 링크: %s\n\n작업 내용:\n%s\n\n변경 파일:\n%s" "$PR_URL" "$BODY" "$FILES")
+          DESCRIPTION=$(printf "PR 링크: %s\n\n작업 내용:\n%s\n\n변경 파일:\n%s" "$PR_URL" "$PR_BODY" "$FILES")
+          
+          # jq를 사용하여 안전하게 JSON 생성
+          PAYLOAD=$(jq -n \
+            --arg project "${{ secrets.JIRA_PROJECT }}" \
+            --arg summary "$PR_TITLE" \
+            --arg desc "$DESCRIPTION" \
+            '{
+              fields: {
+                project: { key: $project },
+                summary: $summary,
+                issuetype: { name: "Task" },
+                description: {
+                  type: "doc",
+                  version: 1,
+                  content: [{
+                    type: "paragraph",
+                    content: [{
+                      type: "text",
+                      text: $desc
+                    }]
+                  }]
+                }
+              }
+            }')
 
           RESPONSE=$(curl -s -X POST \
             -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
             -H "Content-Type: application/json" \
             https://${{ secrets.JIRA_DOMAIN }}/rest/api/3/issue \
-            --data "{
-              \"fields\": {
-                \"project\": { \"key\": \"${{ secrets.JIRA_PROJECT }}\" },
-                \"summary\": \"$TITLE\",
-                \"issuetype\": { \"name\": \"Task\" },
-                \"description\": {
-                  \"type\": \"doc\",
-                  \"version\": 1,
-                  \"content\": [{
-                    \"type\": \"paragraph\",
-                    \"content\": [{
-                      \"type\": \"text\",
-                      \"text\": \"$DESCRIPTION\"
-                    }]
-                  }]
-                }
-              }
-            }")
+            --data "$PAYLOAD")
 
-          ISSUE_KEY=$(echo $RESPONSE | jq -r '.key')
+          ISSUE_KEY=$(echo $RESPONSE | jq -r '.key // empty')
+          
+          if [ -z "$ISSUE_KEY" ]; then
+            echo "❌ Jira 이슈 생성 실패!"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          
           echo "ISSUE_KEY=$ISSUE_KEY" >> $GITHUB_ENV
 
       # 3️⃣ summary에 KAN-XXX 자동 포함
       - name: Update Summary With Issue Key
+        if: env.ISSUE_KEY != ''
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
+          # jq를 사용하여 안전하게 JSON 생성
+          UPDATE_PAYLOAD=$(jq -n \
+            --arg key "${{ env.ISSUE_KEY }}" \
+            --arg title "$PR_TITLE" \
+            '{
+              fields: {
+                summary: "\($key) \($title)"
+              }
+            }')
 
           curl -s -X PUT \
             -u ${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_TOKEN }} \
             -H "Content-Type: application/json" \
             https://${{ secrets.JIRA_DOMAIN }}/rest/api/3/issue/${{ env.ISSUE_KEY }} \
-            --data "{
-              \"fields\": {
-                \"summary\": \"${{ env.ISSUE_KEY }} $TITLE\"
-              }
-            }"
+            --data "$UPDATE_PAYLOAD"
