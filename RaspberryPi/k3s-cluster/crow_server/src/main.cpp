@@ -120,9 +120,85 @@ bool checkUserFromDB(std::string inputId, std::string inputPw) {
     return loginSuccess;
 }
 
+// -------------------------------------------------------
+// MariaDB에 새로운 사용자 등록
+// -------------------------------------------------------
+bool registerUserToDB(std::string inputId, std::string inputPw) {
+    MYSQL *conn;
+    
+    const char* db_host = std::getenv("DB_HOST");
+    const char* db_user = std::getenv("DB_USER");
+    const char* db_pass = std::getenv("DB_PASSWORD");
+
+    if(!db_host || !db_user || !db_pass) {
+        std::cerr << "[Error] DB Environment variables are missing!" << std::endl;
+        return false;
+    }
+
+    conn = mysql_init(NULL);
+    if (!mysql_real_connect(conn, db_host, db_user, db_pass, "veda_db", 3306, NULL, 0)) {
+        std::cerr << "[DB Error] " << mysql_error(conn) << std::endl;
+        mysql_close(conn);
+        return false;
+    }
+
+    // 기존 사용자 확인
+    std::string checkQuery = "SELECT count(*) FROM users WHERE id='" + inputId + "'";
+    if (mysql_query(conn, checkQuery.c_str())) {
+        std::cerr << "[Query Error] " << mysql_error(conn) << std::endl;
+        mysql_close(conn);
+        return false;
+    }
+
+    MYSQL_RES *res = mysql_use_result(conn);
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (row && std::stoi(row[0]) > 0) {
+        mysql_free_result(res);
+        mysql_close(conn);
+        return false; // 중복 ID
+    }
+    mysql_free_result(res);
+
+    // 사용자 추가
+    std::string insertQuery = "INSERT INTO users (id, password) VALUES ('" + inputId + "', '" + inputPw + "')";
+    if (mysql_query(conn, insertQuery.c_str())) {
+        std::cerr << "[Insert Error] " << mysql_error(conn) << std::endl;
+        mysql_close(conn);
+        return false;
+    }
+
+    mysql_close(conn);
+    return true;
+}
+
 int main()
 {
     crow::SimpleApp app;
+
+    // ==========================================
+    // 회원가입 API
+    // ==========================================
+    CROW_ROUTE(app, "/register").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        auto x = crow::json::load(req.body);
+        if (!x) return crow::response(400, "Invalid JSON");
+
+        if (!x.has("id") || !x.has("password")) {
+            return crow::response(400, "Missing id or password");
+        }
+
+        std::string id = x["id"].s();
+        std::string pw = x["password"].s();
+
+        if (registerUserToDB(id, pw)) {
+            crow::json::wvalue res;
+            res["status"] = "success";
+            res["message"] = "User registered successfully";
+            return crow::response(201, res);
+        } else {
+            return crow::response(409, "Registration Failed: ID already exists or DB error");
+        }
+    });
 
     // ==========================================
     // 로그인 API (실제 JWT 발급)
