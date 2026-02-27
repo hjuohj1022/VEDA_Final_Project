@@ -19,7 +19,7 @@ WORKDIR /app
 COPY . .
 
 # 빌드 수행
-RUN mkdir build && cd build && \
+RUN mkdir -p build && cd build && \
     cmake .. && \
     make
 
@@ -38,10 +38,13 @@ RUN apt-get update && apt-get install -y \
     libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/build/crow_server /usr/local/bin/crow_server
+WORKDIR /app
+COPY --from=builder /app/build/crow_server ./crow_server
+# Swagger 파일 복사
+COPY swagger ./swagger
 
 # 포트 개방
 EXPOSE 8080
 
 # 실행
-CMD ["/usr/local/bin/crow_server"]
+CMD ["./crow_server"]

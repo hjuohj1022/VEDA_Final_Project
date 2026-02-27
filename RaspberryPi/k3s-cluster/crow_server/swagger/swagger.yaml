@@ -1,0 +1,80 @@
+openapi: 3.0.0
+info:
+  title: Crow Server API (VEDA Project)
+  description: CCTV Recording and Management System API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local Test Server
+paths:
+  /login:
+    post:
+      summary: User Login (JWT Issue)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Authentication failed
+  /recordings:
+    get:
+      summary: Get MP4 recording list
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+        '401':
+          description: Unauthorized
+    delete:
+      summary: Delete recording file
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: file
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Filename to delete (e.g., recording_1.mp4)
+      responses:
+        '200':
+          description: Deleted
+        '404':
+          description: Not Found
+  /stream:
+    get:
+      summary: Video Streaming (Range support)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: file
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '206':
+          description: Partial Content
+  /health:
+    get:
+      summary: Server health check
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
