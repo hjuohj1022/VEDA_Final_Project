@@ -39,6 +39,7 @@ qt_add_qml_module(Team3VideoReceiver
         Header.qml
         VideoGrid.qml
         LoginScreen.qml
+        PlaybackScreen.qml
         VideoPlayer.qml
 )
 

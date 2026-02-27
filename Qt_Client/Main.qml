@@ -370,7 +370,47 @@ ApplicationWindow {
                                             enabled: backend.isLoggedIn
                                             onClicked: {
                                                 backend.resetSessionTimer()
+                                                window.inlineMainViewVisible = false
+                                                window.inlineMainCameraIndex = -1
                                                 stackLayout.currentIndex = 0
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        id: playbackBtn
+                                        width: 82; height: 28
+                                        color: playbackMouseArea.pressed
+                                               ? "#ea580c"
+                                               : (!backend.isLoggedIn
+                                               ? (window.isDarkMode ? "#27272a" : "#e4e4e7")
+                                               : (stackLayout.currentIndex === 2 ? theme.accent : theme.bgComponent))
+                                        radius: 6
+                                        border.color: theme.border
+                                        border.width: stackLayout.currentIndex === 2 ? 0 : 1
+                                        scale: playbackMouseArea.pressed ? 0.97 : 1.0
+                                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "Playback"
+                                            color: !backend.isLoggedIn
+                                                   ? (window.isDarkMode ? "#71717a" : "#a1a1aa")
+                                                   : (stackLayout.currentIndex === 2 ? "white" : theme.textSecondary)
+                                            font.bold: true
+                                            font.pixelSize: 12
+                                        }
+
+                                        MouseArea {
+                                            id: playbackMouseArea
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            enabled: backend.isLoggedIn
+                                            onClicked: {
+                                                backend.resetSessionTimer()
+                                                window.inlineMainViewVisible = false
+                                                window.inlineMainCameraIndex = -1
+                                                stackLayout.currentIndex = 2
                                             }
                                         }
                                     }
@@ -388,7 +428,7 @@ ApplicationWindow {
                                         border.width: stackLayout.currentIndex === 1 ? 0 : 1
                                         scale: exportMouseArea.pressed ? 0.97 : 1.0
                                         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                                        
+
                                         Text {
                                             anchors.centerIn: parent
                                             text: "Export"
@@ -403,11 +443,9 @@ ApplicationWindow {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 backend.resetSessionTimer()
-                                                if (backend.isLoggedIn) {
-                                                    stackLayout.currentIndex = 1
-                                                } else {
-                                                    stackLayout.currentIndex = 1
-                                                }
+                                                window.inlineMainViewVisible = false
+                                                window.inlineMainCameraIndex = -1
+                                                stackLayout.currentIndex = 1
                                             }
                                         }
                                     }
@@ -419,7 +457,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 currentIndex: backend.isLoggedIn
-                                              ? (window.inlineMainViewVisible ? 2 : 0)
+                                              ? (window.inlineMainViewVisible ? 3 : 0)
                                               : 1
 
                                 VideoGrid {
@@ -432,7 +470,7 @@ ApplicationWindow {
                                     onOpenMainViewRequested: function(cameraIndex) {
                                         window.inlineMainCameraIndex = cameraIndex
                                         window.inlineMainViewVisible = true
-                                        stackLayout.currentIndex = 2
+                                        stackLayout.currentIndex = 3
                                     }
                                 }
 
@@ -441,9 +479,14 @@ ApplicationWindow {
                                     theme: window.appTheme
                                 }
 
+                                PlaybackScreen {
+                                    id: playbackScreen
+                                    theme: window.appTheme
+                                }
+
                                 Item {
                                     id: inlineMainView
-                                    visible: stackLayout.currentIndex === 2
+                                    visible: stackLayout.currentIndex === 3
 
                                     Rectangle {
                                         anchors.fill: parent
@@ -471,7 +514,7 @@ ApplicationWindow {
                                                     cameraIndex: window.inlineMainCameraIndex
                                                     dptzEnabled: true
                                                     locationName: window.cameraLocationName(window.inlineMainCameraIndex)
-                                                    startDelayMs: 150
+                                                    startDelayMs: 0
                                                     source: (backend.isLoggedIn && window.inlineMainCameraIndex >= 0)
                                                             ? ((backend.rtspIp, backend.rtspPort),
                                                                backend.buildRtspUrl(window.inlineMainCameraIndex, false))
@@ -497,7 +540,8 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 theme: window.appTheme
                 visible: backend.isLoggedIn
-                showCameraControls: window.inlineMainViewVisible
+                showCameraControls: window.inlineMainViewVisible && stackLayout.currentIndex === 3
+                showPlaybackControls: backend.isLoggedIn && stackLayout.currentIndex === 2
                 selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
                 cameraNames: window.cameraNames
                 onRequestCameraNameChange: function(cameraIndex, name) {
@@ -506,6 +550,9 @@ ApplicationWindow {
                     var next = window.cameraNames.slice(0)
                     next[cameraIndex] = name
                     window.cameraNames = next
+                }
+                onRequestPlayback: function(channelIndex, dateText, timeText) {
+                    console.log("[PLAYBACK] request", "channel=", channelIndex, "date=", dateText, "time=", timeText)
                 }
             }
         }
@@ -538,7 +585,7 @@ ApplicationWindow {
                 inlineMainCameraIndex = -1
             }
             stackLayout.currentIndex = backend.isLoggedIn
-                                     ? (inlineMainViewVisible ? 2 : 0)
+                                     ? (inlineMainViewVisible ? 3 : 0)
                                      : 1
         }
         function onSessionExpired() {

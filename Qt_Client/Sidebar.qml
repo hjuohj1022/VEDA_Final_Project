@@ -7,13 +7,16 @@ Rectangle {
     property var theme
     property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
     property bool showCameraControls: false
+    property bool showPlaybackControls: false
     property int selectedCameraIndex: -1
     property string cameraControlStatus: ""
     property bool cameraControlError: false
     property bool mapModeEnabled: false
     property bool supportZoom: true
     property bool supportFocus: true
+    property int playbackChannelIndex: 0
     signal requestCameraNameChange(int cameraIndex, string name)
+    signal requestPlayback(int channelIndex, string dateText, string timeText)
     color: theme ? theme.bgSecondary : "#09090b"
 
     function selectedCameraTitle() {
@@ -30,12 +33,6 @@ Rectangle {
             root.cameraControlStatus = message
             root.cameraControlError = isError
             controlStatusTimer.restart()
-        }
-        function onSunapiSupportedPtzActionsLoaded(cameraIndex, actions) {
-            if (cameraIndex !== root.selectedCameraIndex)
-                return
-            root.supportZoom = actions.zoom !== false
-            root.supportFocus = actions.focus !== false
         }
     }
 
@@ -85,7 +82,6 @@ Rectangle {
 
     onShowCameraControlsChanged: {
         if (showCameraControls && selectedCameraIndex >= 0) {
-            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
     }
@@ -94,7 +90,6 @@ Rectangle {
         if (showCameraControls && selectedCameraIndex >= 0) {
             supportZoom = true
             supportFocus = true
-            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
     }
@@ -113,10 +108,74 @@ Rectangle {
 
         // 우측 패널 상단 제목
         Text {
-            text: root.showCameraControls ? "Camera Controls" : "System Metrics"
+            text: root.showCameraControls
+                  ? "Camera Controls"
+                  : (root.showPlaybackControls ? "Playback Controls" : "System Metrics")
             color: theme ? theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14
+        }
+
+        Rectangle {
+            visible: root.showPlaybackControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showPlaybackControls ? 220 : 0
+            Layout.maximumHeight: root.showPlaybackControls ? 220 : 0
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 8
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                ComboBox {
+                    id: playbackChannelBox
+                    Layout.fillWidth: true
+                    model: ["CH 1", "CH 2", "CH 3", "CH 4"]
+                    currentIndex: root.playbackChannelIndex
+                    onCurrentIndexChanged: root.playbackChannelIndex = currentIndex
+                }
+
+                TextField {
+                    id: playbackDateField
+                    Layout.fillWidth: true
+                    placeholderText: "YYYY-MM-DD"
+                    color: theme ? theme.textPrimary : "white"
+                    placeholderTextColor: theme ? theme.textSecondary : "#71717a"
+                    background: Rectangle {
+                        color: theme ? theme.bgSecondary : "#09090b"
+                        border.color: playbackDateField.activeFocus ? theme.accent : theme.border
+                        border.width: 1
+                        radius: 6
+                    }
+                }
+
+                TextField {
+                    id: playbackTimeField
+                    Layout.fillWidth: true
+                    placeholderText: "HH:mm:ss"
+                    color: theme ? theme.textPrimary : "white"
+                    placeholderTextColor: theme ? theme.textSecondary : "#71717a"
+                    background: Rectangle {
+                        color: theme ? theme.bgSecondary : "#09090b"
+                        border.color: playbackTimeField.activeFocus ? theme.accent : theme.border
+                        border.width: 1
+                        radius: 6
+                    }
+                }
+
+                ControlButton {
+                    text: "Play"
+                    Layout.fillWidth: true
+                    accentStyle: true
+                    onClicked: root.requestPlayback(root.playbackChannelIndex,
+                                                    playbackDateField.text.trim(),
+                                                    playbackTimeField.text.trim())
+                }
+            }
         }
 
         Rectangle {
@@ -317,10 +376,10 @@ Rectangle {
 
         // 시스템 메트릭 차트 영역
         ColumnLayout {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 208
-            Layout.maximumHeight: root.showCameraControls ? 0 : 208
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 208
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 208
             spacing: 8
             
             component SystemChart : Rectangle {
@@ -454,10 +513,10 @@ Rectangle {
         }
 
         GridLayout {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 168
-            Layout.maximumHeight: root.showCameraControls ? 0 : 168
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 168
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 168
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
@@ -519,10 +578,10 @@ Rectangle {
 
 
         Rectangle {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 50
-            Layout.maximumHeight: root.showCameraControls ? 0 : 50
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 50
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 50
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
             radius: 8

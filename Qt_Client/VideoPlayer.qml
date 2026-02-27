@@ -181,9 +181,9 @@ Item {
                             return
                         reconnectTimer.stop()
                         reconnectAttempt = 0
-                        mediaPlayer.stop()
-                        mediaPlayer.source = ""
-                        mediaPlayer.source = url
+                        if (mediaPlayer.source.toString() !== url) {
+                            mediaPlayer.source = url
+                        }
                         mediaPlayer.play()
                     }
 
