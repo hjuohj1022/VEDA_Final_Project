@@ -4,8 +4,8 @@ info:
   description: CCTV Recording and Management System API
   version: 1.0.0
 servers:
-  - url: http://localhost:8080
-    description: Local Test Server
+  - url: https://192.168.55.200/
+    description: Development Server
 paths:
   /register:
     post:
