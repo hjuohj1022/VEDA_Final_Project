@@ -14,15 +14,15 @@ qt_policy(SET QTP0001 NEW)
 
 qt_add_executable(Team3VideoReceiver
     WIN32 MACOSX_BUNDLE
-    main.cpp
-    Backend.cpp
-    BackendCore.cpp
-    BackendAuth.cpp
-    BackendMedia.cpp
-    BackendRtsp.cpp
-    BackendSunapi.cpp
-    BackendStreamingWs.cpp
-    Backend.h
+    src/app/main.cpp
+    src/core/Backend.cpp
+    src/core/BackendCore.cpp
+    src/core/BackendAuth.cpp
+    src/core/BackendMedia.cpp
+    src/core/BackendRtsp.cpp
+    src/core/BackendSunapi.cpp
+    src/core/BackendStreamingWs.cpp
+    include/core/Backend.h
     .env
 )
 
@@ -35,13 +35,19 @@ qt_add_qml_module(Team3VideoReceiver
     URI Team3VideoReceiver
     VERSION 1.0
     QML_FILES
-        Main.qml
-        Sidebar.qml
-        Header.qml
-        VideoGrid.qml
-        LoginScreen.qml
-        PlaybackScreen.qml
-        VideoPlayer.qml
+        src/ui/qml/Main.qml
+        src/ui/qml/Sidebar.qml
+        src/ui/qml/Header.qml
+        src/ui/qml/VideoGrid.qml
+        src/ui/qml/LoginScreen.qml
+        src/ui/qml/PlaybackScreen.qml
+        src/ui/qml/VideoPlayer.qml
+)
+
+target_include_directories(Team3VideoReceiver
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/include/core
 )
 
 target_link_libraries(Team3VideoReceiver

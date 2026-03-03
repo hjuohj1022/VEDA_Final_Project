@@ -79,6 +79,43 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 | `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
 | `GET` | `/system/storage` | 저장소 용량 조회 |
 
+## 프로젝트 구조
+
+```text
+Team3VideoReceiver/
+├─ build/
+├─ certs/
+├─ include/
+│  └─ core/
+│     └─ Backend.h
+├─ src/
+│  ├─ app/
+│  │  └─ main.cpp
+│  ├─ core/
+│  │  ├─ Backend.cpp
+│  │  ├─ BackendAuth.cpp
+│  │  ├─ BackendCore.cpp
+│  │  ├─ BackendMedia.cpp
+│  │  ├─ BackendRtsp.cpp
+│  │  ├─ BackendStreamingWs.cpp
+│  │  └─ BackendSunapi.cpp
+│  └─ ui/
+│     └─ qml/
+│        ├─ Header.qml
+│        ├─ LoginScreen.qml
+│        ├─ Main.qml
+│        ├─ PlaybackScreen.qml
+│        ├─ Sidebar.qml
+│        ├─ VideoGrid.qml
+│        └─ VideoPlayer.qml
+├─ .editorconfig
+├─ .env
+├─ .gitignore
+├─ CMakeLists.txt
+├─ example.env
+└─ README.md
+```
+
 ## 빌드
 
 필수:

@@ -91,6 +91,14 @@ Rectangle {
         playbackRecordedDays = []
         requestPlaybackMonthDays(playbackChannelIndex, playbackViewYear, playbackViewMonth + 1)
     }
+    function selectPlaybackChannel(index) {
+        var i = Math.max(0, Math.min(3, Number(index)))
+        if (playbackChannelIndex === i)
+            return
+        playbackChannelIndex = i
+        requestTimelineIfValid()
+        requestMonthDays()
+    }
     function isRecordedDay(day) {
         if (!playbackRecordedDays || playbackRecordedDays.length === 0)
             return false
@@ -379,15 +387,52 @@ Rectangle {
                 anchors.margins: 12
                 spacing: 8
 
-                ComboBox {
-                    id: playbackChannelBox
+                RowLayout {
                     Layout.fillWidth: true
-                    model: ["CH 1", "CH 2", "CH 3", "CH 4"]
-                    currentIndex: root.playbackChannelIndex
-                    onCurrentIndexChanged: {
-                        root.playbackChannelIndex = currentIndex
-                        root.requestTimelineIfValid()
-                        root.requestMonthDays()
+                    spacing: 6
+
+                    Label {
+                        text: "CH"
+                        color: theme ? theme.textPrimary : "white"
+                        font.pixelSize: 12
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+
+                    Repeater {
+                        model: 4
+                        delegate: Button {
+                            id: channelBtn
+                            required property int index
+                            Layout.preferredWidth: 34
+                            Layout.preferredHeight: 30
+                            text: String(index + 1)
+                            hoverEnabled: enabled
+
+                            contentItem: Text {
+                                text: parent.text
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                color: (root.playbackChannelIndex === index)
+                                       ? "white"
+                                       : (theme ? theme.textPrimary : "white")
+                                font.pixelSize: 12
+                                font.bold: (root.playbackChannelIndex === index)
+                            }
+
+                            background: Rectangle {
+                                radius: 4
+                                border.width: 1
+                                border.color: (root.playbackChannelIndex === index)
+                                              ? (theme ? theme.accent : "#f97316")
+                                              : (theme ? theme.border : "#52525b")
+                                color: (root.playbackChannelIndex === index)
+                                       ? (channelBtn.down ? "#ea580c" : (theme ? theme.accent : "#f97316"))
+                                       : (channelBtn.down ? (theme ? theme.bgSecondary : "#09090b")
+                                                       : (theme ? theme.bgComponent : "#18181b"))
+                            }
+
+                            onClicked: root.selectPlaybackChannel(index)
+                        }
                     }
                 }
 
