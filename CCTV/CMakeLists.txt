@@ -42,6 +42,7 @@ add_custom_command(
          -I"${CUDA_INCLUDE}"
          -I"${OPENCV_INCLUDE}"
          -allow-unsupported-compiler
+         -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
          -Xcompiler "/MD"
          -O3
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/main.cu" "${CMAKE_CURRENT_SOURCE_DIR}/app_config.h"

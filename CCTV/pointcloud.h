@@ -79,7 +79,10 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
                                     float minDepth = 0.1f,
                                     float maxDepth = 80.0f,
                                     float rotXDeg = -20.0f,
-                                    float rotYDeg = 35.0f) {
+                                    float rotYDeg = 35.0f,
+                                    bool flipX = false,
+                                    bool flipY = false,
+                                    bool flipZ = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (stride < 1) stride = 1;
@@ -102,7 +105,9 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
     std::vector<cv::Vec3f> rotated;
     rotated.reserve(points.size());
     for (const auto& p : points) {
-        float x = p[0], y = p[1], z = p[2];
+        float x = flipX ? -p[0] : p[0];
+        float y = flipY ? -p[1] : p[1];
+        float z = flipZ ? -p[2] : p[2];
         float x1 = x * cosY + z * sinY;
         float z1 = -x * sinY + z * cosY;
         float y1 = y * cosX - z1 * sinX;
@@ -150,11 +155,17 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                                        float minDepth = 0.1f,
                                        float maxDepth = 80.0f,
                                        float rotXDeg = -20.0f,
-                                       float rotYDeg = 35.0f) {
+                                       float rotYDeg = 35.0f,
+                                       bool flipX = false,
+                                       bool flipY = false,
+                                       bool flipZ = false,
+                                       bool wireframe = false,
+                                       bool meshfill = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (bgr.empty() || bgr.cols != width || bgr.rows != height || bgr.type() != CV_8UC3) {
-        return RenderPointCloudView(depth, width, height, K, outW, outH, stride, minDepth, maxDepth, rotXDeg, rotYDeg);
+        return RenderPointCloudView(depth, width, height, K, outW, outH, stride, minDepth, maxDepth,
+                                    rotXDeg, rotYDeg, flipX, flipY, flipZ);
     }
     if (stride < 1) stride = 1;
 
@@ -173,11 +184,15 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
         for (int x = 0; x < width; x += stride) {
             const float z = depth[row + x];
             if (z < minDepth || z > maxDepth) continue;
-            const float X = (static_cast<float>(x) - K.cx) * z / K.fx;
-            const float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float X = (static_cast<float>(x) - K.cx) * z / K.fx;
+            float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float Z = z;
+            if (flipX) X = -X;
+            if (flipY) Y = -Y;
+            if (flipZ) Z = -Z;
 
-            float x1 = X * cosY + z * sinY;
-            float z1 = -X * sinY + z * cosY;
+            float x1 = X * cosY + Z * sinY;
+            float z1 = -X * sinY + Z * cosY;
             float y1 = Y * cosX - z1 * sinX;
             if (first) {
                 minX = maxX = x1;
@@ -198,23 +213,116 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     const float scaleY = (outH - 2.0f * pad) / (maxY - minY + 1e-6f);
     const float scale = std::min(scaleX, scaleY);
 
-    // Second pass: draw.
-    for (int y = 0; y < height; y += stride) {
+    struct ProjectedPoint {
+        bool valid = false;
+        int px = 0;
+        int py = 0;
+        float z = 0.0f;
+        cv::Vec3b color = cv::Vec3b(0, 0, 0);
+    };
+    const int gx = (width + stride - 1) / stride;
+    const int gy = (height + stride - 1) / stride;
+    std::vector<ProjectedPoint> grid;
+    grid.resize(static_cast<size_t>(gx) * static_cast<size_t>(gy));
+
+    // Second pass: project + draw points.
+    for (int y = 0, yy = 0; y < height; y += stride, ++yy) {
         const int row = y * width;
-        for (int x = 0; x < width; x += stride) {
+        for (int x = 0, xx = 0; x < width; x += stride, ++xx) {
             const float z = depth[row + x];
             if (z < minDepth || z > maxDepth) continue;
-            const float X = (static_cast<float>(x) - K.cx) * z / K.fx;
-            const float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float X = (static_cast<float>(x) - K.cx) * z / K.fx;
+            float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float Z = z;
+            if (flipX) X = -X;
+            if (flipY) Y = -Y;
+            if (flipZ) Z = -Z;
 
-            float x1 = X * cosY + z * sinY;
-            float z1 = -X * sinY + z * cosY;
+            float x1 = X * cosY + Z * sinY;
+            float z1 = -X * sinY + Z * cosY;
             float y1 = Y * cosX - z1 * sinX;
 
             const int px = static_cast<int>((x1 - minX) * scale + pad);
             const int py = static_cast<int>(outH - ((y1 - minY) * scale + pad));
             if (px < 0 || px >= outW || py < 0 || py >= outH) continue;
-            canvas.at<cv::Vec3b>(py, px) = bgr.at<cv::Vec3b>(y, x);
+            ProjectedPoint p;
+            p.valid = true;
+            p.px = px;
+            p.py = py;
+            p.z = z;
+            p.color = bgr.at<cv::Vec3b>(y, x);
+            grid[static_cast<size_t>(yy) * static_cast<size_t>(gx) + static_cast<size_t>(xx)] = p;
+            canvas.at<cv::Vec3b>(py, px) = p.color;
+        }
+    }
+
+    if (meshfill) {
+        constexpr float kDepthJumpRatio = 0.18f;
+        auto depthClose = [&](float a, float b) -> bool {
+            const float m = std::max(a, b);
+            if (m <= 1e-6f) return false;
+            return std::abs(a - b) / m <= kDepthJumpRatio;
+        };
+
+        for (int y = 0; y + 1 < gy; ++y) {
+            for (int x = 0; x + 1 < gx; ++x) {
+                const auto& p00 = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                const auto& p10 = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+                const auto& p01 = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                const auto& p11 = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+
+                if (p00.valid && p10.valid && p01.valid &&
+                    depthClose(p00.z, p10.z) && depthClose(p00.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    cv::Point tri1[3] = {cv::Point(p00.px, p00.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
+                    cv::Scalar c1((p00.color[0] + p10.color[0] + p01.color[0]) / 3.0,
+                                  (p00.color[1] + p10.color[1] + p01.color[1]) / 3.0,
+                                  (p00.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    cv::fillConvexPoly(canvas, tri1, 3, c1, cv::LINE_AA);
+                }
+                if (p11.valid && p10.valid && p01.valid &&
+                    depthClose(p11.z, p10.z) && depthClose(p11.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    cv::Point tri2[3] = {cv::Point(p11.px, p11.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
+                    cv::Scalar c2((p11.color[0] + p10.color[0] + p01.color[0]) / 3.0,
+                                  (p11.color[1] + p10.color[1] + p01.color[1]) / 3.0,
+                                  (p11.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    cv::fillConvexPoly(canvas, tri2, 3, c2, cv::LINE_AA);
+                }
+            }
+        }
+    }
+
+    if (wireframe) {
+        constexpr float kDepthJumpRatio = 0.18f;
+        auto depthClose = [&](float a, float b) -> bool {
+            const float m = std::max(a, b);
+            if (m <= 1e-6f) return false;
+            return std::abs(a - b) / m <= kDepthJumpRatio;
+        };
+
+        for (int y = 0; y < gy; ++y) {
+            for (int x = 0; x < gx; ++x) {
+                const auto& p = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                if (!p.valid) continue;
+
+                if (x + 1 < gx) {
+                    const auto& q = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+                    if (q.valid && depthClose(p.z, q.z)) {
+                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
+                                     (p.color[1] + q.color[1]) * 0.5,
+                                     (p.color[2] + q.color[2]) * 0.5);
+                        cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
+                    }
+                }
+                if (y + 1 < gy) {
+                    const auto& q = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                    if (q.valid && depthClose(p.z, q.z)) {
+                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
+                                     (p.color[1] + q.color[1]) * 0.5,
+                                     (p.color[2] + q.color[2]) * 0.5);
+                        cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
+                    }
+                }
+            }
         }
     }
     return canvas;

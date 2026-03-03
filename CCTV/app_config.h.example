@@ -26,4 +26,5 @@ inline const std::string& GetSelectedRtspUrl() {
 }
 
 // 입력 해상도
-const int INPUT_SIZE = 518;
+const int INPUT_HEIGHT = 560;
+const int INPUT_WIDTH = 1008;
