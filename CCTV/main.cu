@@ -166,6 +166,24 @@ Request ParseRequest(const std::string& line) {
             req.rySet = true;
             continue;
         }
+        if (t.rfind("flipx=", 0) == 0) {
+            std::string v = t.substr(6);
+            req.flipX = (v == "1" || v == "true" || v == "on");
+            req.flipXSet = true;
+            continue;
+        }
+        if (t.rfind("flipy=", 0) == 0) {
+            std::string v = t.substr(6);
+            req.flipY = (v == "1" || v == "true" || v == "on");
+            req.flipYSet = true;
+            continue;
+        }
+        if (t.rfind("flipz=", 0) == 0) {
+            std::string v = t.substr(6);
+            req.flipZ = (v == "1" || v == "true" || v == "on");
+            req.flipZSet = true;
+            continue;
+        }
         if (t == "stop") {
             req.stop = true;
             continue;
@@ -264,6 +282,9 @@ struct ViewParams {
     std::mutex mu;
     float rotX = -20.0f;
     float rotY = 35.0f;
+    bool flipX = false;
+    bool flipY = false;
+    bool flipZ = false;
 };
 
 static size_t Volume(const Dims& dims) {
@@ -616,13 +637,19 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             }
             float rx = -20.0f;
             float ry = 35.0f;
+            bool flipX = false;
+            bool flipY = false;
+            bool flipZ = false;
             if (viewParams) {
                 std::lock_guard<std::mutex> lock(viewParams->mu);
                 rx = viewParams->rotX;
                 ry = viewParams->rotY;
+                flipX = viewParams->flipX;
+                flipY = viewParams->flipY;
+                flipZ = viewParams->flipZ;
             }
             Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
-                                              480, 360, 4, 0.1f, 80.0f, rx, ry);
+                                              480, 360, 4, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ);
             std::vector<unsigned char> encoded;
             std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 3};
             if (cv::imencode(".png", pcv, encoded, params)) {
@@ -661,7 +688,21 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                 } else {
                     colorForDepth = frame;
                 }
-                Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth, 640, 480, 3);
+                float rx = -20.0f;
+                float ry = 35.0f;
+                bool flipX = false;
+                bool flipY = false;
+                bool flipZ = false;
+                if (viewParams) {
+                    std::lock_guard<std::mutex> lock(viewParams->mu);
+                    rx = viewParams->rotX;
+                    ry = viewParams->rotY;
+                    flipX = viewParams->flipX;
+                    flipY = viewParams->flipY;
+                    flipZ = viewParams->flipZ;
+                }
+                Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
+                                                  640, 480, 3, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ);
                 cv::imshow("PointCloud (Projected)", pcv);
             }
             cv::waitKey(1);
@@ -928,12 +969,37 @@ int main(int argc, char** argv) {
         }
 
         if (req.pcView) {
-            if (req.rxSet || req.rySet) {
+            float rxNow = 0.0f;
+            float ryNow = 0.0f;
+            bool fxNow = false;
+            bool fyNow = false;
+            bool fzNow = false;
+            if (req.rxSet || req.rySet || req.flipXSet || req.flipYSet || req.flipZSet) {
                 std::lock_guard<std::mutex> lock(viewParams.mu);
                 if (req.rxSet) viewParams.rotX = req.rx;
                 if (req.rySet) viewParams.rotY = req.ry;
+                if (req.flipXSet) viewParams.flipX = req.flipX;
+                if (req.flipYSet) viewParams.flipY = req.flipY;
+                if (req.flipZSet) viewParams.flipZ = req.flipZ;
+                rxNow = viewParams.rotX;
+                ryNow = viewParams.rotY;
+                fxNow = viewParams.flipX;
+                fyNow = viewParams.flipY;
+                fzNow = viewParams.flipZ;
+            } else {
+                std::lock_guard<std::mutex> lock(viewParams.mu);
+                rxNow = viewParams.rotX;
+                ryNow = viewParams.rotY;
+                fxNow = viewParams.flipX;
+                fyNow = viewParams.flipY;
+                fzNow = viewParams.flipZ;
             }
-            SendResponse(client, "OK pc_view\n");
+            SendResponse(client,
+                         "OK pc_view rx=" + std::to_string(rxNow) +
+                         " ry=" + std::to_string(ryNow) +
+                         " flipx=" + std::to_string(fxNow ? 1 : 0) +
+                         " flipy=" + std::to_string(fyNow ? 1 : 0) +
+                         " flipz=" + std::to_string(fzNow ? 1 : 0) + "\n");
             closesocket(client);
             continue;
         }

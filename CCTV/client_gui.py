@@ -20,7 +20,7 @@ class ClientGui(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Depth TRT Client")
-        self.geometry("360x240")
+        self.geometry("420x300")
         self.resizable(False, False)
 
         self.host_var = tk.StringVar(value="127.0.0.1")
@@ -29,6 +29,9 @@ class ClientGui(tk.Tk):
         self.mode_var = tk.StringVar(value="headless")
         self.rx_var = tk.StringVar(value="-20")
         self.ry_var = tk.StringVar(value="35")
+        self.flipx_var = tk.BooleanVar(value=False)
+        self.flipy_var = tk.BooleanVar(value=False)
+        self.flipz_var = tk.BooleanVar(value=False)
 
         frm = ttk.Frame(self, padding=12)
         frm.pack(fill=tk.BOTH, expand=True)
@@ -63,7 +66,10 @@ class ClientGui(tk.Tk):
         ttk.Entry(frm, textvariable=self.rx_var, width=8).grid(row=7, column=1, sticky="w")
         ttk.Label(frm, text="View RotY").grid(row=8, column=0, sticky="w")
         ttk.Entry(frm, textvariable=self.ry_var, width=8).grid(row=8, column=1, sticky="w")
-        ttk.Button(frm, text="Apply View", command=self.on_apply_view).grid(row=9, column=0, columnspan=2, pady=8, sticky="w")
+        ttk.Checkbutton(frm, text="Flip X", variable=self.flipx_var).grid(row=9, column=0, sticky="w")
+        ttk.Checkbutton(frm, text="Flip Y", variable=self.flipy_var).grid(row=9, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="Flip Z", variable=self.flipz_var).grid(row=10, column=0, sticky="w")
+        ttk.Button(frm, text="Apply View", command=self.on_apply_view).grid(row=11, column=0, columnspan=2, pady=8, sticky="w")
 
         self._stream_stop = threading.Event()
         self._stream_thread = None
@@ -95,8 +101,11 @@ class ClientGui(tk.Tk):
         port = int(self.port_var.get().strip())
         rx = self.rx_var.get().strip()
         ry = self.ry_var.get().strip()
+        flipx = "1" if self.flipx_var.get() else "0"
+        flipy = "1" if self.flipy_var.get() else "0"
+        flipz = "1" if self.flipz_var.get() else "0"
         try:
-            cmd = f"pc_view rx={rx} ry={ry}"
+            cmd = f"pc_view rx={rx} ry={ry} flipx={flipx} flipy={flipy} flipz={flipz}"
             resp = send_command(host, port, cmd)
             self.status.set(resp or "OK")
         except Exception as e:

@@ -79,7 +79,10 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
                                     float minDepth = 0.1f,
                                     float maxDepth = 80.0f,
                                     float rotXDeg = -20.0f,
-                                    float rotYDeg = 35.0f) {
+                                    float rotYDeg = 35.0f,
+                                    bool flipX = false,
+                                    bool flipY = false,
+                                    bool flipZ = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (stride < 1) stride = 1;
@@ -102,7 +105,9 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
     std::vector<cv::Vec3f> rotated;
     rotated.reserve(points.size());
     for (const auto& p : points) {
-        float x = p[0], y = p[1], z = p[2];
+        float x = flipX ? -p[0] : p[0];
+        float y = flipY ? -p[1] : p[1];
+        float z = flipZ ? -p[2] : p[2];
         float x1 = x * cosY + z * sinY;
         float z1 = -x * sinY + z * cosY;
         float y1 = y * cosX - z1 * sinX;
@@ -150,11 +155,15 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                                        float minDepth = 0.1f,
                                        float maxDepth = 80.0f,
                                        float rotXDeg = -20.0f,
-                                       float rotYDeg = 35.0f) {
+                                       float rotYDeg = 35.0f,
+                                       bool flipX = false,
+                                       bool flipY = false,
+                                       bool flipZ = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (bgr.empty() || bgr.cols != width || bgr.rows != height || bgr.type() != CV_8UC3) {
-        return RenderPointCloudView(depth, width, height, K, outW, outH, stride, minDepth, maxDepth, rotXDeg, rotYDeg);
+        return RenderPointCloudView(depth, width, height, K, outW, outH, stride, minDepth, maxDepth,
+                                    rotXDeg, rotYDeg, flipX, flipY, flipZ);
     }
     if (stride < 1) stride = 1;
 
@@ -173,11 +182,15 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
         for (int x = 0; x < width; x += stride) {
             const float z = depth[row + x];
             if (z < minDepth || z > maxDepth) continue;
-            const float X = (static_cast<float>(x) - K.cx) * z / K.fx;
-            const float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float X = (static_cast<float>(x) - K.cx) * z / K.fx;
+            float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float Z = z;
+            if (flipX) X = -X;
+            if (flipY) Y = -Y;
+            if (flipZ) Z = -Z;
 
-            float x1 = X * cosY + z * sinY;
-            float z1 = -X * sinY + z * cosY;
+            float x1 = X * cosY + Z * sinY;
+            float z1 = -X * sinY + Z * cosY;
             float y1 = Y * cosX - z1 * sinX;
             if (first) {
                 minX = maxX = x1;
@@ -204,11 +217,15 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
         for (int x = 0; x < width; x += stride) {
             const float z = depth[row + x];
             if (z < minDepth || z > maxDepth) continue;
-            const float X = (static_cast<float>(x) - K.cx) * z / K.fx;
-            const float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float X = (static_cast<float>(x) - K.cx) * z / K.fx;
+            float Y = (static_cast<float>(y) - K.cy) * z / K.fy;
+            float Z = z;
+            if (flipX) X = -X;
+            if (flipY) Y = -Y;
+            if (flipZ) Z = -Z;
 
-            float x1 = X * cosY + z * sinY;
-            float z1 = -X * sinY + z * cosY;
+            float x1 = X * cosY + Z * sinY;
+            float z1 = -X * sinY + Z * cosY;
             float y1 = Y * cosX - z1 * sinX;
 
             const int px = static_cast<int>((x1 - minX) * scale + pad);
