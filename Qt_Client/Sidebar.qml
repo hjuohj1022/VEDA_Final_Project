@@ -7,14 +7,207 @@ Rectangle {
     property var theme
     property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
     property bool showCameraControls: false
+    property bool showPlaybackControls: false
     property int selectedCameraIndex: -1
     property string cameraControlStatus: ""
     property bool cameraControlError: false
     property bool mapModeEnabled: false
     property bool supportZoom: true
     property bool supportFocus: true
+    property int playbackChannelIndex: 0
+    property bool playbackRunning: false
+    property bool playbackPending: false
+    property int playbackCurrentSeconds: -1
+    property date playbackSelectedDate: new Date()
+    property string playbackDateText: ""
+    property string playbackTimeText: ""
+    property var playbackSegments: []
+    property bool playbackTimeInRange: false
+    property string playbackTimelineInfoText: "녹화 구간 없음"
+    property int playbackViewYear: playbackSelectedDate.getFullYear()
+    property int playbackViewMonth: playbackSelectedDate.getMonth()
+    property bool playbackCalendarVisible: false
+    property var playbackRecordedDays: []
     signal requestCameraNameChange(int cameraIndex, string name)
+    signal requestPlayback(int channelIndex, string dateText, string timeText)
+    signal requestPlaybackSeek(int channelIndex, string dateText, string timeText)
+    signal requestPlaybackTimeline(int channelIndex, string dateText)
+    signal requestPlaybackMonthDays(int channelIndex, int year, int month)
+    signal requestPlaybackPause()
+    signal requestPlaybackResume()
     color: theme ? theme.bgSecondary : "#09090b"
+
+    function pad2(v) { return (v < 10 ? "0" : "") + v }
+    function formatPlaybackDate() {
+        return playbackSelectedDate.getFullYear() + "-" + pad2(playbackSelectedDate.getMonth() + 1) + "-" + pad2(playbackSelectedDate.getDate())
+    }
+    function formatPlaybackTime() {
+        var s = playbackCurrentSeconds >= 0 ? playbackCurrentSeconds : 0
+        return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
+    }
+    function syncTimeFromSeconds(sec) {
+        var s = Math.max(0, Math.min(86399, Math.floor(sec)))
+        playbackCurrentSeconds = s
+        playbackTimeText = pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
+    }
+    function syncSecondsFromFields() {
+        var parts = playbackTimeText.split(":")
+        if (parts.length !== 3)
+            return false
+        var h = parseInt(parts[0], 10)
+        var m = parseInt(parts[1], 10)
+        var s = parseInt(parts[2], 10)
+        if (isNaN(h) || isNaN(m) || isNaN(s))
+            return false
+        if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59)
+            return false
+        playbackCurrentSeconds = (h * 3600) + (m * 60) + s
+        playbackTimeText = pad2(h) + ":" + pad2(m) + ":" + pad2(s)
+        return true
+    }
+    function syncDateFromField() {
+        var t = playbackDateText.trim()
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t)
+        if (!m)
+            return false
+        var y = parseInt(m[1], 10)
+        var mo = parseInt(m[2], 10)
+        var d = parseInt(m[3], 10)
+        var dt = new Date(y, mo - 1, d)
+        if (dt.getFullYear() !== y || (dt.getMonth() + 1) !== mo || dt.getDate() !== d)
+            return false
+        playbackSelectedDate = dt
+        playbackViewYear = dt.getFullYear()
+        playbackViewMonth = dt.getMonth()
+        playbackDateText = formatPlaybackDate()
+        return true
+    }
+    function requestTimelineIfValid() {
+        if (!syncDateFromField())
+            return
+        requestPlaybackTimeline(playbackChannelIndex, playbackDateText)
+    }
+    function requestMonthDays() {
+        playbackRecordedDays = []
+        requestPlaybackMonthDays(playbackChannelIndex, playbackViewYear, playbackViewMonth + 1)
+    }
+    function isRecordedDay(day) {
+        if (!playbackRecordedDays || playbackRecordedDays.length === 0)
+            return false
+        for (var i = 0; i < playbackRecordedDays.length; i++) {
+            if (Number(playbackRecordedDays[i]) === day)
+                return true
+        }
+        return false
+    }
+    function isTodayInViewDay(day) {
+        var now = new Date()
+        return now.getFullYear() === playbackViewYear
+            && now.getMonth() === playbackViewMonth
+            && now.getDate() === day
+    }
+    function isSecondRecorded(sec) {
+        if (!playbackSegments || playbackSegments.length === 0)
+            return false
+        var s = Math.max(0, Math.min(86399, Math.floor(sec)))
+        for (var i = 0; i < playbackSegments.length; i++) {
+            var seg = playbackSegments[i]
+            var a = Math.max(0, Math.min(86399, Number(seg.start || 0)))
+            var b = Math.max(0, Math.min(86399, Number(seg.end || 0)))
+            var lo = Math.min(a, b)
+            var hi = Math.max(a, b)
+            if (s >= lo && s <= hi)
+                return true
+        }
+        return false
+    }
+    function updateTimelineInfo() {
+        if (!playbackSegments || playbackSegments.length === 0) {
+            playbackTimelineInfoText = "녹화 구간 없음"
+            playbackTimeInRange = false
+            return
+        }
+        var ranges = []
+        for (var i = 0; i < playbackSegments.length; i++) {
+            var seg = playbackSegments[i]
+            var a = Math.max(0, Math.min(86399, Number(seg.start || 0)))
+            var b = Math.max(0, Math.min(86399, Number(seg.end || 0)))
+            var lo = Math.min(a, b)
+            var hi = Math.max(a, b)
+            ranges.push({ start: lo, end: hi })
+        }
+        if (ranges.length === 0) {
+            playbackTimelineInfoText = "녹화 구간 없음"
+            playbackTimeInRange = false
+            return
+        }
+
+        ranges.sort(function(lhs, rhs) { return lhs.start - rhs.start })
+
+        // 인접/겹침 구간 병합(1초 이내 간격은 연결 구간으로 처리)
+        var merged = []
+        for (var j = 0; j < ranges.length; j++) {
+            var cur = ranges[j]
+            if (merged.length === 0) {
+                merged.push({ start: cur.start, end: cur.end })
+                continue
+            }
+            var last = merged[merged.length - 1]
+            if (cur.start <= (last.end + 1)) {
+                if (cur.end > last.end)
+                    last.end = cur.end
+            } else {
+                merged.push({ start: cur.start, end: cur.end })
+            }
+        }
+
+        var fmt = function(v) {
+            return pad2(Math.floor(v / 3600)) + ":" + pad2(Math.floor((v % 3600) / 60)) + ":" + pad2(v % 60)
+        }
+        var cursorSec = (playbackCurrentSeconds >= 0 ? playbackCurrentSeconds : 0)
+        var selectedSeg = null
+        for (var k = 0; k < merged.length; k++) {
+            if (cursorSec >= merged[k].start && cursorSec <= merged[k].end) {
+                selectedSeg = merged[k]
+                break
+            }
+        }
+
+        if (selectedSeg) {
+            playbackTimelineInfoText = "녹화 구간: " + fmt(selectedSeg.start) + " ~ " + fmt(selectedSeg.end)
+            playbackTimeInRange = true
+        } else {
+            playbackTimelineInfoText = "녹화 구간 없음 (선택 시간)"
+            playbackTimeInRange = false
+        }
+    }
+    function applyPlaybackStart(dateText, timeText) {
+        var d = new Date(dateText + "T00:00:00")
+        if (!isNaN(d.getTime())) {
+            playbackSelectedDate = d
+            playbackViewYear = d.getFullYear()
+            playbackViewMonth = d.getMonth()
+            playbackDateText = formatPlaybackDate()
+        }
+        var parts = timeText.split(":")
+        if (parts.length === 3) {
+            var hh = Math.max(0, Math.min(23, parseInt(parts[0], 10) || 0))
+            var mm = Math.max(0, Math.min(59, parseInt(parts[1], 10) || 0))
+            var ss = Math.max(0, Math.min(59, parseInt(parts[2], 10) || 0))
+            playbackTimeText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
+        }
+        syncSecondsFromFields()
+    }
+    function daysInViewMonth() {
+        return new Date(playbackViewYear, playbackViewMonth + 1, 0).getDate()
+    }
+    function firstDayOffset() {
+        return new Date(playbackViewYear, playbackViewMonth, 1).getDay()
+    }
+    function monthLabel() {
+        var m = playbackViewMonth + 1
+        return playbackViewYear + "-" + pad2(m)
+    }
 
     function selectedCameraTitle() {
         if (selectedCameraIndex < 0 || selectedCameraIndex >= cameraNames.length)
@@ -30,12 +223,6 @@ Rectangle {
             root.cameraControlStatus = message
             root.cameraControlError = isError
             controlStatusTimer.restart()
-        }
-        function onSunapiSupportedPtzActionsLoaded(cameraIndex, actions) {
-            if (cameraIndex !== root.selectedCameraIndex)
-                return
-            root.supportZoom = actions.zoom !== false
-            root.supportFocus = actions.focus !== false
         }
     }
 
@@ -55,6 +242,11 @@ Rectangle {
         property bool compact: false
         implicitHeight: compact ? 30 : 40
         hoverEnabled: enabled
+        scale: controlBtn.down ? 0.97 : 1.0
+
+        Behavior on scale {
+            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+        }
 
         background: Rectangle {
             radius: 6
@@ -85,18 +277,69 @@ Rectangle {
 
     onShowCameraControlsChanged: {
         if (showCameraControls && selectedCameraIndex >= 0) {
-            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
+    }
+
+    Timer {
+        id: playbackTick
+        interval: 1000
+        repeat: true
+        running: root.showPlaybackControls && root.playbackRunning && !root.playbackPending
+        onTriggered: root.syncTimeFromSeconds(root.playbackCurrentSeconds + 1)
     }
 
     onSelectedCameraIndexChanged: {
         if (showCameraControls && selectedCameraIndex >= 0) {
             supportZoom = true
             supportFocus = true
-            backend.sunapiLoadSupportedPtzActions(selectedCameraIndex)
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
         }
+    }
+    onShowPlaybackControlsChanged: {
+        if (showPlaybackControls && playbackCurrentSeconds < 0) {
+            var now = new Date()
+            playbackSelectedDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            playbackViewYear = playbackSelectedDate.getFullYear()
+            playbackViewMonth = playbackSelectedDate.getMonth()
+            playbackDateText = formatPlaybackDate()
+            playbackTimeText = "00:00:00"
+            playbackCurrentSeconds = 0
+        }
+        if (showPlaybackControls) {
+            requestTimelineIfValid()
+            requestMonthDays()
+        }
+    }
+    onPlaybackViewYearChanged: {
+        if (showPlaybackControls)
+            requestMonthDays()
+    }
+    onPlaybackViewMonthChanged: {
+        if (showPlaybackControls)
+            requestMonthDays()
+    }
+    onPlaybackCurrentSecondsChanged: {
+        playbackTimeInRange = isSecondRecorded(playbackCurrentSeconds >= 0 ? playbackCurrentSeconds : 0)
+        updateTimelineInfo()
+    }
+    onPlaybackDateTextChanged: {
+        if (playbackDateTextField && playbackDateTextField.text !== playbackDateText)
+            playbackDateTextField.text = playbackDateText
+    }
+    onPlaybackTimeTextChanged: {
+        var parts = playbackTimeText.split(":")
+        if (parts.length !== 3)
+            return
+        if (playbackHourField && playbackHourField.text !== parts[0])
+            playbackHourField.text = parts[0]
+        if (playbackMinuteField && playbackMinuteField.text !== parts[1])
+            playbackMinuteField.text = parts[1]
+        if (playbackSecondField && playbackSecondField.text !== parts[2])
+            playbackSecondField.text = parts[2]
+    }
+    onPlaybackSegmentsChanged: {
+        updateTimelineInfo()
     }
     
     Rectangle {
@@ -113,10 +356,418 @@ Rectangle {
 
         // 우측 패널 상단 제목
         Text {
-            text: root.showCameraControls ? "Camera Controls" : "System Metrics"
+            text: root.showCameraControls
+                  ? "Camera Controls"
+                  : (root.showPlaybackControls ? "Playback Controls" : "System Metrics")
             color: theme ? theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14
+        }
+
+        Rectangle {
+            visible: root.showPlaybackControls
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.showPlaybackControls ? 440 : 0
+            Layout.maximumHeight: root.showPlaybackControls ? 440 : 0
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+            radius: 8
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                ComboBox {
+                    id: playbackChannelBox
+                    Layout.fillWidth: true
+                    model: ["CH 1", "CH 2", "CH 3", "CH 4"]
+                    currentIndex: root.playbackChannelIndex
+                    onCurrentIndexChanged: {
+                        root.playbackChannelIndex = currentIndex
+                        root.requestTimelineIfValid()
+                        root.requestMonthDays()
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    TextField {
+                        id: playbackDateTextField
+                        Layout.fillWidth: true
+                        text: root.playbackDateText
+                        enabled: !root.playbackRunning && !root.playbackPending
+                        inputMask: "0000-00-00;_"
+                        placeholderText: "YYYY-MM-DD"
+                        color: theme ? theme.textPrimary : "white"
+                        placeholderTextColor: theme ? theme.textSecondary : "#71717a"
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackDateTextField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncDateFromField()) {
+                                text = root.playbackDateText
+                                return
+                            }
+                            root.playbackCalendarVisible = false
+                            root.requestTimelineIfValid()
+                        }
+                    }
+
+                    ControlButton {
+                        text: "날짜"
+                        compact: true
+                        Layout.preferredWidth: 58
+                        enabled: !root.playbackRunning && !root.playbackPending
+                        onClicked: {
+                            root.playbackCalendarVisible = !root.playbackCalendarVisible
+                            if (root.playbackCalendarVisible)
+                                root.requestMonthDays()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.playbackCalendarVisible
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 190
+                    color: theme ? theme.bgSecondary : "#09090b"
+                    border.color: theme ? theme.border : "#27272a"
+                    border.width: 1
+                    radius: 6
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            ControlButton {
+                                text: "<"
+                                compact: true
+                                Layout.preferredWidth: 34
+                                onClicked: {
+                                    if (root.playbackViewMonth === 0) {
+                                        root.playbackViewMonth = 11
+                                        root.playbackViewYear -= 1
+                                    } else {
+                                        root.playbackViewMonth -= 1
+                                    }
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: root.monthLabel()
+                                color: theme ? theme.textPrimary : "white"
+                                font.bold: true
+                            }
+
+                            ControlButton {
+                                text: ">"
+                                compact: true
+                                Layout.preferredWidth: 34
+                                onClicked: {
+                                    if (root.playbackViewMonth === 11) {
+                                        root.playbackViewMonth = 0
+                                        root.playbackViewYear += 1
+                                    } else {
+                                        root.playbackViewMonth += 1
+                                    }
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 7
+                            rowSpacing: 4
+                            columnSpacing: 4
+
+                            Repeater {
+                                model: ["일", "월", "화", "수", "목", "금", "토"]
+                                delegate: Label {
+                                    Layout.fillWidth: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: modelData
+                                    color: theme ? theme.textSecondary : "#a1a1aa"
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            Repeater {
+                                model: 42
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 20
+                                    radius: 4
+                                    border.width: {
+                                        var first = root.firstDayOffset()
+                                        var d = index - first + 1
+                                        if (d < 1 || d > root.daysInViewMonth())
+                                            return 0
+                                        var selected = (root.playbackSelectedDate.getFullYear() === root.playbackViewYear
+                                                    && root.playbackSelectedDate.getMonth() === root.playbackViewMonth
+                                                    && root.playbackSelectedDate.getDate() === d)
+                                        return (!selected && root.isTodayInViewDay(d)) ? 1 : 0
+                                    }
+                                    border.color: {
+                                        var first = root.firstDayOffset()
+                                        var d = index - first + 1
+                                        if (d < 1 || d > root.daysInViewMonth())
+                                            return "transparent"
+                                        return theme ? theme.textPrimary : "#ffffff"
+                                    }
+                                    color: {
+                                        var first = root.firstDayOffset()
+                                        var d = index - first + 1
+                                        if (d < 1 || d > root.daysInViewMonth())
+                                            return "transparent"
+                                        var selected = (root.playbackSelectedDate.getFullYear() === root.playbackViewYear
+                                                    && root.playbackSelectedDate.getMonth() === root.playbackViewMonth
+                                                    && root.playbackSelectedDate.getDate() === d)
+                                        if (selected)
+                                            return theme.accent
+                                        return "transparent"
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: {
+                                            var first = root.firstDayOffset()
+                                            var d = index - first + 1
+                                            if (d < 1 || d > root.daysInViewMonth())
+                                                return ""
+                                            return d
+                                        }
+                                        color: {
+                                            var first = root.firstDayOffset()
+                                            var d = index - first + 1
+                                            if (d < 1 || d > root.daysInViewMonth())
+                                                return (theme ? theme.textPrimary : "white")
+                                            var selected = (root.playbackSelectedDate.getFullYear() === root.playbackViewYear
+                                                        && root.playbackSelectedDate.getMonth() === root.playbackViewMonth
+                                                        && root.playbackSelectedDate.getDate() === d)
+                                            if (selected)
+                                                return "white"
+                                            if (root.isRecordedDay(d))
+                                                return "#f97316"
+                                            return (theme ? theme.textPrimary : "white")
+                                        }
+                                        font.pixelSize: 11
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        enabled: {
+                                            var first = root.firstDayOffset()
+                                            var d = index - first + 1
+                                            return d >= 1 && d <= root.daysInViewMonth()
+                                        }
+                                        onClicked: {
+                                            var first = root.firstDayOffset()
+                                            var d = index - first + 1
+                                            root.playbackSelectedDate = new Date(root.playbackViewYear, root.playbackViewMonth, d)
+                                            root.playbackDateText = root.formatPlaybackDate()
+                                            root.playbackCalendarVisible = false
+                                            root.requestTimelineIfValid()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    TextField {
+                        id: playbackHourField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackRunning && !root.playbackPending
+                        inputMask: "00;_"
+                        placeholderText: "시"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackHourField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            var hh = parseInt(playbackHourField.text, 10)
+                            var mm = parseInt(playbackMinuteField.text, 10)
+                            var ss = parseInt(playbackSecondField.text, 10)
+                            if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
+                                playbackHourField.text = root.pad2(Math.floor((root.playbackCurrentSeconds >= 0 ? root.playbackCurrentSeconds : 0) / 3600))
+                                return
+                            }
+                            root.playbackTimeText = root.pad2(hh) + ":" + root.pad2(mm) + ":" + root.pad2(ss)
+                            root.syncSecondsFromFields()
+                        }
+                    }
+
+                    Label {
+                        text: ":"
+                        color: theme ? theme.textPrimary : "white"
+                        font.bold: true
+                    }
+
+                    TextField {
+                        id: playbackMinuteField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackRunning && !root.playbackPending
+                        inputMask: "00;_"
+                        placeholderText: "분"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackMinuteField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            var hh = parseInt(playbackHourField.text, 10)
+                            var mm = parseInt(playbackMinuteField.text, 10)
+                            var ss = parseInt(playbackSecondField.text, 10)
+                            if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
+                                playbackMinuteField.text = root.pad2(Math.floor(((root.playbackCurrentSeconds >= 0 ? root.playbackCurrentSeconds : 0) % 3600) / 60))
+                                return
+                            }
+                            root.playbackTimeText = root.pad2(hh) + ":" + root.pad2(mm) + ":" + root.pad2(ss)
+                            root.syncSecondsFromFields()
+                        }
+                    }
+
+                    Label {
+                        text: ":"
+                        color: theme ? theme.textPrimary : "white"
+                        font.bold: true
+                    }
+
+                    TextField {
+                        id: playbackSecondField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackRunning && !root.playbackPending
+                        inputMask: "00;_"
+                        placeholderText: "초"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackSecondField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            var hh = parseInt(playbackHourField.text, 10)
+                            var mm = parseInt(playbackMinuteField.text, 10)
+                            var ss = parseInt(playbackSecondField.text, 10)
+                            if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
+                                playbackSecondField.text = root.pad2((root.playbackCurrentSeconds >= 0 ? root.playbackCurrentSeconds : 0) % 60)
+                                return
+                            }
+                            root.playbackTimeText = root.pad2(hh) + ":" + root.pad2(mm) + ":" + root.pad2(ss)
+                            root.syncSecondsFromFields()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    ControlButton {
+                        text: "새로고침"
+                        Layout.preferredWidth: 86
+                        compact: true
+                        onClicked: {
+                            root.requestTimelineIfValid()
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    ControlButton {
+                        text: "Play"
+                        Layout.fillWidth: true
+                        accentStyle: true
+                        enabled: !root.playbackRunning && !root.playbackPending && root.playbackTimeInRange
+                        onClicked: {
+                            if (!root.syncDateFromField() || !root.syncSecondsFromFields())
+                                return
+                            var d = root.formatPlaybackDate()
+                            var t = root.formatPlaybackTime()
+                            root.playbackPending = true
+                            root.requestPlayback(root.playbackChannelIndex, d, t)
+                        }
+                    }
+
+                    ControlButton {
+                        text: "Pause"
+                        Layout.fillWidth: true
+                        enabled: root.playbackRunning && !root.playbackPending
+                        onClicked: {
+                            root.playbackRunning = false
+                            root.playbackPending = false
+                            root.requestPlaybackPause()
+                            backend.playbackWsPause()
+                        }
+                    }
+
+                    ControlButton {
+                        text: "Resume"
+                        Layout.fillWidth: true
+                        enabled: !root.playbackRunning && !root.playbackPending && root.playbackTimeInRange
+                        onClicked: {
+                            if (backend.playbackWsPlay()) {
+                                root.playbackRunning = true
+                                root.playbackPending = false
+                                root.requestPlaybackResume()
+                            } else {
+                                var d = root.formatPlaybackDate()
+                                var t = root.formatPlaybackTime()
+                                root.playbackPending = true
+                                root.requestPlaybackSeek(root.playbackChannelIndex, d, t)
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.playbackTimelineInfoText
+                    color: root.playbackTimeInRange
+                           ? (theme ? theme.textSecondary : "#a1a1aa")
+                           : "#f59e0b"
+                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 11
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.formatPlaybackDate() + " " + root.formatPlaybackTime()
+                    color: theme ? theme.textSecondary : "#a1a1aa"
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
         }
 
         Rectangle {
@@ -317,10 +968,10 @@ Rectangle {
 
         // 시스템 메트릭 차트 영역
         ColumnLayout {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 208
-            Layout.maximumHeight: root.showCameraControls ? 0 : 208
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 208
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 208
             spacing: 8
             
             component SystemChart : Rectangle {
@@ -454,10 +1105,10 @@ Rectangle {
         }
 
         GridLayout {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 168
-            Layout.maximumHeight: root.showCameraControls ? 0 : 168
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 168
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 168
             columns: 2
             columnSpacing: 8
             rowSpacing: 8
@@ -519,10 +1170,10 @@ Rectangle {
 
 
         Rectangle {
-            visible: !root.showCameraControls
+            visible: !root.showCameraControls && !root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showCameraControls ? 0 : 50
-            Layout.maximumHeight: root.showCameraControls ? 0 : 50
+            Layout.preferredHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 50
+            Layout.maximumHeight: (root.showCameraControls || root.showPlaybackControls) ? 0 : 50
             height: 50
             color: theme ? theme.bgComponent : "#18181b"
             radius: 8

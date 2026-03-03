@@ -12,12 +12,15 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariant>
+#include <QWebSocket>
+#include <QStringList>
+class QUdpSocket;
 
 class Backend : public QObject
 {
     Q_OBJECT
 
-    // Login/session and server info
+    // 로그인/세션 및 서버 정보
     Q_PROPERTY(bool isLoggedIn READ isLoggedIn NOTIFY isLoggedInChanged)
     Q_PROPERTY(QString userId READ userId NOTIFY userIdChanged)
     Q_PROPERTY(int sessionRemainingSeconds READ sessionRemainingSeconds NOTIFY sessionRemainingSecondsChanged)
@@ -28,12 +31,12 @@ class Backend : public QObject
     Q_PROPERTY(QString rtspIp READ rtspIp NOTIFY rtspIpChanged)
     Q_PROPERTY(QString rtspPort READ rtspPort NOTIFY rtspPortChanged)
 
-    // Live metrics
+    // 라이브 메트릭
     Q_PROPERTY(int activeCameras READ activeCameras WRITE setActiveCameras NOTIFY activeCamerasChanged)
     Q_PROPERTY(int currentFps READ currentFps WRITE setCurrentFps NOTIFY currentFpsChanged)
     Q_PROPERTY(int latency READ latency WRITE setLatency NOTIFY latencyChanged)
 
-    // Storage info
+    // 스토리지 정보
     Q_PROPERTY(QString storageUsed READ storageUsed NOTIFY storageChanged)
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
@@ -71,7 +74,7 @@ public:
     int detectedObjects() const { return m_detectedObjects; }
     QString networkStatus() const { return m_networkStatus; }
 
-    // QML invokable APIs
+    // QML 호출 가능 인터페이스
     Q_INVOKABLE void login(QString id, QString pw);
     Q_INVOKABLE void skipLoginTemporarily();
     Q_INVOKABLE void logout();
@@ -94,6 +97,15 @@ public:
     Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
 
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
+    Q_INVOKABLE QString buildPlaybackRtspUrl(int channelIndex, const QString &dateText, const QString &timeText) const;
+    Q_INVOKABLE void preparePlaybackRtsp(int channelIndex, const QString &dateText, const QString &timeText);
+    Q_INVOKABLE void loadPlaybackTimeline(int channelIndex, const QString &dateText);
+    Q_INVOKABLE void loadPlaybackMonthRecordedDays(int channelIndex, int year, int month);
+    Q_INVOKABLE void streamingWsConnect();
+    Q_INVOKABLE void streamingWsDisconnect();
+    Q_INVOKABLE bool streamingWsSendHex(QString hexPayload);
+    Q_INVOKABLE bool playbackWsPause();
+    Q_INVOKABLE bool playbackWsPlay();
 
     Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
     Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
@@ -130,7 +142,7 @@ signals:
     void renameSuccess();
     void renameFailed(QString error);
 
-    // Download signals
+    // 다운로드 시그널
     void downloadProgress(qint64 received, qint64 total);
     void downloadFinished(QString path);
     void downloadError(QString error);
@@ -138,6 +150,15 @@ signals:
     void cameraControlMessage(QString message, bool isError);
     void rtspProbeFinished(bool success, QString error);
     void sunapiSupportedPtzActionsLoaded(int cameraIndex, QVariantMap actions);
+    void playbackPrepared(QString url);
+    void playbackPrepareFailed(QString error);
+    void playbackTimelineLoaded(int channelIndex, QString dateText, QVariantList segments);
+    void playbackTimelineFailed(QString error);
+    void playbackMonthRecordedDaysLoaded(int channelIndex, QString yearMonth, QVariantList days);
+    void playbackMonthRecordedDaysFailed(QString error);
+    void streamingWsStateChanged(QString state);
+    void streamingWsFrame(QString direction, QString hexPayload);
+    void streamingWsError(QString error);
 
 private slots:
     void checkStorage();
@@ -165,6 +186,9 @@ private:
                            int cameraIndex,
                            const QString &actionLabel,
                            bool includeChannelParam = true);
+    QString ensurePlaybackWsSdpSource();
+    void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
+    void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
 
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;
@@ -189,12 +213,12 @@ private:
     QString m_rtspUsernameOverride;
     QString m_rtspPasswordOverride;
 
-    // Metrics data
+    // 메트릭 데이터
     int m_activeCameras = 0;
     int m_currentFps = 0;
     int m_latency = 0;
 
-    // Storage data
+    // 스토리지 데이터
     QString m_storageUsed = "0 GB";
     QString m_storageTotal = "0 GB";
     int m_storagePercent = 0;
@@ -203,7 +227,7 @@ private:
     int m_detectedObjects = 0;
     QString m_networkStatus = "Disconnected";
 
-    // Download state
+    // 다운로드 상태
     QNetworkReply *m_downloadReply = nullptr;
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
@@ -211,6 +235,30 @@ private:
     QSslConfiguration m_sslConfig;
     bool m_sslConfigReady = false;
     bool m_sslIgnoreErrors = false;
+    QWebSocket *m_streamingWs = nullptr;
+    QTimer *m_playbackWsKeepaliveTimer = nullptr;
+    bool m_playbackWsActive = false;
+    bool m_playbackWsPlaySent = false;
+    bool m_playbackWsPaused = false;
+    int m_playbackWsNextCseq = 1;
+    int m_playbackWsFinalSetupCseq = 0;
+    QString m_playbackWsUri;
+    QString m_playbackWsAuthHeader;
+    QString m_playbackWsSession;
+    QUdpSocket *m_playbackRtpOutSocket = nullptr;
+    QString m_playbackWsSdpPath;
+    int m_playbackRtpVideoPort = 5004;
+    int m_playbackRtpVideoChannel = 2;
+    int m_playbackRtpVideoAltChannel = 3;
+    int m_playbackWsH264SetupCseq = -1;
+    int m_playbackRtpPayloadType = 96;
+    bool m_playbackWsSdpPublished = false;
+    QByteArray m_playbackSps;
+    QByteArray m_playbackPps;
+    QByteArray m_playbackFuBuffer;
+    int m_playbackFuNalType = 0;
+    QByteArray m_playbackInterleavedBuffer;
+    int m_playbackValidRtpCount = 0;
 };
 
 #endif // BACKEND_H

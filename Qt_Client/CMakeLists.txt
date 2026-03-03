@@ -3,7 +3,7 @@ project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
 # Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
 
 qt_standard_project_setup()
 
@@ -21,6 +21,7 @@ qt_add_executable(Team3VideoReceiver
     BackendMedia.cpp
     BackendRtsp.cpp
     BackendSunapi.cpp
+    BackendStreamingWs.cpp
     Backend.h
     .env
 )
@@ -39,6 +40,7 @@ qt_add_qml_module(Team3VideoReceiver
         Header.qml
         VideoGrid.qml
         LoginScreen.qml
+        PlaybackScreen.qml
         VideoPlayer.qml
 )
 
@@ -53,6 +55,7 @@ target_link_libraries(Team3VideoReceiver
         Qt::Qml
         Qt::QuickControls2
         Qt::Mqtt
+        Qt::WebSockets
         dwmapi
 )
 

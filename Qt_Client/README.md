@@ -1,111 +1,132 @@
-﻿# Qt CCTV Client (Live Streaming & Recording Manager)
+﻿# Qt CCTV Client (Live + Playback VMS)
 
-이 프로젝트는 **Qt 6 (C++)**와 **libVLC**를 활용하여 개발된 CCTV 관제 클라이언트 프로그램입니다.
-현대적인 **Dark Theme** UI를 적용하였으며, 실시간 RTSP 스트리밍(4채널 멀티뷰)과 REST API를 통한 녹화 영상 관리(재생, 목록 조회, 삭제) 기능을 제공합니다.
+이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
+실시간 Live(4채널), 녹화 목록/저장소 API, SUNAPI 기반 Playback(타임라인/구간 탐색)을 제공합니다.
 
-## Key Features (주요 기능)
+## 주요 기능
 
-### 1. Modern UI & UX
-- **Vision VMS 디자인 포팅:** React 기반의 모던한 CCTV 관제 UI를 **Qt Quick (QML)**으로 완벽하게 이식.
-- **Dark/Light 테마 전환:** 헤더의 토글 버튼으로 실시간 테마 변경 지원 (Windows 타이틀바 색상 연동).
-- **반응형 레이아웃:** 사이드바, 헤더, 메인 콘텐츠 영역이 유기적으로 동작.
+### 1. Live 모니터링
+- 2x2 그리드 4채널 동시 표시
+- MediaMTX 경유 RTSP/RTSPS 재생
+- FPS/Latency/Storage 등 사이드바 메트릭 표시
 
-### 2. Live View (실시간 라이브 뷰)
-- **4채널 그리드 뷰:** 4개의 CCTV 화면을 동시에 모니터링 (2x2 Grid).
-- **고성능 재생 엔진:** `libVLC`를 사용하여 지연 시간(Latency) 최소화 및 안정적인 재생.
-- **RTSP over TCP 강제:** 패킷 손실 및 UDP 차단 환경 대응을 위해 TCP 전송 방식 강제 적용 (`--rtsp-tcp`).
-- **실시간 상태 모니터링:** 
-  - 각 채널별 연결 상태 (LIVE, BUFFERING, ERROR, OFFLINE) 표시.
-  - 시스템 전체 FPS 및 활성 카메라 수 실시간 집계.
+### 2. Playback
+- 채널/날짜/시간 지정 재생
+- SUNAPI 타임라인 조회 후 녹화 구간 표시
+- 하단 타임라인(녹화 구간 초록색), 시각 이동(seek), 줌(휠) 지원
+- Play / Pause / Resume 제어
+- 화면 전환 시 Playback 세션 정리(disconnect)
 
-### 3. Recordings (녹화 영상 관리)
-- **사용자 인증:** MariaDB 연동 로그인 시스템 (ID/PW).
-- **영상 목록 조회:** 서버(`/app/recordings`)에 저장된 녹화 파일 리스트 및 **용량(File Size)** 확인.
-- **영상 재생 (Download & Play):** 
-  - **끊김 없는 재생:** 녹화 파일을 임시 폴더로 다운로드 후 재생 (더블 클릭).
-  - **다운로드 상태 표시:** 실시간 다운로드 진행률 및 **예상 소요 시간(ETA)** 표시.
-  - **정확한 탐색:** 전체 재생 시간 인식 및 즉각적인 탐색(Seek) 지원.
-- **영상 관리 (Context Menu):** 
-  - **이름 변경 (Rename):** 우클릭 메뉴를 통해 파일 이름 변경.
-  - **내보내기 (Export):** 우클릭 메뉴를 통해 원하는 경로에 파일 저장.
-  - **삭제 (Delete):** 권한이 있는 사용자의 녹화 파일 삭제 기능.
+### 3. 녹화 관리 API 연동
+- `/recordings` 목록 조회
+- `/recordings?file=` 삭제
+- `/stream?file=` 재생/다운로드
+- `/system/storage` 저장소 용량 표시
 
-### 4. System Integration
-- **Server Storage Monitoring:** Crow 서버 API(`/system/storage`)를 통해 원격 서버의 디스크 사용량 실시간 표시.
+## Playback 작동 원리
 
----
+1. 사용자가 채널/날짜/시간 선택 후 재생 요청  
+2. SUNAPI `recording.cgi?msubmenu=timeline`으로 녹화 구간 조회  
+3. 선택 시간이 녹화 구간인지 검증  
+4. `ws://<SUNAPI_IP>/StreamingServer` 연결  
+5. WebSocket 바이너리 프레임으로 RTSP 시퀀스 전송  
+   - `OPTIONS` (401) -> Digest 포함 `OPTIONS` (200)  
+   - 다중 `SETUP` (track별 interleaved channel)  
+   - `PLAY`  
+6. RTP interleaved 수신 + 디코딩 경로로 전달  
+7. `GET_PARAMETER` keepalive로 세션 유지  
+8. `PAUSE/PLAY`로 일시정지/재개 제어
 
-## Tech Stack (기술 스택)
+Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1회 호출이 아니라 WS + RTSP 제어 시퀀스가 핵심입니다.
 
-- **Language:** C++17
-- **Framework:** Qt 6 (Qt Multimedia, Qt Network, **Qt Quick/QML**)
-- **Video Engine:** libVLC (VLC SDK)
-- **Backend Server:** Crow (C++ Microframework)
-- **Database:** MariaDB (Authentication)
-- **Protocol:** RTSP (Live), HTTP (API & File Transfer)
+## 기술 스택
 
----
+- Language: C++17
+- UI: Qt Quick/QML
+- Media: Qt Multimedia (FFmpeg backend)
+- Network: Qt Network / WebSocket
+- Backend API: Crow + MariaDB (외부 서버)
+- Protocol: RTSP/RTSPS, HTTP/HTTPS, WebSocket
 
-## Configuration (환경 설정)
+## 환경 설정 (.env)
 
-이 프로그램은 하드코딩된 설정을 피하기 위해 실행 파일과 같은 경로에 있는 `.env` 파일을 로드합니다.
-프로그램 실행 전, 실행 파일과 같은 경로에 아래 내용으로 `.env` 파일을 생성해주세요.
+실행 파일과 같은 경로의 `.env`를 로드합니다.  
+기본 템플릿은 `example.env`를 사용하세요.
 
-**파일명:** `.env`
+주요 항목:
+- API/SSL
+  - `API_URL`
+  - `SSL_CA_CERT`, `SSL_CLIENT_CERT`, `SSL_CLIENT_KEY`
+  - `SSL_VERIFY_PEER`, `SSL_IGNORE_ERRORS`
+- Live RTSP(MediaMTX)
+  - `RTSP_SCHEME`, `RTSP_IP`, `RTSP_PORT`
+  - `RTSP_USERNAME`, `RTSP_PASSWORD`
+  - `RTSP_MAIN_PATH_TEMPLATE`, `RTSP_SUB_PATH_TEMPLATE`
+- SUNAPI/Playback
+  - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
+  - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_PORT`
+  - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
+- MQTT(선택)
+  - `MQTT_ENABLED` 및 TLS 관련 변수
 
-```ini
-# 백엔드 API 서버 주소 (로그인 및 녹화 파일 관리)
-API_URL=http://192.168.55.xxx:8080
+## 백엔드 API 요구사항
 
-# RTSP 스트리밍 서버 주소 (MediaMTX 프록시 서버)
-RTSP_IP=192.168.55.xxx
-RTSP_PORT=8554
+| Method | Endpoint | 설명 |
+| :--- | :--- | :--- |
+| `POST` | `/login` | 로그인 |
+| `GET` | `/recordings` | 녹화 목록 조회 |
+| `DELETE` | `/recordings?file={name}` | 녹화 파일 삭제 |
+| `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
+| `GET` | `/system/storage` | 저장소 용량 조회 |
 
-# [주의] .env 파일이 없으면 프로그램이 정상적으로 서버에 접속할 수 없습니다.
+## 빌드
+
+필수:
+1. Qt 6 SDK (Qt Quick, Qt Multimedia, Qt Network, Qt WebSockets)
+2. CMake 3.19+
+3. MinGW 64-bit (Qt Kit와 동일)
+
+예시:
+```bash
+cmake -S . -B build
+cmake --build build --config Release
 ```
 
----
+## Wireshark 분석 기록(요약)
 
-## API Requirements (API 규격)
+Playback 동작 검증 시 아래를 확인했습니다.
 
-이 클라이언트가 정상 작동하기 위해서는 백엔드 서버가 다음 API를 제공해야 합니다.
+- 필터 예시
+  - `ip.addr == <camera_ip> && (http || websocket || rtsp)`
+  - `http.request.uri contains "recording.cgi" || http.request.uri contains "security.cgi"`
+  - `tcp.stream eq <N>`
+- 확인 포인트
+  - `GET /StreamingServer` -> `101 Switching Protocols`
+  - WS Binary payload 내부 RTSP 메시지 확인
+  - `OPTIONS 401` -> Digest 포함 재시도 `200`
+  - `SETUP` 다중 트랙 `200`
+  - `PLAY 200` 이후 interleaved RTP 수신
+- 결론
+  - 웹 플레이백과 동일 동작을 위해 WS 세션 + RTSP 제어 순서 재현 필요
 
-| Method | Endpoint | Description | Request Body |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/login` | 사용자 로그인 | `{"id": "...", "password": "..."}` |
-| `GET` | `/recordings` | 녹화 목록 조회 | `N/A` |
-| `DELETE` | `/recordings?file={name}` | 특정 녹화 파일 삭제 | `N/A` |
-| `GET` | `/stream?file={name}` | 녹화 파일 다운로드/스트리밍 | `N/A` |
-| `GET` | `/system/storage` | 서버 디스크 용량 조회 | `N/A` |
+## 트러블슈팅
 
----
+- `invalid JSON` (timeline)
+  - 일부 장비 응답이 JSON이 아닌 key-value 형식
+  - key-value fallback 파서로 처리
 
-## Build & Run (빌드 및 실행 방법)
+- `STORAGE_CHECK SSL host mismatch`
+  - 접속 host와 인증서 SAN/CN 불일치
+  - 인증서 재발급 또는 host 매칭 필요
 
-### Prerequisites (필수 요구 사항)
-1.  **Qt 6 SDK** 설치 (Qt Multimedia, Qt Network, Qt Quick, Qt Mqtt 모듈 포함)
-2.  **CMake 3.19+**
-3.  **MinGW 64-bit** (Qt Kit와 동일 버전)
+- `MediaPlayer error / Invalid data / Invalid argument`
+  - Playback 입력 경로/세션 상태/프로토콜 설정 점검 필요
+  - WS 연결, RTSP 시퀀스, SDP/입력 URL 순서대로 확인
 
-### RTSP URL Rule (주소 규칙)
-MediaMTX 서버를 경유하기 위해 코드는 다음 규칙으로 RTSP 주소를 생성합니다.
-`{RTSP_SCHEME}://{RTSP_IP}:{RTSP_PORT}/{index}/{main|sub}`
-(예: `rtsps://192.168.xxx.xxx:8555/0/sub`)
-
----
-
-## Troubleshooting (트러블슈팅)
-
-**Q. 라이브 뷰가 "BUFFERING"이나 "ERROR" 상태에서 멈춥니다.**
-> A. `.env` 파일의 `RTSP_IP`와 `RTSP_PORT`가 정확한지 확인하세요. 방화벽이 8554 포트를 차단하고 있는지 확인하세요.
-
-**Q. 녹화 영상 재생 시 "Player Error"가 발생합니다.**
-> A. 서버(`API_URL`)가 정상 작동 중인지, 디스크 용량이 부족하여 다운로드에 실패한 것은 아닌지 확인하세요.
-
----
+- 타임라인 라벨 겹침
+  - 기본/확대 라벨 Repeater 동시 렌더 문제
+  - 조건부 `model` 렌더링으로 수정
 
 ## License
 
-This project is for educational purposes.
-
----
+교육/프로젝트 목적 샘플 코드입니다.

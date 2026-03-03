@@ -6,7 +6,7 @@
 #include <QSettings>
 #include <QUrl>
 
-// 로그인 요청을 전송하고 결과를 처리한다.
+// 로그인 요청 전송 및 결과 처리
 void Backend::login(QString id, QString pw) {
     if (m_loginLocked) {
         emit loginFailed("로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
@@ -129,7 +129,7 @@ void Backend::login(QString id, QString pw) {
     });
 }
 
-// 로그인 없이 임시로 앱을 사용 상태로 전환한다.
+// 로그인 없이 임시 사용 상태 전환
 void Backend::skipLoginTemporarily() {
     if (m_isLoggedIn) {
         return;
@@ -152,7 +152,7 @@ void Backend::skipLoginTemporarily() {
     emit loginSuccess();
 }
 
-// 사용자 세션을 종료한다.
+// 사용자 세션 종료
 void Backend::logout() {
     if (!m_isLoggedIn) return;
 
@@ -166,7 +166,7 @@ void Backend::logout() {
     emit sessionRemainingSecondsChanged();
 }
 
-// 사용자 활동 시 세션 타이머를 초기화한다.
+// 사용자 활동 시 세션 타이머 초기화
 void Backend::resetSessionTimer() {
     if (!m_isLoggedIn) return;
 
@@ -180,7 +180,7 @@ void Backend::resetSessionTimer() {
     }
 }
 
-// 관리자 코드로 잠금 상태를 해제한다.
+// 관리자 코드 기반 잠금 상태 해제
 bool Backend::adminUnlock(QString adminCode) {
     QString expected = m_env.value("ADMIN_UNLOCK_KEY").trimmed();
     if (expected.isEmpty()) {
@@ -199,7 +199,7 @@ bool Backend::adminUnlock(QString adminCode) {
     return true;
 }
 
-// 1초마다 세션 만료를 체크한다.
+// 1초 주기 세션 만료 체크
 void Backend::onSessionTick() {
     if (!m_isLoggedIn) {
         m_sessionTimer->stop();
