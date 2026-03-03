@@ -4,11 +4,13 @@
 #include <string>
 #include <memory>
 #include <sstream>
+#include <iomanip>
 #include <chrono>
 #include <thread>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <deque>
 
 // TensorRT & CUDA
 #include <NvInfer.h>
@@ -325,7 +327,7 @@ static bool InitTrt(TrtContextData& trt) {
         }
     }
     if (needSetInput || trt.inputDims.nbDims == 0) {
-        Dims4 fixedInput{1, 3, INPUT_SIZE, INPUT_SIZE};
+        Dims4 fixedInput{1, 3, INPUT_HEIGHT, INPUT_WIDTH};
         if (!trt.context->setInputShape(trt.inputName, fixedInput)) {
             LogError("Failed to set input shape.");
             return false;
@@ -359,7 +361,7 @@ static bool InitTrt(TrtContextData& trt) {
     trt.inputSize = Volume(trt.inputDims) * sizeof(float);
     trt.outputElements = Volume(trt.outputDims);
     trt.outputSize = trt.outputElements * sizeof(float);
-    trt.rawInputSize = INPUT_SIZE * INPUT_SIZE * 3 * sizeof(uint8_t);
+    trt.rawInputSize = static_cast<size_t>(INPUT_HEIGHT) * static_cast<size_t>(INPUT_WIDTH) * 3 * sizeof(uint8_t);
 
     std::cout << "[TRT] Input Dims: ";
     for (int i = 0; i < trt.inputDims.nbDims; ++i) std::cout << trt.inputDims.d[i] << (i + 1 < trt.inputDims.nbDims ? "x" : "");
@@ -383,8 +385,8 @@ static bool InitCudaResources(const TrtContextData& trt, CudaResources& cudaRes)
 }
 
 static void ResolveOutputHW(const Dims& outputDims, int& outH, int& outW) {
-    outH = INPUT_SIZE;
-    outW = INPUT_SIZE;
+    outH = INPUT_HEIGHT;
+    outW = INPUT_WIDTH;
     if (outputDims.nbDims == 4) {
         outH = outputDims.d[2];
         outW = outputDims.d[3];
@@ -428,16 +430,41 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     LogInfo("Stream started.");
 
     dim3 block(16, 16);
-    dim3 grid((INPUT_SIZE + block.x - 1) / block.x, (INPUT_SIZE + block.y - 1) / block.y);
+    dim3 grid((INPUT_WIDTH + block.x - 1) / block.x, (INPUT_HEIGHT + block.y - 1) / block.y);
 
     auto prevTime = std::chrono::high_resolution_clock::now();
+    auto lastMetricsLog = std::chrono::steady_clock::now();
+    std::string perfOverlay1 = "Perf: warming up...";
+    std::string perfOverlay2 = "";
 
     int grabFailCount = 0;
     const int grabFailLogEvery = 30;
+    uint64_t totalGrabFail = 0;
+    uint64_t totalRetrieveFail = 0;
+    uint64_t totalInvalidFrame = 0;
+    uint64_t processedFrames = 0;
+    uint64_t processedFramesAtLastLog = 0;
+    uint64_t dropProxyAtLastLog = 0;
+    std::deque<double> e2eMsWindow;
+    std::deque<double> gpuMsWindow;
+    double e2eMsSum = 0.0;
+    double gpuMsSum = 0.0;
+    constexpr size_t kMetricsWindow = 120;
+
+    auto pushWindow = [&](std::deque<double>& q, double& sum, double v) {
+        q.push_back(v);
+        sum += v;
+        if (q.size() > kMetricsWindow) {
+            sum -= q.front();
+            q.pop_front();
+        }
+    };
+
     bool fatalError = false;
     while (!stopFlag.load()) {
         if (!cap.grab()) {
             grabFailCount++;
+            totalGrabFail++;
             if (grabFailCount % grabFailLogEvery == 1) {
                 LogWarn("RTSP grab failed (" + std::to_string(grabFailCount) +
                         "x). url=" + rtspUrl);
@@ -445,30 +472,39 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
-        if (!cap.retrieve(frame)) continue;
+        if (!cap.retrieve(frame)) {
+            totalRetrieveFail++;
+            continue;
+        }
         grabFailCount = 0;
         frameIdx++;
+        const auto frameStart = std::chrono::steady_clock::now();
         if (frame.empty()) {
+            totalInvalidFrame++;
             LogWarn("Empty frame at idx=" + std::to_string(frameIdx));
             continue;
         }
         if (frame.channels() != 3) {
+            totalInvalidFrame++;
             LogWarn("Unexpected channels=" + std::to_string(frame.channels()) +
                     " at idx=" + std::to_string(frameIdx));
             continue;
         }
 
-        cv::resize(frame, resized, Size(INPUT_SIZE, INPUT_SIZE), 0, 0, INTER_LINEAR);
-        if (resized.empty() || resized.cols != INPUT_SIZE || resized.rows != INPUT_SIZE) {
+        cv::resize(frame, resized, Size(INPUT_WIDTH, INPUT_HEIGHT), 0, 0, INTER_LINEAR);
+        if (resized.empty() || resized.cols != INPUT_WIDTH || resized.rows != INPUT_HEIGHT) {
+            totalInvalidFrame++;
             LogWarn("Resize failed or size mismatch at idx=" + std::to_string(frameIdx));
             continue;
         }
         if (resized.type() != CV_8UC3) {
+            totalInvalidFrame++;
             LogWarn("Unexpected resized type=" + std::to_string(resized.type()) +
                     " at idx=" + std::to_string(frameIdx));
             continue;
         }
 
+        const auto gpuStart = std::chrono::steady_clock::now();
         if (!resized.isContinuous()) {
             resized = resized.clone();
         }
@@ -481,7 +517,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
 
         preprocess_kernel<<<grid, block, 0, cudaRes.stream>>>((uint8_t*)cudaRes.d_raw_img,
                                                                (float*)cudaRes.d_input,
-                                                               INPUT_SIZE, INPUT_SIZE);
+                                                               INPUT_WIDTH, INPUT_HEIGHT);
         auto err = cudaGetLastError();
         if (err != cudaSuccess) {
             LogError(std::string("CUDA kernel error: ") + cudaGetErrorString(err) +
@@ -516,9 +552,10 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             fatalError = true;
             break;
         }
+        const auto gpuEnd = std::chrono::steady_clock::now();
 
-        int outH = INPUT_SIZE;
-        int outW = INPUT_SIZE;
+        int outH = INPUT_HEIGHT;
+        int outW = INPUT_WIDTH;
         ResolveOutputHW(trt.outputDims, outH, outW);
         if (static_cast<size_t>(outH) * static_cast<size_t>(outW) > trt.outputElements) {
             LogWarn("Output size mismatch outH*outW=" +
@@ -610,7 +647,13 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
 
             cv::putText(combined, "C++ CUDA FPS: " + std::to_string((int)fps),
                         Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
-            cv::imshow("Depth Anything V2 (CUDA Optimized)", combined);
+            cv::putText(combined, perfOverlay1, Point(10, 62),
+                        FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1);
+            if (!perfOverlay2.empty()) {
+                cv::putText(combined, perfOverlay2, Point(10, 86),
+                            FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1);
+            }
+            cv::imshow("Depth Anything 3 Metric (CUDA Optimized)", combined);
             if (showPointCloud) {
                 Mat colorForDepth;
                 if (frame.cols != outW || frame.rows != outH) {
@@ -622,6 +665,51 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                 cv::imshow("PointCloud (Projected)", pcv);
             }
             cv::waitKey(1);
+        }
+
+        const auto frameEnd = std::chrono::steady_clock::now();
+        const double gpuMs =
+            std::chrono::duration<double, std::milli>(gpuEnd - gpuStart).count();
+        const double e2eMs =
+            std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
+        pushWindow(gpuMsWindow, gpuMsSum, gpuMs);
+        pushWindow(e2eMsWindow, e2eMsSum, e2eMs);
+        processedFrames++;
+
+        const auto now = std::chrono::steady_clock::now();
+        const double logIntervalSec = std::chrono::duration<double>(now - lastMetricsLog).count();
+        if (logIntervalSec >= 2.0) {
+            const uint64_t intervalProcessed = processedFrames - processedFramesAtLastLog;
+            const uint64_t dropProxyNow = totalGrabFail + totalRetrieveFail + totalInvalidFrame;
+            const uint64_t intervalDropProxy = dropProxyNow - dropProxyAtLastLog;
+            const double procFps = intervalProcessed / logIntervalSec;
+            const double avgE2eMs = e2eMsWindow.empty() ? 0.0 : (e2eMsSum / static_cast<double>(e2eMsWindow.size()));
+            const double avgGpuMs = gpuMsWindow.empty() ? 0.0 : (gpuMsSum / static_cast<double>(gpuMsWindow.size()));
+            const double dropProxyRatio = (intervalProcessed + intervalDropProxy) == 0
+                                              ? 0.0
+                                              : (100.0 * static_cast<double>(intervalDropProxy) /
+                                                 static_cast<double>(intervalProcessed + intervalDropProxy));
+            std::ostringstream oss1;
+            oss1 << std::fixed << std::setprecision(1)
+                 << "Perf fps=" << procFps
+                 << " e2e_ms=" << avgE2eMs
+                 << " gpu_ms=" << avgGpuMs;
+            std::ostringstream oss2;
+            oss2 << std::fixed << std::setprecision(2)
+                 << "drop_proxy_pct=" << dropProxyRatio
+                 << " (grabFail=" << totalGrabFail
+                 << ", retrieveFail=" << totalRetrieveFail
+                 << ", invalid=" << totalInvalidFrame << ")";
+            if (headless) {
+                LogInfo("[Perf] " + oss1.str() + " " + oss2.str());
+            } else {
+                perfOverlay1 = oss1.str();
+                perfOverlay2 = oss2.str();
+            }
+
+            lastMetricsLog = now;
+            processedFramesAtLastLog = processedFrames;
+            dropProxyAtLastLog = dropProxyNow;
         }
     }
 
@@ -744,7 +832,7 @@ int main(int argc, char** argv) {
     addr.sin_port = htons(static_cast<u_short>(port));
 
     if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        std::cerr << "bind failed" << std::endl;
+        std::cerr << "bind failed (port=" << port << ", wsa=" << WSAGetLastError() << ")" << std::endl;
         closesocket(server);
         WSACleanup();
         return 1;
