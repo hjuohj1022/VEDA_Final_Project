@@ -32,6 +32,7 @@ class ClientGui(tk.Tk):
         self.flipx_var = tk.BooleanVar(value=False)
         self.flipy_var = tk.BooleanVar(value=False)
         self.flipz_var = tk.BooleanVar(value=False)
+        self.wire_var = tk.BooleanVar(value=False)
 
         frm = ttk.Frame(self, padding=12)
         frm.pack(fill=tk.BOTH, expand=True)
@@ -69,6 +70,7 @@ class ClientGui(tk.Tk):
         ttk.Checkbutton(frm, text="Flip X", variable=self.flipx_var).grid(row=9, column=0, sticky="w")
         ttk.Checkbutton(frm, text="Flip Y", variable=self.flipy_var).grid(row=9, column=1, sticky="w")
         ttk.Checkbutton(frm, text="Flip Z", variable=self.flipz_var).grid(row=10, column=0, sticky="w")
+        ttk.Checkbutton(frm, text="Wireframe", variable=self.wire_var).grid(row=10, column=1, sticky="w")
         ttk.Button(frm, text="Apply View", command=self.on_apply_view).grid(row=11, column=0, columnspan=2, pady=8, sticky="w")
 
         self._stream_stop = threading.Event()
@@ -104,8 +106,9 @@ class ClientGui(tk.Tk):
         flipx = "1" if self.flipx_var.get() else "0"
         flipy = "1" if self.flipy_var.get() else "0"
         flipz = "1" if self.flipz_var.get() else "0"
+        wire = "1" if self.wire_var.get() else "0"
         try:
-            cmd = f"pc_view rx={rx} ry={ry} flipx={flipx} flipy={flipy} flipz={flipz}"
+            cmd = f"pc_view rx={rx} ry={ry} flipx={flipx} flipy={flipy} flipz={flipz} wire={wire}"
             resp = send_command(host, port, cmd)
             self.status.set(resp or "OK")
         except Exception as e:

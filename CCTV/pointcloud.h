@@ -158,7 +158,8 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                                        float rotYDeg = 35.0f,
                                        bool flipX = false,
                                        bool flipY = false,
-                                       bool flipZ = false) {
+                                       bool flipZ = false,
+                                       bool wireframe = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (bgr.empty() || bgr.cols != width || bgr.rows != height || bgr.type() != CV_8UC3) {
@@ -211,10 +212,22 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     const float scaleY = (outH - 2.0f * pad) / (maxY - minY + 1e-6f);
     const float scale = std::min(scaleX, scaleY);
 
-    // Second pass: draw.
-    for (int y = 0; y < height; y += stride) {
+    struct ProjectedPoint {
+        bool valid = false;
+        int px = 0;
+        int py = 0;
+        float z = 0.0f;
+        cv::Vec3b color = cv::Vec3b(0, 0, 0);
+    };
+    const int gx = (width + stride - 1) / stride;
+    const int gy = (height + stride - 1) / stride;
+    std::vector<ProjectedPoint> grid;
+    grid.resize(static_cast<size_t>(gx) * static_cast<size_t>(gy));
+
+    // Second pass: project + draw points.
+    for (int y = 0, yy = 0; y < height; y += stride, ++yy) {
         const int row = y * width;
-        for (int x = 0; x < width; x += stride) {
+        for (int x = 0, xx = 0; x < width; x += stride, ++xx) {
             const float z = depth[row + x];
             if (z < minDepth || z > maxDepth) continue;
             float X = (static_cast<float>(x) - K.cx) * z / K.fx;
@@ -231,7 +244,46 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
             const int px = static_cast<int>((x1 - minX) * scale + pad);
             const int py = static_cast<int>(outH - ((y1 - minY) * scale + pad));
             if (px < 0 || px >= outW || py < 0 || py >= outH) continue;
-            canvas.at<cv::Vec3b>(py, px) = bgr.at<cv::Vec3b>(y, x);
+            ProjectedPoint p;
+            p.valid = true;
+            p.px = px;
+            p.py = py;
+            p.z = z;
+            p.color = bgr.at<cv::Vec3b>(y, x);
+            grid[static_cast<size_t>(yy) * static_cast<size_t>(gx) + static_cast<size_t>(xx)] = p;
+            canvas.at<cv::Vec3b>(py, px) = p.color;
+        }
+    }
+
+    if (wireframe) {
+        constexpr float kDepthJumpRatio = 0.18f;
+        auto depthClose = [&](float a, float b) -> bool {
+            const float m = std::max(a, b);
+            if (m <= 1e-6f) return false;
+            return std::abs(a - b) / m <= kDepthJumpRatio;
+        };
+
+        for (int y = 0; y < gy; ++y) {
+            for (int x = 0; x < gx; ++x) {
+                const auto& p = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                if (!p.valid) continue;
+
+                if (x + 1 < gx) {
+                    const auto& q = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+                    if (q.valid && depthClose(p.z, q.z)) {
+                        // Use a fixed bright color so wireframe mode is visually obvious.
+                        cv::Scalar c(80, 255, 80);
+                        cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
+                    }
+                }
+                if (y + 1 < gy) {
+                    const auto& q = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                    if (q.valid && depthClose(p.z, q.z)) {
+                        cv::Scalar c(80, 255, 80);
+                        cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
+                    }
+                }
+            }
         }
     }
     return canvas;

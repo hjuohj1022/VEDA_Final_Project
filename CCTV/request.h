@@ -17,11 +17,13 @@ struct Request {
     bool flipXSet = false;
     bool flipYSet = false;
     bool flipZSet = false;
+    bool wireSet = false;
     float rx = -20.0f;
     float ry = 35.0f;
     bool flipX = false;
     bool flipY = false;
     bool flipZ = false;
+    bool wire = false;
 };
 
 std::vector<std::string> SplitTokens(const std::string& line);
