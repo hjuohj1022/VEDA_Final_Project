@@ -7,10 +7,54 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QDate>
+#include <QDir>
 #include <QSet>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QTimer>
 #include <algorithm>
+#include <memory>
+
+namespace {
+QString extractKvValue(const QString &text, const QStringList &keys) {
+    for (const QString &k : keys) {
+        QRegularExpression re(QString("(^|\\s|\\r|\\n)%1\\s*=\\s*([^\\r\\n]+)")
+                                  .arg(QRegularExpression::escape(k)),
+                              QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatch m = re.match(text);
+        if (m.hasMatch()) {
+            return m.captured(2).trimmed();
+        }
+    }
+    return QString();
+}
+
+QString extractJsonString(const QJsonObject &obj, const QStringList &keys) {
+    for (const QString &k : keys) {
+        if (obj.contains(k)) {
+            const QJsonValue v = obj.value(k);
+            if (v.isString()) return v.toString().trimmed();
+            if (v.isDouble()) return QString::number(static_cast<qint64>(v.toDouble()));
+            if (v.isBool()) return v.toBool() ? "true" : "false";
+        }
+    }
+    return QString();
+}
+
+int parseHmsToSec(const QString &hms) {
+    const QRegularExpression re("^(\\d{2}):(\\d{2}):(\\d{2})$");
+    const auto m = re.match(hms.trimmed());
+    if (!m.hasMatch()) return -1;
+    const int h = m.captured(1).toInt();
+    const int mm = m.captured(2).toInt();
+    const int s = m.captured(3).toInt();
+    if (h < 0 || h > 23 || mm < 0 || mm > 59 || s < 0 || s > 59) return -1;
+    return (h * 3600) + (mm * 60) + s;
+}
+} // namespace
 
 // SUNAPI GET 요청 생성 및 공통 응답 처리
 bool Backend::sendSunapiCommand(const QString &cgiName,
@@ -616,4 +660,382 @@ void Backend::loadPlaybackMonthRecordedDays(int channelIndex, int year, int mont
         emit playbackMonthRecordedDaysLoaded(channelIndex, yearMonth, dayList);
         reply->deleteLater();
     });
+}
+
+void Backend::requestPlaybackExport(int channelIndex,
+                                    const QString &dateText,
+                                    const QString &startTimeText,
+                                    const QString &endTimeText,
+                                    const QString &savePath) {
+    if (channelIndex < 0) {
+        emit playbackExportFailed("내보내기 실패: invalid channel index");
+        return;
+    }
+
+    const QRegularExpression dateRe("^\\d{4}-\\d{2}-\\d{2}$");
+    if (!dateRe.match(dateText.trimmed()).hasMatch()) {
+        emit playbackExportFailed("내보내기 실패: 날짜 형식 오류 (YYYY-MM-DD)");
+        return;
+    }
+
+    const int startSec = parseHmsToSec(startTimeText);
+    const int endSec = parseHmsToSec(endTimeText);
+    if (startSec < 0 || endSec < 0) {
+        emit playbackExportFailed("내보내기 실패: 시간 형식 오류 (HH:MM:SS)");
+        return;
+    }
+    if (startSec > endSec) {
+        emit playbackExportFailed("내보내기 실패: 시작 시간이 종료 시간보다 큼");
+        return;
+    }
+
+    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    if (host.isEmpty()) {
+        emit playbackExportFailed("내보내기 실패: SUNAPI_IP 비어 있음");
+        return;
+    }
+
+    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
+    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
+    const int defaultPort = (scheme == "https") ? 443 : 80;
+    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+    QString outPath = savePath.trimmed();
+    if (outPath.startsWith("file:", Qt::CaseInsensitive)) {
+        outPath = QUrl(outPath).toLocalFile();
+    }
+    if (outPath.isEmpty()) {
+        emit playbackExportFailed("내보내기 실패: 저장 경로 비어 있음");
+        return;
+    }
+
+    const QString format = m_env.value("SUNAPI_EXPORT_TYPE", "AVI").trimmed().toUpper();
+    const QString startDt = QString("%1 %2").arg(dateText.trimmed(), startTimeText.trimmed());
+    const QString endDt = QString("%1 %2").arg(dateText.trimmed(), endTimeText.trimmed());
+
+    struct Candidate {
+        QString cgi;
+        QString submenu;
+        QString action;
+        QString extraQuery;
+    };
+
+    QList<Candidate> createCandidates;
+    createCandidates.push_back({
+        m_env.value("SUNAPI_EXPORT_CREATE_CGI", "recording.cgi").trimmed(),
+        m_env.value("SUNAPI_EXPORT_CREATE_SUBMENU", "export").trimmed(),
+        m_env.value("SUNAPI_EXPORT_CREATE_ACTION", "create").trimmed(),
+        m_env.value("SUNAPI_EXPORT_CREATE_QUERY").trimmed()
+    });
+    createCandidates.push_back({"recording.cgi", "backup", "create", ""});
+    createCandidates.push_back({"recording.cgi", "export", "start", ""});
+
+    auto buildUrl = [scheme, host, port](const QString &cgi,
+                                         const QString &submenu,
+                                         const QString &action,
+                                         const QMap<QString, QString> &params,
+                                         const QString &extraQuery = QString()) {
+        QUrl url;
+        url.setScheme(scheme);
+        url.setHost(host);
+        if (port > 0) url.setPort(port);
+        url.setPath(QString("/stw-cgi/%1").arg(cgi));
+        QUrlQuery q;
+        q.addQueryItem("msubmenu", submenu);
+        q.addQueryItem("action", action);
+        for (auto it = params.constBegin(); it != params.constEnd(); ++it) {
+            q.addQueryItem(it.key(), it.value());
+        }
+        const QString eq = extraQuery.trimmed();
+        if (!eq.isEmpty()) {
+            const QStringList pairs = eq.split('&', Qt::SkipEmptyParts);
+            for (const QString &pair : pairs) {
+                const int sep = pair.indexOf('=');
+                if (sep > 0) q.addQueryItem(pair.left(sep), pair.mid(sep + 1));
+                else q.addQueryItem(pair, QString());
+            }
+        }
+        url.setQuery(q);
+        return url;
+    };
+
+    auto parseCreateReply = [&](const QByteArray &body, QString *jobId, QString *downloadUrl, QString *reason) -> bool {
+        const QByteArray trimmed = body.trimmed();
+        if (trimmed.isEmpty()) {
+            if (reason) *reason = "empty body";
+            return false;
+        }
+
+        QJsonParseError pe{};
+        const QJsonDocument doc = QJsonDocument::fromJson(trimmed, &pe);
+        if (pe.error == QJsonParseError::NoError && doc.isObject()) {
+            const QJsonObject obj = doc.object();
+            const QString err = extractJsonString(obj, {"Error", "error", "Result", "result"});
+            if (!err.isEmpty()) {
+                const QString el = err.toLower();
+                if (el == "fail" || el == "error" || el == "false" || el == "ng") {
+                    if (reason) *reason = err;
+                    return false;
+                }
+            }
+            if (jobId) *jobId = extractJsonString(obj, {"JobID", "JobId", "ExportID", "id"});
+            if (downloadUrl) *downloadUrl = extractJsonString(obj, {"DownloadUrl", "DownloadURL", "Url", "url", "FileUrl"});
+            if ((jobId && !jobId->isEmpty()) || (downloadUrl && !downloadUrl->isEmpty())) return true;
+        }
+
+        const QString text = QString::fromUtf8(trimmed);
+        if (jobId) *jobId = extractKvValue(text, {"JobID", "JobId", "ExportID", "id"});
+        if (downloadUrl) *downloadUrl = extractKvValue(text, {"DownloadUrl", "DownloadURL", "Url", "url", "FileUrl"});
+        const QString err = extractKvValue(text, {"Error", "Result", "Status"});
+        if (!err.isEmpty()) {
+            const QString el = err.toLower();
+            if (el == "fail" || el == "error" || el == "false" || el == "ng") {
+                if (reason) *reason = err;
+                return false;
+            }
+        }
+        if ((jobId && !jobId->isEmpty()) || (downloadUrl && !downloadUrl->isEmpty())) return true;
+
+        if (reason) *reason = text.left(120);
+        return false;
+    };
+
+    auto parsePollReply = [&](const QByteArray &body, int *progress, bool *done, bool *failed, QString *downloadUrl, QString *reason) {
+        *progress = -1;
+        *done = false;
+        *failed = false;
+        const QByteArray trimmed = body.trimmed();
+        if (trimmed.isEmpty()) {
+            if (reason) *reason = "empty body";
+            return;
+        }
+
+        QString statusText;
+        QJsonParseError pe{};
+        const QJsonDocument doc = QJsonDocument::fromJson(trimmed, &pe);
+        if (pe.error == QJsonParseError::NoError && doc.isObject()) {
+            const QJsonObject obj = doc.object();
+            statusText = extractJsonString(obj, {"Status", "status", "State", "state", "Result", "result"});
+            if (downloadUrl) *downloadUrl = extractJsonString(obj, {"DownloadUrl", "DownloadURL", "Url", "url", "FileUrl"});
+            const QString p = extractJsonString(obj, {"Progress", "progress", "Percent", "percent"});
+            bool ok = false;
+            int n = p.toInt(&ok);
+            if (ok) *progress = qMax(0, qMin(100, n));
+        } else {
+            const QString text = QString::fromUtf8(trimmed);
+            statusText = extractKvValue(text, {"Status", "State", "Result"});
+            if (downloadUrl) *downloadUrl = extractKvValue(text, {"DownloadUrl", "DownloadURL", "Url", "url", "FileUrl"});
+            const QString p = extractKvValue(text, {"Progress", "Percent"});
+            bool ok = false;
+            int n = p.toInt(&ok);
+            if (ok) *progress = qMax(0, qMin(100, n));
+            if (statusText.isEmpty()) statusText = text.left(60);
+        }
+
+        const QString st = statusText.toLower();
+        if (st.contains("complete") || st.contains("done") || st.contains("ready") || st.contains("success")) {
+            *done = true;
+            return;
+        }
+        if (st.contains("fail") || st.contains("error") || st.contains("invalid") || st.contains("timeout")) {
+            *failed = true;
+            if (reason) *reason = statusText;
+            return;
+        }
+    };
+
+    auto startDownload = [this, outPath](const QUrl &downloadUrl) {
+        emit playbackExportProgress(95, "내보내기 파일 다운로드 시작");
+        QNetworkRequest req(downloadUrl);
+        applySslIfNeeded(req);
+        QNetworkReply *dl = m_manager->get(req);
+        attachIgnoreSslErrors(dl, "SUNAPI_EXPORT_DOWNLOAD");
+
+        connect(dl, &QNetworkReply::downloadProgress, this, [this](qint64 rec, qint64 total) {
+            if (total <= 0) return;
+            const int p = qMax(0, qMin(100, static_cast<int>((rec * 100) / total)));
+            emit playbackExportProgress(p, QString("다운로드 중 %1%").arg(p));
+        });
+
+        connect(dl, &QNetworkReply::finished, this, [this, dl, outPath]() {
+            if (dl->error() != QNetworkReply::NoError) {
+                emit playbackExportFailed(QString("다운로드 실패: %1").arg(dl->errorString()));
+                dl->deleteLater();
+                return;
+            }
+            const QByteArray bytes = dl->readAll();
+            QFile out(outPath);
+            const QFileInfo fi(outPath);
+            QDir().mkpath(fi.absolutePath());
+            if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                emit playbackExportFailed(QString("저장 실패: %1").arg(out.errorString()));
+                dl->deleteLater();
+                return;
+            }
+            out.write(bytes);
+            out.close();
+            emit playbackExportFinished(outPath);
+            dl->deleteLater();
+        });
+    };
+
+    emit playbackExportStarted("내보내기 요청 시작");
+
+    const auto lastCreateReason = std::make_shared<QString>();
+    const auto tryCreate = std::make_shared<std::function<void(int)>>();
+    *tryCreate = [=](int idx) {
+        if (idx < 0 || idx >= createCandidates.size()) {
+            if (lastCreateReason->contains("Error Code: 608", Qt::CaseInsensitive)) {
+                emit playbackExportFailed("내보내기 실패: 카메라가 SUNAPI export 기능을 지원하지 않음(Error 608)");
+            } else if (!lastCreateReason->trimmed().isEmpty()) {
+                emit playbackExportFailed(QString("내보내기 실패: create 엔드포인트 호환 실패 (%1)").arg(*lastCreateReason));
+            } else {
+                emit playbackExportFailed("내보내기 실패: create 엔드포인트 호환 실패");
+            }
+            return;
+        }
+
+        const Candidate c = createCandidates.at(idx);
+        QMap<QString, QString> params;
+        params.insert("Channel", QString::number(channelIndex));
+        params.insert("ChannelIDList", QString::number(channelIndex));
+        params.insert("StartTime", startDt);
+        params.insert("EndTime", endDt);
+        params.insert("FromDate", startDt);
+        params.insert("ToDate", endDt);
+        params.insert("Type", format);
+        params.insert("FileType", format);
+
+        const QUrl url = buildUrl(c.cgi, c.submenu, c.action, params, c.extraQuery);
+        qInfo() << "[SUNAPI][EXPORT] create request url=" << url;
+        QNetworkRequest req(url);
+        applySslIfNeeded(req);
+        QNetworkReply *reply = m_manager->get(req);
+        attachIgnoreSslErrors(reply, "SUNAPI_EXPORT_CREATE");
+
+        connect(reply, &QNetworkReply::finished, this, [=]() {
+            const QByteArray body = reply->readAll();
+            if (reply->error() != QNetworkReply::NoError) {
+                *lastCreateReason = reply->errorString();
+                reply->deleteLater();
+                (*tryCreate)(idx + 1);
+                return;
+            }
+
+            QString jobId;
+            QString downloadUrlText;
+            QString reason;
+            if (!parseCreateReply(body, &jobId, &downloadUrlText, &reason)) {
+                *lastCreateReason = reason;
+                qWarning() << "[SUNAPI][EXPORT] create parse failed" << "url=" << url
+                           << "reason=" << reason
+                           << "body=" << QString::fromUtf8(body.left(180));
+                reply->deleteLater();
+                (*tryCreate)(idx + 1);
+                return;
+            }
+
+            reply->deleteLater();
+
+            if (!downloadUrlText.isEmpty()) {
+                QUrl dl = QUrl(downloadUrlText);
+                if (dl.isRelative()) {
+                    dl = url.resolved(dl);
+                }
+                startDownload(dl);
+                return;
+            }
+
+            if (jobId.isEmpty()) {
+                emit playbackExportFailed("내보내기 실패: JobID/다운로드 URL 없음");
+                return;
+            }
+
+            emit playbackExportProgress(5, QString("내보내기 작업 생성 완료 (JobID=%1)").arg(jobId));
+
+            const QString pollCgi = m_env.value("SUNAPI_EXPORT_POLL_CGI", c.cgi).trimmed();
+            const QString pollSubmenu = m_env.value("SUNAPI_EXPORT_POLL_SUBMENU", c.submenu).trimmed().isEmpty()
+                    ? c.submenu : m_env.value("SUNAPI_EXPORT_POLL_SUBMENU", c.submenu).trimmed();
+            const QString pollAction = m_env.value("SUNAPI_EXPORT_POLL_ACTION", "status").trimmed();
+            const QString pollExtra = m_env.value("SUNAPI_EXPORT_POLL_QUERY").trimmed();
+            const int pollMs = qMax(500, m_env.value("SUNAPI_EXPORT_POLL_INTERVAL_MS", "1500").toInt());
+            const int timeoutMs = qMax(5000, m_env.value("SUNAPI_EXPORT_POLL_TIMEOUT_MS", "120000").toInt());
+            const qint64 startMs = QDateTime::currentMSecsSinceEpoch();
+
+            const auto pollOnce = std::make_shared<std::function<void()>>();
+            *pollOnce = [=]() {
+                const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startMs;
+                if (elapsed > timeoutMs) {
+                    emit playbackExportFailed("내보내기 실패: 상태 조회 시간 초과");
+                    return;
+                }
+
+                QMap<QString, QString> pollParams;
+                pollParams.insert("JobID", jobId);
+                pollParams.insert("ExportID", jobId);
+                const QUrl pollUrl = buildUrl(pollCgi, pollSubmenu, pollAction, pollParams, pollExtra);
+                QNetworkRequest pollReq(pollUrl);
+                applySslIfNeeded(pollReq);
+                QNetworkReply *pollReply = m_manager->get(pollReq);
+                attachIgnoreSslErrors(pollReply, "SUNAPI_EXPORT_POLL");
+
+                connect(pollReply, &QNetworkReply::finished, this, [=]() {
+                    const QByteArray pollBody = pollReply->readAll();
+                    if (pollReply->error() != QNetworkReply::NoError) {
+                        pollReply->deleteLater();
+                        QTimer::singleShot(pollMs, this, [=]() { (*pollOnce)(); });
+                        return;
+                    }
+
+                    int progress = -1;
+                    bool done = false;
+                    bool failed = false;
+                    QString dlUrlText;
+                    QString reason2;
+                    parsePollReply(pollBody, &progress, &done, &failed, &dlUrlText, &reason2);
+                    if (progress >= 0) {
+                        emit playbackExportProgress(progress, QString("내보내기 생성 중 %1%").arg(progress));
+                    }
+
+                    if (failed) {
+                        emit playbackExportFailed(QString("내보내기 실패: %1").arg(reason2.isEmpty() ? "장비 오류" : reason2));
+                        pollReply->deleteLater();
+                        return;
+                    }
+
+                    if (done) {
+                        if (dlUrlText.isEmpty()) {
+                            const QString dlCgi = m_env.value("SUNAPI_EXPORT_DOWNLOAD_CGI", c.cgi).trimmed();
+                            const QString dlSubmenu = m_env.value("SUNAPI_EXPORT_DOWNLOAD_SUBMENU", c.submenu).trimmed().isEmpty()
+                                    ? c.submenu : m_env.value("SUNAPI_EXPORT_DOWNLOAD_SUBMENU", c.submenu).trimmed();
+                            const QString dlAction = m_env.value("SUNAPI_EXPORT_DOWNLOAD_ACTION", "download").trimmed();
+                            const QString dlExtra = m_env.value("SUNAPI_EXPORT_DOWNLOAD_QUERY").trimmed();
+                            QMap<QString, QString> dlParams;
+                            dlParams.insert("JobID", jobId);
+                            dlParams.insert("ExportID", jobId);
+                            const QUrl dlUrl = buildUrl(dlCgi, dlSubmenu, dlAction, dlParams, dlExtra);
+                            pollReply->deleteLater();
+                            startDownload(dlUrl);
+                            return;
+                        }
+
+                        QUrl dlUrl = QUrl(dlUrlText);
+                        if (dlUrl.isRelative()) {
+                            dlUrl = pollUrl.resolved(dlUrl);
+                        }
+                        pollReply->deleteLater();
+                        startDownload(dlUrl);
+                        return;
+                    }
+
+                    pollReply->deleteLater();
+                    QTimer::singleShot(pollMs, this, [=]() { (*pollOnce)(); });
+                });
+            };
+
+            QTimer::singleShot(pollMs, this, [=]() { (*pollOnce)(); });
+        });
+    };
+
+    (*tryCreate)(0);
 }
