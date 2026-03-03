@@ -10,6 +10,14 @@ qt_standard_project_setup()
 # QTP0001: QML 모듈의 기본 리소스 접두사를 :/qt/qml/로 설정
 qt_policy(SET QTP0001 NEW)
 
+set_source_files_properties(
+    src/ui/assets/icons/tooltip_dark.svg
+    PROPERTIES QT_RESOURCE_ALIAS icons/tooltip_dark.svg
+)
+set_source_files_properties(
+    src/ui/assets/icons/tooltip_light.svg
+    PROPERTIES QT_RESOURCE_ALIAS icons/tooltip_light.svg
+)
 
 
 qt_add_executable(Team3VideoReceiver
@@ -42,6 +50,11 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/LoginScreen.qml
         src/ui/qml/PlaybackScreen.qml
         src/ui/qml/VideoPlayer.qml
+        src/ui/qml/components/IconButton.qml
+    RESOURCES
+        src/ui/assets/icons/README.txt
+        src/ui/assets/icons/tooltip_dark.svg
+        src/ui/assets/icons/tooltip_light.svg
 )
 
 target_include_directories(Team3VideoReceiver

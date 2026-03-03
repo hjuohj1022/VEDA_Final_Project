@@ -1,14 +1,14 @@
 ﻿# Qt CCTV Client (Live + Playback VMS)
 
 이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
-실시간 Live(4채널), 녹화 목록/저장소 API, SUNAPI 기반 Playback(타임라인/구간 탐색)을 제공합니다.
+실시간 Live(4채널), 녹화 목록 API, 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색)을 제공합니다.
 
 ## 주요 기능
 
 ### 1. Live 모니터링
 - 2x2 그리드 4채널 동시 표시
 - MediaMTX 경유 RTSP/RTSPS 재생
-- FPS/Latency/Storage 등 사이드바 메트릭 표시
+- FPS/Latency/Storage(카메라 SD 기준) 등 사이드바 메트릭 표시
 
 ### 2. Playback
 - 채널/날짜/시간 지정 재생
@@ -21,7 +21,7 @@
 - `/recordings` 목록 조회
 - `/recordings?file=` 삭제
 - `/stream?file=` 재생/다운로드
-- `/system/storage` 저장소 용량 표시
+- 카메라 SUNAPI 응답 기반 SD 저장소 용량 표시
 
 ## Playback 작동 원리
 
@@ -77,7 +77,10 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 | `GET` | `/recordings` | 녹화 목록 조회 |
 | `DELETE` | `/recordings?file={name}` | 녹화 파일 삭제 |
 | `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
-| `GET` | `/system/storage` | 저장소 용량 조회 |
+| `GET` | `/stw-cgi/... (SUNAPI)` | 카메라 SD 저장소 용량 조회(앱 내부 SUNAPI 호출) |
+
+참고:
+- Storage 메트릭은 백엔드 `/system/storage`가 아니라, 카메라 SUNAPI(`SUNAPI_STORAGE_*`)를 직접 호출해 계산합니다.
 
 ## 프로젝트 구조
 
