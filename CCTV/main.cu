@@ -138,6 +138,10 @@ Request ParseRequest(const std::string& line) {
             req.depthStream = true;
             continue;
         }
+        if (t == "rgbd_stream" || t == "depth_rgb_stream" || t == "stream_rgbd") {
+            req.rgbdStream = true;
+            continue;
+        }
         if (t == "pc_stream" || t == "stream_pc") {
             req.pcStream = true;
             continue;
@@ -188,6 +192,22 @@ Request ParseRequest(const std::string& line) {
             std::string v = t.substr(5);
             req.wire = (v == "1" || v == "true" || v == "on");
             req.wireSet = true;
+            continue;
+        }
+        if (t.rfind("mesh=", 0) == 0) {
+            std::string v = t.substr(5);
+            req.mesh = (v == "1" || v == "true" || v == "on");
+            req.meshSet = true;
+            continue;
+        }
+        if (t == "pause" || t == "pause=1" || t == "pause=true") {
+            req.pause = true;
+            req.pauseSet = true;
+            continue;
+        }
+        if (t == "resume" || t == "pause=0" || t == "pause=false") {
+            req.pause = false;
+            req.pauseSet = true;
             continue;
         }
         if (t == "stop") {
@@ -284,6 +304,18 @@ struct ImageStreamBuffer {
     bool stop = false;
 };
 
+struct RgbdStreamBuffer {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::vector<float> depth;
+    std::vector<unsigned char> bgr;
+    int width = 0;
+    int height = 0;
+    uint32_t frameIdx = 0;
+    bool hasFrame = false;
+    bool stop = false;
+};
+
 struct ViewParams {
     std::mutex mu;
     float rotX = -20.0f;
@@ -292,6 +324,8 @@ struct ViewParams {
     bool flipY = false;
     bool flipZ = false;
     bool wire = false;
+    bool mesh = false;
+    bool paused = false;
 };
 
 static size_t Volume(const Dims& dims) {
@@ -429,6 +463,7 @@ static void ResolveOutputHW(const Dims& outputDims, int& outH, int& outW) {
 
 bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                     DepthStreamBuffer* streamBuf,
+                    RgbdStreamBuffer* rgbdStreamBuf,
                     ImageStreamBuffer* pcStreamBuf,
                     ViewParams* viewParams) {
     LogInfo("Mode: " + std::string(headless ? "headless" : "gui") +
@@ -454,6 +489,12 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     Mat frame, resized;
     std::vector<float> outputBuffer(trt.outputElements);
     uint64_t frameIdx = 0;
+    Mat frozenDepth;
+    Mat frozenColor;
+    Mat frozenFrame;
+    int frozenW = 0;
+    int frozenH = 0;
+    uint64_t frozenFrameIdx = 0;
 
     LogInfo("Stream started.");
 
@@ -490,6 +531,127 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
 
     bool fatalError = false;
     while (!stopFlag.load()) {
+        bool paused = false;
+        if (viewParams) {
+            std::lock_guard<std::mutex> lock(viewParams->mu);
+            paused = viewParams->paused;
+        }
+        if (paused) {
+            if (frozenDepth.empty() || frozenW <= 0 || frozenH <= 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                continue;
+            }
+
+            const int outW = frozenW;
+            const int outH = frozenH;
+            Mat depthMat = frozenDepth;
+            Mat colorForDepth = frozenColor;
+            if (colorForDepth.empty()) {
+                colorForDepth = Mat(outH, outW, CV_8UC3, Scalar(0, 0, 0));
+            }
+
+            double minVal, maxVal;
+            cv::minMaxLoc(depthMat, &minVal, &maxVal);
+            Mat depthNorm;
+            depthMat.convertTo(depthNorm, CV_8U, 255.0 / (maxVal - minVal + 1e-5),
+                               -minVal * 255.0 / (maxVal - minVal + 1e-5));
+            Mat depthColor;
+            cv::applyColorMap(depthNorm, depthColor, COLORMAP_INFERNO);
+
+            const uint64_t frozenIdx = frozenFrameIdx;
+            if (streamBuf) {
+                std::unique_lock<std::mutex> lock(streamBuf->mu);
+                const size_t count = static_cast<size_t>(outW) * static_cast<size_t>(outH);
+                streamBuf->data.assign(depthMat.ptr<float>(), depthMat.ptr<float>() + count);
+                streamBuf->width = outW;
+                streamBuf->height = outH;
+                streamBuf->frameIdx = static_cast<uint32_t>(frozenIdx);
+                streamBuf->hasFrame = true;
+                lock.unlock();
+                streamBuf->cv.notify_all();
+            }
+
+            if (rgbdStreamBuf) {
+                std::unique_lock<std::mutex> lock(rgbdStreamBuf->mu);
+                const size_t count = static_cast<size_t>(outW) * static_cast<size_t>(outH);
+                rgbdStreamBuf->depth.assign(depthMat.ptr<float>(), depthMat.ptr<float>() + count);
+                if (!colorForDepth.empty() && colorForDepth.type() == CV_8UC3 &&
+                    colorForDepth.cols == outW && colorForDepth.rows == outH) {
+                    rgbdStreamBuf->bgr.assign(colorForDepth.data,
+                                              colorForDepth.data + static_cast<size_t>(outW) * static_cast<size_t>(outH) * 3);
+                } else {
+                    rgbdStreamBuf->bgr.assign(static_cast<size_t>(outW) * static_cast<size_t>(outH) * 3, 0);
+                }
+                rgbdStreamBuf->width = outW;
+                rgbdStreamBuf->height = outH;
+                rgbdStreamBuf->frameIdx = static_cast<uint32_t>(frozenIdx);
+                rgbdStreamBuf->hasFrame = true;
+                lock.unlock();
+                rgbdStreamBuf->cv.notify_all();
+            }
+
+            if (pcStreamBuf) {
+                float rx = -20.0f;
+                float ry = 35.0f;
+                bool flipX = false;
+                bool flipY = false;
+                bool flipZ = false;
+                bool wire = false;
+                bool mesh = false;
+                if (viewParams) {
+                    std::lock_guard<std::mutex> lock(viewParams->mu);
+                    rx = viewParams->rotX;
+                    ry = viewParams->rotY;
+                    flipX = viewParams->flipX;
+                    flipY = viewParams->flipY;
+                    flipZ = viewParams->flipZ;
+                    wire = viewParams->wire;
+                    mesh = viewParams->mesh;
+                }
+                const CameraIntrinsics Kfhd = MakeIntrinsicsFromFovDegrees(109.0f, 55.0f, 1920, 1080);
+                const CameraIntrinsics K = ScaleIntrinsics(Kfhd, outW, outH, 1920, 1080);
+                Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
+                                                  480, 360, 4, 0.1f, 80.0f, rx, ry,
+                                                  flipX, flipY, flipZ, wire, mesh);
+                std::vector<unsigned char> encoded;
+                std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 3};
+                if (cv::imencode(".png", pcv, encoded, params)) {
+                    std::unique_lock<std::mutex> lock(pcStreamBuf->mu);
+                    pcStreamBuf->data.swap(encoded);
+                    pcStreamBuf->width = pcv.cols;
+                    pcStreamBuf->height = pcv.rows;
+                    pcStreamBuf->frameIdx = static_cast<uint32_t>(frozenIdx);
+                    pcStreamBuf->hasFrame = true;
+                    lock.unlock();
+                    pcStreamBuf->cv.notify_all();
+                }
+            }
+
+            if (!headless) {
+                Mat showFrame, showDepth;
+                if (!frozenFrame.empty()) {
+                    cv::resize(frozenFrame, showFrame, Size(640, 480));
+                } else {
+                    showFrame = Mat(480, 640, CV_8UC3, Scalar(0, 0, 0));
+                }
+                cv::resize(depthColor, showDepth, Size(640, 480));
+                Mat combined;
+                cv::hconcat(showFrame, showDepth, combined);
+                cv::putText(combined, "PAUSED", Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 255), 2);
+                cv::putText(combined, perfOverlay1, Point(10, 62),
+                            FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1);
+                if (!perfOverlay2.empty()) {
+                    cv::putText(combined, perfOverlay2, Point(10, 86),
+                                FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1);
+                }
+                cv::imshow("Depth Anything 3 Metric (CUDA Optimized)", combined);
+                cv::waitKey(1);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            continue;
+        }
+
         if (!cap.grab()) {
             grabFailCount++;
             totalGrabFail++;
@@ -593,6 +755,12 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             continue;
         }
         Mat depthMat(outH, outW, CV_32F, outputBuffer.data());
+        Mat colorForDepth;
+        if (frame.cols != outW || frame.rows != outH) {
+            cv::resize(frame, colorForDepth, Size(outW, outH));
+        } else {
+            colorForDepth = frame;
+        }
         double minVal, maxVal;
         cv::minMaxLoc(depthMat, &minVal, &maxVal);
 
@@ -634,20 +802,33 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             streamBuf->cv.notify_all();
         }
 
+        if (rgbdStreamBuf) {
+            std::unique_lock<std::mutex> lock(rgbdStreamBuf->mu);
+            rgbdStreamBuf->depth.assign(outputBuffer.begin(), outputBuffer.end());
+            if (!colorForDepth.empty() && colorForDepth.type() == CV_8UC3 &&
+                colorForDepth.cols == outW && colorForDepth.rows == outH) {
+                rgbdStreamBuf->bgr.assign(colorForDepth.data,
+                                          colorForDepth.data + static_cast<size_t>(outW) * static_cast<size_t>(outH) * 3);
+            } else {
+                rgbdStreamBuf->bgr.assign(static_cast<size_t>(outW) * static_cast<size_t>(outH) * 3, 0);
+            }
+            rgbdStreamBuf->width = outW;
+            rgbdStreamBuf->height = outH;
+            rgbdStreamBuf->frameIdx = static_cast<uint32_t>(frameIdx);
+            rgbdStreamBuf->hasFrame = true;
+            lock.unlock();
+            rgbdStreamBuf->cv.notify_all();
+        }
+
         if (pcStreamBuf) {
             // Render lower-res projected view for streaming.
-            Mat colorForDepth;
-            if (frame.cols != outW || frame.rows != outH) {
-                cv::resize(frame, colorForDepth, Size(outW, outH));
-            } else {
-                colorForDepth = frame;
-            }
             float rx = -20.0f;
             float ry = 35.0f;
             bool flipX = false;
             bool flipY = false;
             bool flipZ = false;
             bool wire = false;
+            bool mesh = false;
             if (viewParams) {
                 std::lock_guard<std::mutex> lock(viewParams->mu);
                 rx = viewParams->rotX;
@@ -656,9 +837,10 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                 flipY = viewParams->flipY;
                 flipZ = viewParams->flipZ;
                 wire = viewParams->wire;
+                mesh = viewParams->mesh;
             }
             Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
-                                              480, 360, 4, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ, wire);
+                                              480, 360, 4, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ, wire, mesh);
             std::vector<unsigned char> encoded;
             std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 3};
             if (cv::imencode(".png", pcv, encoded, params)) {
@@ -691,18 +873,13 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             }
             cv::imshow("Depth Anything 3 Metric (CUDA Optimized)", combined);
             if (showPointCloud) {
-                Mat colorForDepth;
-                if (frame.cols != outW || frame.rows != outH) {
-                    cv::resize(frame, colorForDepth, Size(outW, outH));
-                } else {
-                    colorForDepth = frame;
-                }
                 float rx = -20.0f;
                 float ry = 35.0f;
                 bool flipX = false;
                 bool flipY = false;
                 bool flipZ = false;
                 bool wire = false;
+                bool mesh = false;
                 if (viewParams) {
                     std::lock_guard<std::mutex> lock(viewParams->mu);
                     rx = viewParams->rotX;
@@ -711,13 +888,21 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                     flipY = viewParams->flipY;
                     flipZ = viewParams->flipZ;
                     wire = viewParams->wire;
+                    mesh = viewParams->mesh;
                 }
                 Mat pcv = RenderPointCloudViewRgb(depthMat.ptr<float>(), outW, outH, K, colorForDepth,
-                                                  640, 480, 3, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ, wire);
+                                                  640, 480, 3, 0.1f, 80.0f, rx, ry, flipX, flipY, flipZ, wire, mesh);
                 cv::imshow("PointCloud (Projected)", pcv);
             }
             cv::waitKey(1);
         }
+
+        frozenDepth = depthMat.clone();
+        frozenColor = colorForDepth.clone();
+        frozenFrame = frame.clone();
+        frozenW = outW;
+        frozenH = outH;
+        frozenFrameIdx = frameIdx;
 
         const auto frameEnd = std::chrono::steady_clock::now();
         const double gpuMs =
@@ -815,6 +1000,52 @@ static void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::
     closesocket(client);
 }
 
+static void RgbdStreamWorker(SOCKET client, RgbdStreamBuffer* streamBuf, std::atomic<bool>* active) {
+    if (!streamBuf) {
+        closesocket(client);
+        return;
+    }
+
+    LogInfo("RGBD stream client connected.");
+    if (active) active->store(true);
+    streamBuf->stop = false;
+
+    std::string ok = "OK rgbd_stream fmt=depth32f+bgr24\n";
+    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+
+    while (true) {
+        std::vector<float> localDepth;
+        std::vector<unsigned char> localBgr;
+        int w = 0, h = 0;
+        uint32_t frameIdx = 0;
+        {
+            std::unique_lock<std::mutex> lock(streamBuf->mu);
+            streamBuf->cv.wait(lock, [&] { return streamBuf->hasFrame || streamBuf->stop; });
+            if (streamBuf->stop) break;
+            localDepth = streamBuf->depth;
+            localBgr = streamBuf->bgr;
+            w = streamBuf->width;
+            h = streamBuf->height;
+            frameIdx = streamBuf->frameIdx;
+            streamBuf->hasFrame = false;
+        }
+
+        const uint32_t depthBytes = static_cast<uint32_t>(localDepth.size() * sizeof(float));
+        const uint32_t bgrBytes = static_cast<uint32_t>(localBgr.size());
+        uint32_t header[5] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), depthBytes, bgrBytes};
+        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(localDepth.data()), depthBytes, 0);
+        if (sent <= 0) break;
+        sent = send(client, reinterpret_cast<const char*>(localBgr.data()), bgrBytes, 0);
+        if (sent <= 0) break;
+    }
+
+    LogWarn("RGBD stream client disconnected.");
+    if (active) active->store(false);
+    closesocket(client);
+}
+
 static void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomic<bool>* active) {
     if (!streamBuf) {
         closesocket(client);
@@ -903,8 +1134,11 @@ int main(int argc, char** argv) {
     std::thread streamThread;
     std::atomic<bool> workerStop{false};
     DepthStreamBuffer depthStream;
+    std::thread rgbdStreamThread;
+    RgbdStreamBuffer rgbdStream;
     bool workerRunning = false;
     std::atomic<bool> streamActive{false};
+    std::atomic<bool> rgbdStreamActive{false};
     std::thread pcStreamThread;
     ImageStreamBuffer pcStream;
     std::atomic<bool> pcStreamActive{false};
@@ -913,6 +1147,9 @@ int main(int argc, char** argv) {
     while (true) {
         if (streamThread.joinable() && !streamActive.load()) {
             streamThread.join();
+        }
+        if (rgbdStreamThread.joinable() && !rgbdStreamActive.load()) {
+            rgbdStreamThread.join();
         }
         if (pcStreamThread.joinable() && !pcStreamActive.load()) {
             pcStreamThread.join();
@@ -963,6 +1200,22 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        if (req.rgbdStream) {
+            if (rgbdStreamThread.joinable()) {
+                {
+                    std::unique_lock<std::mutex> lock(rgbdStream.mu);
+                    rgbdStream.stop = true;
+                    lock.unlock();
+                }
+                rgbdStream.cv.notify_all();
+                rgbdStreamThread.join();
+            }
+            rgbdStreamThread = std::thread([client, &rgbdStream, &rgbdStreamActive]() {
+                RgbdStreamWorker(client, &rgbdStream, &rgbdStreamActive);
+            });
+            continue;
+        }
+
         if (req.pcStream) {
             if (pcStreamThread.joinable()) {
                 {
@@ -986,7 +1239,8 @@ int main(int argc, char** argv) {
             bool fyNow = false;
             bool fzNow = false;
             bool wireNow = false;
-            if (req.rxSet || req.rySet || req.flipXSet || req.flipYSet || req.flipZSet || req.wireSet) {
+            bool meshNow = false;
+            if (req.rxSet || req.rySet || req.flipXSet || req.flipYSet || req.flipZSet || req.wireSet || req.meshSet) {
                 std::lock_guard<std::mutex> lock(viewParams.mu);
                 if (req.rxSet) viewParams.rotX = req.rx;
                 if (req.rySet) viewParams.rotY = req.ry;
@@ -994,12 +1248,14 @@ int main(int argc, char** argv) {
                 if (req.flipYSet) viewParams.flipY = req.flipY;
                 if (req.flipZSet) viewParams.flipZ = req.flipZ;
                 if (req.wireSet) viewParams.wire = req.wire;
+                if (req.meshSet) viewParams.mesh = req.mesh;
                 rxNow = viewParams.rotX;
                 ryNow = viewParams.rotY;
                 fxNow = viewParams.flipX;
                 fyNow = viewParams.flipY;
                 fzNow = viewParams.flipZ;
                 wireNow = viewParams.wire;
+                meshNow = viewParams.mesh;
             } else {
                 std::lock_guard<std::mutex> lock(viewParams.mu);
                 rxNow = viewParams.rotX;
@@ -1008,6 +1264,7 @@ int main(int argc, char** argv) {
                 fyNow = viewParams.flipY;
                 fzNow = viewParams.flipZ;
                 wireNow = viewParams.wire;
+                meshNow = viewParams.mesh;
             }
             SendResponse(client,
                          "OK pc_view rx=" + std::to_string(rxNow) +
@@ -1015,7 +1272,20 @@ int main(int argc, char** argv) {
                          " flipx=" + std::to_string(fxNow ? 1 : 0) +
                          " flipy=" + std::to_string(fyNow ? 1 : 0) +
                          " flipz=" + std::to_string(fzNow ? 1 : 0) +
-                         " wire=" + std::to_string(wireNow ? 1 : 0) + "\n");
+                         " wire=" + std::to_string(wireNow ? 1 : 0) +
+                         " mesh=" + std::to_string(meshNow ? 1 : 0) + "\n");
+            closesocket(client);
+            continue;
+        }
+
+        if (req.pauseSet) {
+            bool pausedNow = false;
+            {
+                std::lock_guard<std::mutex> lock(viewParams.mu);
+                viewParams.paused = req.pause;
+                pausedNow = viewParams.paused;
+            }
+            SendResponse(client, std::string("OK pause=") + (pausedNow ? "1\n" : "0\n"));
             closesocket(client);
             continue;
         }
@@ -1038,8 +1308,8 @@ int main(int argc, char** argv) {
         if (req.gui) headless = false;
 
         workerStop.store(false);
-        worker = std::thread([channel, headless, &workerStop, &depthStream, &pcStream, &viewParams]() {
-            bool ok = RunDepthWorker(channel, headless, workerStop, &depthStream, &pcStream, &viewParams);
+        worker = std::thread([channel, headless, &workerStop, &depthStream, &rgbdStream, &pcStream, &viewParams]() {
+            bool ok = RunDepthWorker(channel, headless, workerStop, &depthStream, &rgbdStream, &pcStream, &viewParams);
             if (!ok) LogError("Worker exited with errors.");
         });
         workerRunning = true;
@@ -1065,6 +1335,15 @@ int main(int argc, char** argv) {
         }
         depthStream.cv.notify_all();
         streamThread.join();
+    }
+    if (rgbdStreamThread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lock(rgbdStream.mu);
+            rgbdStream.stop = true;
+            lock.unlock();
+        }
+        rgbdStream.cv.notify_all();
+        rgbdStreamThread.join();
     }
     if (pcStreamThread.joinable()) {
         {

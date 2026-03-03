@@ -159,7 +159,8 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                                        bool flipX = false,
                                        bool flipY = false,
                                        bool flipZ = false,
-                                       bool wireframe = false) {
+                                       bool wireframe = false,
+                                       bool meshfill = false) {
     cv::Mat canvas(outH, outW, CV_8UC3, cv::Scalar(0, 0, 0));
     if (!depth || width <= 0 || height <= 0) return canvas;
     if (bgr.empty() || bgr.cols != width || bgr.rows != height || bgr.type() != CV_8UC3) {
@@ -255,6 +256,41 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
         }
     }
 
+    if (meshfill) {
+        constexpr float kDepthJumpRatio = 0.18f;
+        auto depthClose = [&](float a, float b) -> bool {
+            const float m = std::max(a, b);
+            if (m <= 1e-6f) return false;
+            return std::abs(a - b) / m <= kDepthJumpRatio;
+        };
+
+        for (int y = 0; y + 1 < gy; ++y) {
+            for (int x = 0; x + 1 < gx; ++x) {
+                const auto& p00 = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                const auto& p10 = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+                const auto& p01 = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
+                const auto& p11 = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
+
+                if (p00.valid && p10.valid && p01.valid &&
+                    depthClose(p00.z, p10.z) && depthClose(p00.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    cv::Point tri1[3] = {cv::Point(p00.px, p00.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
+                    cv::Scalar c1((p00.color[0] + p10.color[0] + p01.color[0]) / 3.0,
+                                  (p00.color[1] + p10.color[1] + p01.color[1]) / 3.0,
+                                  (p00.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    cv::fillConvexPoly(canvas, tri1, 3, c1, cv::LINE_AA);
+                }
+                if (p11.valid && p10.valid && p01.valid &&
+                    depthClose(p11.z, p10.z) && depthClose(p11.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    cv::Point tri2[3] = {cv::Point(p11.px, p11.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
+                    cv::Scalar c2((p11.color[0] + p10.color[0] + p01.color[0]) / 3.0,
+                                  (p11.color[1] + p10.color[1] + p01.color[1]) / 3.0,
+                                  (p11.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    cv::fillConvexPoly(canvas, tri2, 3, c2, cv::LINE_AA);
+                }
+            }
+        }
+    }
+
     if (wireframe) {
         constexpr float kDepthJumpRatio = 0.18f;
         auto depthClose = [&](float a, float b) -> bool {
@@ -271,15 +307,18 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                 if (x + 1 < gx) {
                     const auto& q = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
                     if (q.valid && depthClose(p.z, q.z)) {
-                        // Use a fixed bright color so wireframe mode is visually obvious.
-                        cv::Scalar c(80, 255, 80);
+                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
+                                     (p.color[1] + q.color[1]) * 0.5,
+                                     (p.color[2] + q.color[2]) * 0.5);
                         cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
                     }
                 }
                 if (y + 1 < gy) {
                     const auto& q = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
                     if (q.valid && depthClose(p.z, q.z)) {
-                        cv::Scalar c(80, 255, 80);
+                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
+                                     (p.color[1] + q.color[1]) * 0.5,
+                                     (p.color[2] + q.color[2]) * 0.5);
                         cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
                     }
                 }
