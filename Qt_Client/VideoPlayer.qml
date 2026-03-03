@@ -30,12 +30,32 @@ Item {
     signal cameraFpsChanged(int cameraIndex, int fps)
     signal doubleClicked()
 
+    function pauseStream() {
+        if (root.source === "")
+            return
+        startPlayTimer.stop()
+        reconnectTimer.stop()
+        vlc.userPaused = true
+        mediaPlayer.pause()
+    }
+
+    function resumeStream() {
+        if (root.source === "")
+            return
+        reconnectTimer.stop()
+        vlc.userPaused = false
+        if (mediaPlayer.source.toString() !== root.source) {
+            mediaPlayer.source = root.source
+        }
+        mediaPlayer.play()
+    }
+
     function restartStream() {
         if (root.source === "")
             return
         startPlayTimer.stop()
         vlc.stop()
-        // Small delay helps camera-side stream reconfiguration settle.
+        // 카메라 측 스트림 재구성 안정화용 짧은 지연
         startPlayTimer.interval = 350
         startPlayTimer.start()
     }
@@ -141,7 +161,7 @@ Item {
                             }
                             Text {
                                 id: statusLabel
-                                text: vlc.isPlaying ? "LIVE" : "OFFLINE"
+                                text: (vlc.isPlaying && vlc.hasRecentFrames) ? "LIVE" : "OFFLINE"
                                 color: text === "LIVE" ? (theme ? theme.accent : "#f97316") : "#71717a"
                                 font.bold: true
                                 font.pixelSize: 9
@@ -169,18 +189,22 @@ Item {
                     anchors.fill: parent
                     property string url: ""
                     property bool isPlaying: false
+                    property bool hasRecentFrames: false
                     property real fps: 0
                     property int videoWidth: (videoOutput.videoSink && videoOutput.videoSink.videoSize.width > 0) ? videoOutput.videoSink.videoSize.width : 0
                     property int videoHeight: (videoOutput.videoSink && videoOutput.videoSink.videoSize.height > 0) ? videoOutput.videoSink.videoSize.height : 0
                     property int frameCounter: 0
+                    property int noFrameSeconds: 0
                     property int reconnectAttempt: 0
                     property int maxReconnectAttempt: 6
+                    property bool userPaused: false
 
                     function play() {
                         if (url === "")
                             return
                         reconnectTimer.stop()
                         reconnectAttempt = 0
+                        userPaused = false
                         if (mediaPlayer.source.toString() !== url) {
                             mediaPlayer.source = url
                         }
@@ -192,6 +216,7 @@ Item {
                         mediaPlayer.stop()
                         mediaPlayer.source = ""
                         reconnectAttempt = 0
+                        userPaused = false
                         frameCounter = 0
                         fps = 0
                     }
@@ -207,7 +232,7 @@ Item {
                     }
 
                     function setDigitalZoom(scale, focusX, focusY) {
-                        // No-op: zoom is implemented in QML transform.
+                        // 무동작 처리(줌 기능 QML 변환 구현)
                     }
 
                     onIsPlayingChanged: {
@@ -216,6 +241,8 @@ Item {
                             root.cameraFpsChanged(root.cameraIndex, 0)
                             frameCounter = 0
                             fps = 0
+                            hasRecentFrames = false
+                            noFrameSeconds = 0
                         }
                     }
 
@@ -238,6 +265,9 @@ Item {
                         onErrorOccurred: function(error, errorString) {
                             vlc.isPlaying = false
                             console.warn("MediaPlayer error:", error, errorString)
+                            if (vlc.userPaused) {
+                                return
+                            }
                             vlc.scheduleReconnect()
                         }
                     }
@@ -280,9 +310,19 @@ Item {
                                 if (vlc.fps !== 0)
                                     vlc.fps = 0
                                 vlc.frameCounter = 0
+                                vlc.hasRecentFrames = false
+                                vlc.noFrameSeconds = 0
                                 return
                             }
                             vlc.fps = vlc.frameCounter
+                            if (vlc.frameCounter > 0) {
+                                vlc.hasRecentFrames = true
+                                vlc.noFrameSeconds = 0
+                            } else {
+                                vlc.noFrameSeconds += 1
+                                if (vlc.noFrameSeconds >= 2)
+                                    vlc.hasRecentFrames = false
+                            }
                             vlc.frameCounter = 0
                         }
                     }

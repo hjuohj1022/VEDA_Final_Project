@@ -372,7 +372,7 @@ Item {
                                         return
                                     if (Math.abs(mouse.x - pressX) > 8 || Math.abs(mouse.y - pressY) > 8) {
                                         dragDetected = true
-                                        // Let ListView handle drag-flick scrolling.
+                                        // 리스트뷰 드래그-플릭 스크롤 처리 위임
                                         mouse.accepted = false
                                     }
                                 }

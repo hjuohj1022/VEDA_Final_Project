@@ -12,7 +12,7 @@
 #include <QFileInfo>
 #include <QElapsedTimer>
 
-// 서버에서 녹화 목록을 조회한다.
+// 서버 녹화 목록 조회
 void Backend::refreshRecordings() {
     QUrl url(serverUrl() + "/recordings");
     QNetworkRequest request(url);
@@ -59,7 +59,7 @@ void Backend::refreshRecordings() {
     });
 }
 
-// 선택한 녹화 파일을 삭제한다.
+// 선택 녹화 파일 삭제
 void Backend::deleteRecording(QString name) {
     QUrl url(serverUrl() + "/recordings");
     QUrlQuery query;
@@ -80,7 +80,7 @@ void Backend::deleteRecording(QString name) {
     });
 }
 
-// 선택한 녹화 파일 이름을 변경한다.
+// 선택 녹화 파일 이름 변경
 void Backend::renameRecording(QString oldName, QString newName) {
     QUrl url(serverUrl() + "/recordings/rename");
     QNetworkRequest request(url);
@@ -104,7 +104,7 @@ void Backend::renameRecording(QString oldName, QString newName) {
     });
 }
 
-// 녹화 파일 스트림 URL을 만든다.
+// 녹화 파일 스트림 URL 생성
 QString Backend::getStreamUrl(QString fileName) {
     QUrl url(serverUrl() + "/stream");
     QUrlQuery query;
@@ -113,7 +113,7 @@ QString Backend::getStreamUrl(QString fileName) {
     return url.toString();
 }
 
-// 녹화 파일을 임시 저장 후 재생한다.
+// 녹화 파일 임시 저장 후 재생
 void Backend::downloadAndPlay(QString fileName) {
     qDebug() << "Backend::downloadAndPlay called for:" << fileName;
     if (m_downloadReply) {
@@ -125,7 +125,7 @@ void Backend::downloadAndPlay(QString fileName) {
     const QString localName = QFileInfo(fileName).fileName();
     m_tempFilePath = tempDir + "/" + (localName.isEmpty() ? QString("recording.mp4") : localName);
     if (QFile::exists(m_tempFilePath)) {
-        // 기존 임시 파일이 있으면 먼저 삭제한다.
+        // 기존 임시 파일 선삭제
         QFile::remove(m_tempFilePath);
     }
     QUrl url = QUrl(getStreamUrl(fileName));
@@ -161,7 +161,7 @@ void Backend::downloadAndPlay(QString fileName) {
     });
 }
 
-// 진행 중 다운로드를 취소한다.
+// 진행 중 다운로드 취소
 void Backend::cancelDownload() {
     if (m_downloadReply) {
         QNetworkReply *reply = m_downloadReply;
@@ -175,7 +175,7 @@ void Backend::cancelDownload() {
     }
 }
 
-// 녹화 파일을 지정 경로로 내보낸다.
+// 녹화 파일 지정 경로 내보내기
 void Backend::exportRecording(QString fileName, QString savePath) {
     cancelDownload();
     m_tempFilePath = savePath;
@@ -210,7 +210,7 @@ void Backend::exportRecording(QString fileName, QString savePath) {
     });
 }
 
-// 서버 스토리지 사용량을 조회한다.
+// 서버 스토리지 사용량 조회
 void Backend::checkStorage() {
     QUrl url(serverUrl() + "/system/storage");
     QNetworkRequest request(url);
@@ -228,7 +228,7 @@ void Backend::checkStorage() {
     });
 }
 
-// 스토리지 API 응답을 파싱해 상태를 갱신한다.
+// 스토리지 API 응답 파싱 및 상태 갱신
 void Backend::onStorageReply(QNetworkReply *reply) {
     if (reply->error() == QNetworkReply::NoError) {
         QByteArray responseData = reply->readAll();

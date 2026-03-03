@@ -33,11 +33,28 @@ ApplicationWindow {
     property bool streamPrewarmEnabled: true
     property int inlineMainCameraIndex: -1
     property bool inlineMainViewVisible: false
+    property int lastStackIndex: -1
+    property string playbackSourceUrl: ""
+    property string playbackTitleText: "Playback Stream"
     property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
 
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
         return cameraNames[index]
+    }
+
+    function teardownPlaybackSession() {
+        if (!rightSidebar) {
+            playbackSourceUrl = ""
+            return
+        }
+        if (rightSidebar.playbackRunning || rightSidebar.playbackPending || playbackSourceUrl.length > 0) {
+            backend.playbackWsPause()
+            backend.streamingWsDisconnect()
+        }
+        rightSidebar.playbackRunning = false
+        rightSidebar.playbackPending = false
+        playbackSourceUrl = ""
     }
 
     function startRtspConnectCheck(resetStats) {
@@ -459,12 +476,18 @@ ApplicationWindow {
                                 currentIndex: backend.isLoggedIn
                                               ? (window.inlineMainViewVisible ? 3 : 0)
                                               : 1
+                                onCurrentIndexChanged: {
+                                    if (window.lastStackIndex === 2 && currentIndex !== 2) {
+                                        window.teardownPlaybackSession()
+                                    }
+                                    window.lastStackIndex = currentIndex
+                                }
 
                                 VideoGrid {
                                     id: videoGrid
                                     theme: window.appTheme
                                     cameraNames: window.cameraNames
-                                    // Keep sub streams running even while inline main view is open.
+                                    // 인라인 메인뷰 오픈 상태에서도 서브스트림 유지
                                     isActive: (backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn))
                                     visible: stackLayout.currentIndex === 0
                                     onOpenMainViewRequested: function(cameraIndex) {
@@ -482,6 +505,22 @@ ApplicationWindow {
                                 PlaybackScreen {
                                     id: playbackScreen
                                     theme: window.appTheme
+                                    playbackSource: window.playbackSourceUrl
+                                    playbackTitle: window.playbackTitleText
+                                    playbackCurrentSeconds: rightSidebar.playbackCurrentSeconds
+                                    playbackSegments: rightSidebar.playbackSegments
+                                    playbackTimelineInfoText: rightSidebar.playbackTimelineInfoText
+                                    onSeekRequested: function(seconds) {
+                                        rightSidebar.syncTimeFromSeconds(seconds)
+                                        if (rightSidebar.playbackRunning && !rightSidebar.playbackPending) {
+                                            var d = rightSidebar.formatPlaybackDate()
+                                            var t = rightSidebar.formatPlaybackTime()
+                                            rightSidebar.playbackPending = true
+                                            window.playbackTitleText = "CH " + (rightSidebar.playbackChannelIndex + 1) + " - " + d + " " + t
+                                            window.playbackSourceUrl = ""
+                                            backend.preparePlaybackRtsp(rightSidebar.playbackChannelIndex, d, t)
+                                        }
+                                    }
                                 }
 
                                 Item {
@@ -536,6 +575,7 @@ ApplicationWindow {
             }
 
             Sidebar {
+                id: rightSidebar
                 Layout.preferredWidth: backend.isLoggedIn ? 256 : 0
                 Layout.fillHeight: true
                 theme: window.appTheme
@@ -552,7 +592,31 @@ ApplicationWindow {
                     window.cameraNames = next
                 }
                 onRequestPlayback: function(channelIndex, dateText, timeText) {
-                    console.log("[PLAYBACK] request", "channel=", channelIndex, "date=", dateText, "time=", timeText)
+                    if (dateText.length === 0 || timeText.length === 0) {
+                        console.warn("[PLAYBACK] date/time is empty")
+                        return
+                    }
+                    rightSidebar.applyPlaybackStart(dateText, timeText)
+                    window.playbackTitleText = "CH " + (channelIndex + 1) + " - " + dateText + " " + timeText
+                    window.playbackSourceUrl = ""
+                    backend.preparePlaybackRtsp(channelIndex, dateText, timeText)
+                }
+                onRequestPlaybackSeek: function(channelIndex, dateText, timeText) {
+                    window.playbackTitleText = "CH " + (channelIndex + 1) + " - " + dateText + " " + timeText
+                    window.playbackSourceUrl = ""
+                    backend.preparePlaybackRtsp(channelIndex, dateText, timeText)
+                }
+                onRequestPlaybackTimeline: function(channelIndex, dateText) {
+                    backend.loadPlaybackTimeline(channelIndex, dateText)
+                }
+                onRequestPlaybackMonthDays: function(channelIndex, year, month) {
+                    backend.loadPlaybackMonthRecordedDays(channelIndex, year, month)
+                }
+                onRequestPlaybackPause: {
+                    playbackScreen.pausePlayback()
+                }
+                onRequestPlaybackResume: {
+                    playbackScreen.resumePlayback()
                 }
             }
         }
@@ -636,6 +700,63 @@ ApplicationWindow {
                 window.rtspConfigIsError = true
                 window.rtspConfigError = "IP/포트 형식을 확인해 주세요."
             }
+        }
+        function onPlaybackPrepared(url) {
+            window.playbackSourceUrl = url
+            rightSidebar.playbackRunning = true
+            rightSidebar.playbackPending = false
+            console.log("[PLAYBACK] source:", window.playbackSourceUrl)
+        }
+        function onPlaybackPrepareFailed(error) {
+            rightSidebar.playbackRunning = false
+            rightSidebar.playbackPending = false
+            console.warn("[PLAYBACK] prepare failed:", error)
+        }
+        function onPlaybackTimelineLoaded(channelIndex, dateText, segments) {
+            if (!rightSidebar.showPlaybackControls)
+                return
+            if (channelIndex !== rightSidebar.playbackChannelIndex)
+                return
+            rightSidebar.playbackSegments = segments
+        }
+        function onPlaybackTimelineFailed(error) {
+            if (rightSidebar.showPlaybackControls) {
+                rightSidebar.playbackSegments = []
+            }
+            console.warn("[PLAYBACK][TIMELINE]", error)
+        }
+        function onPlaybackMonthRecordedDaysLoaded(channelIndex, yearMonth, days) {
+            if (!rightSidebar.showPlaybackControls)
+                return
+            if (channelIndex !== rightSidebar.playbackChannelIndex)
+                return
+            var ym = rightSidebar.playbackViewYear + "-" + (rightSidebar.playbackViewMonth + 1 < 10 ? "0" : "") + (rightSidebar.playbackViewMonth + 1)
+            if (yearMonth !== ym)
+                return
+            rightSidebar.playbackRecordedDays = days
+        }
+        function onPlaybackMonthRecordedDaysFailed(error) {
+            if (rightSidebar.showPlaybackControls) {
+                rightSidebar.playbackRecordedDays = []
+            }
+            console.warn("[PLAYBACK][MONTH_DAYS]", error)
+        }
+        function onStreamingWsStateChanged(state) {
+            console.log("[PLAYBACK][WS] state:", state)
+        }
+        function onStreamingWsFrame(direction, hexPayload) {
+            if (direction === "recv-bin") {
+                // 로그 노이즈 방지: RTP 바이너리 프레임은 생략하고 RTSP 제어응답만 출력
+                if (!hexPayload.startsWith("525453502F312E30"))
+                    return
+            }
+            var preview = hexPayload
+            if (preview.length > 96)
+                preview = preview.slice(0, 96) + "..."
+            console.log("[PLAYBACK][WS]", direction, preview)
+        }
+        function onStreamingWsError(error) {
+            console.warn("[PLAYBACK][WS] error:", error)
         }
     }
 
