@@ -1,4 +1,4 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -14,10 +14,8 @@
 
 // 서버 녹화 목록 조회
 void Backend::refreshRecordings() {
-    QUrl url(serverUrl() + "/recordings");
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
-    qDebug() << "Refreshing recordings from:" << url.toString();
+    QNetworkRequest request = makeApiJsonRequest("/recordings");
+    qDebug() << "Refreshing recordings from:" << request.url().toString();
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "RECORDINGS_LIST");
     connect(reply, &QNetworkReply::finished, this, [=](){
@@ -61,12 +59,9 @@ void Backend::refreshRecordings() {
 
 // 선택 녹화 파일 삭제
 void Backend::deleteRecording(QString name) {
-    QUrl url(serverUrl() + "/recordings");
-    QUrlQuery query;
-    query.addQueryItem("file", name);
-    url.setQuery(query);
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
+    QMap<QString, QString> query;
+    query.insert("file", name);
+    QNetworkRequest request = makeApiJsonRequest("/recordings", query);
     QNetworkReply *reply = m_manager->deleteResource(request);
     attachIgnoreSslErrors(reply, "RECORDINGS_DELETE");
     connect(reply, &QNetworkReply::finished, this, [=](){
@@ -82,10 +77,7 @@ void Backend::deleteRecording(QString name) {
 
 // 선택 녹화 파일 이름 변경
 void Backend::renameRecording(QString oldName, QString newName) {
-    QUrl url(serverUrl() + "/recordings/rename");
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkRequest request = makeApiJsonRequest("/recordings/rename");
 
     QJsonObject json;
     json["oldName"] = oldName;
@@ -106,11 +98,9 @@ void Backend::renameRecording(QString oldName, QString newName) {
 
 // 녹화 파일 스트림 URL 생성
 QString Backend::getStreamUrl(QString fileName) {
-    QUrl url(serverUrl() + "/stream");
-    QUrlQuery query;
-    query.addQueryItem("file", fileName);
-    url.setQuery(query);
-    return url.toString();
+    QMap<QString, QString> query;
+    query.insert("file", fileName);
+    return buildApiUrl("/stream", query).toString();
 }
 
 // 녹화 파일 임시 저장 후 재생
@@ -128,9 +118,10 @@ void Backend::downloadAndPlay(QString fileName) {
         // 기존 임시 파일 선삭제
         QFile::remove(m_tempFilePath);
     }
-    QUrl url = QUrl(getStreamUrl(fileName));
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
+    
+    QMap<QString, QString> query;
+    query.insert("file", fileName);
+    QNetworkRequest request = makeApiJsonRequest("/stream", query);
     m_downloadReply = m_manager->get(request);
     attachIgnoreSslErrors(m_downloadReply, "RECORDINGS_DOWNLOAD_PLAY");
 
@@ -180,9 +171,9 @@ void Backend::exportRecording(QString fileName, QString savePath) {
     cancelDownload();
     m_tempFilePath = savePath;
 
-    QUrl url = QUrl(getStreamUrl(fileName));
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
+    QMap<QString, QString> query;
+    query.insert("file", fileName);
+    QNetworkRequest request = makeApiJsonRequest("/stream", query);
     m_downloadReply = m_manager->get(request);
     attachIgnoreSslErrors(m_downloadReply, "RECORDINGS_EXPORT");
 
@@ -212,9 +203,7 @@ void Backend::exportRecording(QString fileName, QString savePath) {
 
 // 서버 스토리지 사용량 조회
 void Backend::checkStorage() {
-    QUrl url(serverUrl() + "/system/storage");
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
+    QNetworkRequest request = makeApiJsonRequest("/system/storage");
     QElapsedTimer timer;
     timer.start();
     QNetworkReply *reply = m_manager->get(request);

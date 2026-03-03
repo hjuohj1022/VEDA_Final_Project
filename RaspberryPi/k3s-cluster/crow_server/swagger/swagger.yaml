@@ -5,11 +5,16 @@ info:
   version: 1.0.0
 servers:
   - url: https://192.168.55.200/
-    description: Development Server
+    description: Production Server (Raspberry Pi)
+  - url: http://localhost:8080/
+    description: Local Test Server
 paths:
+  # === 회원가입 ===
   /register:
     post:
       summary: User Registration
+      tags:
+        - Authentication
       requestBody:
         required: true
         content:
@@ -19,8 +24,10 @@ paths:
               properties:
                 id:
                   type: string
+                  example: "team3"
                 password:
                   type: string
+                  example: "password123"
       responses:
         '201':
           description: Registration successful
@@ -28,9 +35,13 @@ paths:
           description: Invalid JSON or missing parameters
         '409':
           description: ID already exists
+
+  # === 로그인 (JWT 발급) ===
   /login:
     post:
-      summary: User Login (JWT Issue)
+      summary: User Login (Get JWT Token)
+      tags:
+        - Authentication
       requestBody:
         required: true
         content:
@@ -40,16 +51,33 @@ paths:
               properties:
                 id:
                   type: string
+                  example: "team3"
                 password:
                   type: string
+                  example: "password123"
       responses:
         '200':
           description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  status:
+                    type: string
+                    example: "success"
         '401':
           description: Authentication failed
+
+  # === 녹화 영상 관리 ===
   /recordings:
     get:
       summary: Get MP4 recording list
+      tags:
+        - Recordings
       security:
         - bearerAuth: []
       responses:
@@ -59,6 +87,8 @@ paths:
           description: Unauthorized
     delete:
       summary: Delete recording file
+      tags:
+        - Recordings
       security:
         - bearerAuth: []
       parameters:
@@ -67,15 +97,20 @@ paths:
           required: true
           schema:
             type: string
-          description: Filename to delete (e.g., recording_1.mp4)
+            example: "20260303_120000.mp4"
+          description: Filename to delete
       responses:
         '200':
-          description: Deleted
+          description: Deleted successfully
         '404':
-          description: Not Found
+          description: File not found
+
+  # === 스트리밍 ===
   /stream:
     get:
       summary: Video Streaming (Range support)
+      tags:
+        - Streaming
       security:
         - bearerAuth: []
       parameters:
@@ -84,12 +119,17 @@ paths:
           required: true
           schema:
             type: string
+            example: "20260303_120000.mp4"
       responses:
         '206':
-          description: Partial Content
+          description: Partial Content (Streaming)
+
+  # === 시스템 정보 ===
   /system/storage:
     get:
       summary: Get system storage usage
+      tags:
+        - System
       security:
         - bearerAuth: []
       responses:
@@ -102,18 +142,30 @@ paths:
                 properties:
                   total_bytes:
                     type: integer
+                    format: int64
+                    example: 32000000000
                   used_bytes:
                     type: integer
+                    format: int64
+                    example: 15000000000
                   available_bytes:
                     type: integer
+                    format: int64
+                    example: 17000000000
         '401':
           description: Unauthorized
+
+  # === 헬스 체크 ===
   /health:
     get:
       summary: Server health check
+      tags:
+        - System
       responses:
         '200':
           description: OK
+
+# === 보안 설정 (JWT) ===
 components:
   securitySchemes:
     bearerAuth:

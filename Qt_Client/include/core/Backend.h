@@ -197,6 +197,7 @@ private:
 
     bool m_isLoggedIn = false;
     QString m_userId;
+    QString m_accessToken;
     int m_sessionRemainingSeconds = 0;
     const int m_sessionTimeoutSeconds = 300;
     bool m_loginLocked = false;

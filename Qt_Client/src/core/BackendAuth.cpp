@@ -1,4 +1,4 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -60,6 +60,16 @@ void Backend::login(QString id, QString pw) {
                    << "errorString=" << reply->errorString();
 
         if (reply->error() == QNetworkReply::NoError) {
+            QByteArray responseData = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(responseData);
+            if (!doc.isNull() && doc.isObject()) {
+                QJsonObject obj = doc.object();
+                if (obj.contains("access_token")) {
+                    m_accessToken = obj["access_token"].toString();
+                    qInfo() << "[LOGIN] Access token received and stored.";
+                }
+            }
+
             m_isLoggedIn = true;
             m_userId = id;
             m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
@@ -158,6 +168,7 @@ void Backend::logout() {
 
     m_isLoggedIn = false;
     m_userId.clear();
+    m_accessToken.clear();
     m_sessionTimer->stop();
     m_sessionRemainingSeconds = 0;
 

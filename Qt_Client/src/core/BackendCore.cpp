@@ -1,4 +1,4 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -12,6 +12,7 @@
 #include <QSslKey>
 #include <QSslSocket>
 #include <QTextStream>
+#include <QUrlQuery>
 
 // 실행 경로 기준 .env 탐색 및 로드
 void Backend::loadEnv() {
@@ -402,4 +403,30 @@ void Backend::setLatency(int ms) {
         m_latency = ms;
         emit latencyChanged();
     }
+}
+
+QUrl Backend::buildApiUrl(const QString &path, const QMap<QString, QString> &query) const {
+    QUrl url(serverUrl() + path);
+    if (!query.isEmpty()) {
+        QUrlQuery urlQuery;
+        QMapIterator<QString, QString> it(query);
+        while (it.hasNext()) {
+            it.next();
+            urlQuery.addQueryItem(it.key(), it.value());
+        }
+        url.setQuery(urlQuery);
+    }
+    return url;
+}
+
+QNetworkRequest Backend::makeApiJsonRequest(const QString &path, const QMap<QString, QString> &query) const {
+    QNetworkRequest request(buildApiUrl(path, query));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    applySslIfNeeded(request);
+
+    if (!m_accessToken.isEmpty()) {
+        request.setRawHeader("Authorization", "Bearer " + m_accessToken.toUtf8());
+    }
+
+    return request;
 }
