@@ -6,34 +6,29 @@ pipeline {
         MAJOR_VER = '1'
         MINOR_VER = '0'
         
-        // 빌드 번호는 Jenkins에서 제공하는 ${BUILD_NUMBER} 사용
-        // Git Hash는 아래 '초기화' 스테이지에서 계산
-        
-        // === 2. 기본 설정 ===
         GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project.git' 
         DOCKER_CRED = 'docker-hub-login'
         KUBE_CONFIG = 'k3s-kubeconfig'
-        GIT_CREDENTIAL_ID = 'github-access-token' // ★ Git 태그 푸시를 위한 토큰 ID 필요
+        GIT_CREDENTIAL_ID = 'github-access-token'
     }
 
     stages {
-        // 🏁 0. 초기화 및 버전 계산 (새로 추가됨)
+        // 🏁 0. 초기화 및 버전 계산
         stage('초기화 및 버전 설정') {
             steps {
                 script {
-                    // Git Short Hash 계산 (앞 7자리)
+                    // Git Short Hash 계산
                     def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
                     
-                    // Docker용 풀 버전: 1.0.50-a1b2c3d (추적용)
+                    // Docker용 풀 버전: 1.0.50-a1b2c3d
                     env.DOCKER_VER = "${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}-${gitHash}"
                     
-                    // Git 태그용 버전: v1.0.50 (깔끔함)
+                    // Git 태그용 버전: v1.0.50
                     env.GIT_TAG_VER = "v${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}"
                     
                     echo "ℹ️ 이번 빌드 버전: ${env.DOCKER_VER}"
                 }
                 
-                // 시작 알림 (버전 정보 포함)
                 slackSend (
                     channel: 'C0ADS8RQAL9', 
                     color: '#439FE0',
@@ -111,7 +106,6 @@ pipeline {
                         echo "📡 MQTT 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            // ★ 수정됨: 버전 태그와 latest 태그 동시 푸시
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:${env.DOCKER_VER} -t hjuohj/mqtt-broker:latest --push ."
                         }
                     }
@@ -166,7 +160,6 @@ pipeline {
                             echo "🎥 MediaMTX 빌드: ${env.DOCKER_VER}"
                             withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                                 sh "echo $PASS | docker login -u $USER --password-stdin"
-                                // ★ 수정됨: 버전 태그와 latest 태그 동시 푸시
                                 sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:${env.DOCKER_VER} -t hjuohj/mediamtx-server:latest --push ."
                             }
                         }
@@ -197,7 +190,6 @@ pipeline {
                         echo "🐬 MariaDB 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            // ★ 수정됨: 버전 태그와 latest 태그 동시 푸시
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:${env.DOCKER_VER} -t hjuohj/mariadb-server:latest --push ."
                         }
                     }
@@ -239,7 +231,6 @@ pipeline {
                         echo "🛡️ Nginx Gateway 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            // ★ 수정됨: 버전 태그와 latest 태그 동시 푸시
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:${env.DOCKER_VER} -t hjuohj/nginx-gateway:latest --push ."
                         }
                     }
@@ -251,7 +242,7 @@ pipeline {
                 }
             }
         }
-        // Qt Client는 주석 처리된 상태 유지 (필요 시 위와 동일하게 env.DOCKER_VER 활용 가능)
+        
          // // 🖥️ 6. Qt Client (Windows)
         // stage('Qt Client (Windows CMake)') {
         //     agent { label 'windows-qt' } 
