@@ -106,6 +106,11 @@ public:
     Q_INVOKABLE bool streamingWsSendHex(QString hexPayload);
     Q_INVOKABLE bool playbackWsPause();
     Q_INVOKABLE bool playbackWsPlay();
+    Q_INVOKABLE void requestPlaybackExport(int channelIndex,
+                                           const QString &dateText,
+                                           const QString &startTimeText,
+                                           const QString &endTimeText,
+                                           const QString &savePath = QString());
 
     Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
     Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
@@ -159,10 +164,13 @@ signals:
     void streamingWsStateChanged(QString state);
     void streamingWsFrame(QString direction, QString hexPayload);
     void streamingWsError(QString error);
+    void playbackExportStarted(QString message);
+    void playbackExportProgress(int percent, QString message);
+    void playbackExportFinished(QString path);
+    void playbackExportFailed(QString error);
 
 private slots:
     void checkStorage();
-    void onStorageReply(QNetworkReply *reply);
     void onSessionTick();
 
 private:

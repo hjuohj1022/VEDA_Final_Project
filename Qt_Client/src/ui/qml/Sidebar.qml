@@ -21,6 +21,8 @@ Rectangle {
     property date playbackSelectedDate: new Date()
     property string playbackDateText: ""
     property string playbackTimeText: ""
+    property string playbackExportStartText: ""
+    property string playbackExportEndText: ""
     property var playbackSegments: []
     property bool playbackTimeInRange: false
     property string playbackTimelineInfoText: "녹화 구간 없음"
@@ -30,9 +32,9 @@ Rectangle {
     property var playbackRecordedDays: []
     signal requestCameraNameChange(int cameraIndex, string name)
     signal requestPlayback(int channelIndex, string dateText, string timeText)
-    signal requestPlaybackSeek(int channelIndex, string dateText, string timeText)
     signal requestPlaybackTimeline(int channelIndex, string dateText)
     signal requestPlaybackMonthDays(int channelIndex, int year, int month)
+    signal requestPlaybackExport(int channelIndex, string dateText, string startTimeText, string endTimeText)
     signal requestPlaybackPause()
     signal requestPlaybackResume()
     color: theme ? theme.bgSecondary : "#09090b"
@@ -80,6 +82,42 @@ Rectangle {
         playbackViewYear = dt.getFullYear()
         playbackViewMonth = dt.getMonth()
         playbackDateText = formatPlaybackDate()
+        return true
+    }
+    function isValidHmsText(t) {
+        var m = /^(\d{2}):(\d{2}):(\d{2})$/.exec((t || "").trim())
+        if (!m) return false
+        var h = parseInt(m[1], 10)
+        var mm = parseInt(m[2], 10)
+        var s = parseInt(m[3], 10)
+        return h >= 0 && h <= 23 && mm >= 0 && mm <= 59 && s >= 0 && s <= 59
+    }
+    function secToHms(sec) {
+        var s = Math.max(0, Math.min(86399, Math.floor(sec)))
+        return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
+    }
+    function applyExportRangeFromSecond(sec) {
+        var startSec = Math.max(0, Math.min(86399, Math.floor(sec)))
+        var endSec = Math.max(startSec, Math.min(86399, startSec + 300))
+        playbackExportStartText = secToHms(startSec)
+        playbackExportEndText = secToHms(endSec)
+    }
+    function syncExportStartFromFields() {
+        var hh = parseInt(playbackExportStartHourField.text, 10)
+        var mm = parseInt(playbackExportStartMinuteField.text, 10)
+        var ss = parseInt(playbackExportStartSecondField.text, 10)
+        if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59)
+            return false
+        playbackExportStartText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
+        return true
+    }
+    function syncExportEndFromFields() {
+        var hh = parseInt(playbackExportEndHourField.text, 10)
+        var mm = parseInt(playbackExportEndMinuteField.text, 10)
+        var ss = parseInt(playbackExportEndSecondField.text, 10)
+        if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59)
+            return false
+        playbackExportEndText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
         return true
     }
     function requestTimelineIfValid() {
@@ -205,6 +243,10 @@ Rectangle {
             playbackTimeText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
         }
         syncSecondsFromFields()
+        if (isValidHmsText(playbackTimeText)) {
+            playbackExportStartText = playbackTimeText
+            applyExportRangeFromSecond(playbackCurrentSeconds)
+        }
     }
     function daysInViewMonth() {
         return new Date(playbackViewYear, playbackViewMonth + 1, 0).getDate()
@@ -313,6 +355,8 @@ Rectangle {
             playbackDateText = formatPlaybackDate()
             playbackTimeText = "00:00:00"
             playbackCurrentSeconds = 0
+            playbackExportStartText = "00:00:00"
+            playbackExportEndText = "00:00:00"
         }
         if (showPlaybackControls) {
             requestTimelineIfValid()
@@ -345,9 +389,37 @@ Rectangle {
             playbackMinuteField.text = parts[1]
         if (playbackSecondField && playbackSecondField.text !== parts[2])
             playbackSecondField.text = parts[2]
+        if (!root.playbackRunning && !root.playbackPending && root.isValidHmsText(root.playbackTimeText)) {
+            if (!root.isValidHmsText(root.playbackExportStartText))
+                root.playbackExportStartText = root.playbackTimeText
+            if (!root.isValidHmsText(root.playbackExportEndText))
+                root.playbackExportEndText = root.playbackTimeText
+        }
     }
     onPlaybackSegmentsChanged: {
         updateTimelineInfo()
+    }
+    onPlaybackExportStartTextChanged: {
+        var parts = playbackExportStartText.split(":")
+        if (parts.length !== 3)
+            return
+        if (playbackExportStartHourField && playbackExportStartHourField.text !== parts[0])
+            playbackExportStartHourField.text = parts[0]
+        if (playbackExportStartMinuteField && playbackExportStartMinuteField.text !== parts[1])
+            playbackExportStartMinuteField.text = parts[1]
+        if (playbackExportStartSecondField && playbackExportStartSecondField.text !== parts[2])
+            playbackExportStartSecondField.text = parts[2]
+    }
+    onPlaybackExportEndTextChanged: {
+        var parts = playbackExportEndText.split(":")
+        if (parts.length !== 3)
+            return
+        if (playbackExportEndHourField && playbackExportEndHourField.text !== parts[0])
+            playbackExportEndHourField.text = parts[0]
+        if (playbackExportEndMinuteField && playbackExportEndMinuteField.text !== parts[1])
+            playbackExportEndMinuteField.text = parts[1]
+        if (playbackExportEndSecondField && playbackExportEndSecondField.text !== parts[2])
+            playbackExportEndSecondField.text = parts[2]
     }
     
     Rectangle {
@@ -375,8 +447,9 @@ Rectangle {
         Rectangle {
             visible: root.showPlaybackControls
             Layout.fillWidth: true
-            Layout.preferredHeight: root.showPlaybackControls ? 440 : 0
-            Layout.maximumHeight: root.showPlaybackControls ? 440 : 0
+            Layout.fillHeight: root.showPlaybackControls
+            Layout.minimumHeight: root.showPlaybackControls ? 500 : 0
+            clip: true
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
@@ -384,12 +457,12 @@ Rectangle {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
+                anchors.margins: 14
+                spacing: 10
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 6
+                    spacing: 8
 
                     Label {
                         text: "CH"
@@ -443,6 +516,7 @@ Rectangle {
                     TextField {
                         id: playbackDateTextField
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         text: root.playbackDateText
                         enabled: !root.playbackRunning && !root.playbackPending
                         inputMask: "0000-00-00;_"
@@ -468,12 +542,24 @@ Rectangle {
                     ControlButton {
                         text: "날짜"
                         compact: true
-                        Layout.preferredWidth: 58
+                        Layout.preferredWidth: 50
+                        Layout.minimumWidth: 50
+                        Layout.maximumWidth: 50
                         enabled: !root.playbackRunning && !root.playbackPending
                         onClicked: {
                             root.playbackCalendarVisible = !root.playbackCalendarVisible
-                            if (root.playbackCalendarVisible)
-                                root.requestMonthDays()
+                        }
+                    }
+
+                    ControlButton {
+                        text: "새로고침"
+                        compact: true
+                        Layout.preferredWidth: 58
+                        Layout.minimumWidth: 58
+                        Layout.maximumWidth: 58
+                        onClicked: {
+                            root.requestTimelineIfValid()
+                            root.requestMonthDays()
                         }
                     }
                 }
@@ -733,22 +819,7 @@ Rectangle {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 6
-
-                    ControlButton {
-                        text: "새로고침"
-                        Layout.preferredWidth: 86
-                        compact: true
-                        onClicked: {
-                            root.requestTimelineIfValid()
-                        }
-                    }
-                    Item { Layout.fillWidth: true }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
+                    spacing: 8
 
                     ControlButton {
                         text: "Play"
@@ -758,10 +829,16 @@ Rectangle {
                         onClicked: {
                             if (!root.syncDateFromField() || !root.syncSecondsFromFields())
                                 return
-                            var d = root.formatPlaybackDate()
-                            var t = root.formatPlaybackTime()
-                            root.playbackPending = true
-                            root.requestPlayback(root.playbackChannelIndex, d, t)
+                            if (backend.playbackWsPlay()) {
+                                root.playbackRunning = true
+                                root.playbackPending = false
+                                root.requestPlaybackResume()
+                            } else {
+                                var d = root.formatPlaybackDate()
+                                var t = root.formatPlaybackTime()
+                                root.playbackPending = true
+                                root.requestPlayback(root.playbackChannelIndex, d, t)
+                            }
                         }
                     }
 
@@ -774,24 +851,6 @@ Rectangle {
                             root.playbackPending = false
                             root.requestPlaybackPause()
                             backend.playbackWsPause()
-                        }
-                    }
-
-                    ControlButton {
-                        text: "Resume"
-                        Layout.fillWidth: true
-                        enabled: !root.playbackRunning && !root.playbackPending && root.playbackTimeInRange
-                        onClicked: {
-                            if (backend.playbackWsPlay()) {
-                                root.playbackRunning = true
-                                root.playbackPending = false
-                                root.requestPlaybackResume()
-                            } else {
-                                var d = root.formatPlaybackDate()
-                                var t = root.formatPlaybackTime()
-                                root.playbackPending = true
-                                root.requestPlaybackSeek(root.playbackChannelIndex, d, t)
-                            }
                         }
                     }
                 }
@@ -812,6 +871,193 @@ Rectangle {
                     color: theme ? theme.textSecondary : "#a1a1aa"
                     horizontalAlignment: Text.AlignHCenter
                 }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme ? theme.border : "#27272a"
+                    opacity: 0.9
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: "시작"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 11
+                        Layout.preferredWidth: 30
+                    }
+
+                    TextField {
+                        id: playbackExportStartHourField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportStartHourField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportStartFromFields()) {
+                                var p = root.playbackExportStartText.split(":")
+                                if (p.length === 3) text = p[0]
+                            }
+                        }
+                    }
+                    Label { text: ":"; color: theme ? theme.textPrimary : "white"; font.bold: true }
+                    TextField {
+                        id: playbackExportStartMinuteField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportStartMinuteField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportStartFromFields()) {
+                                var p = root.playbackExportStartText.split(":")
+                                if (p.length === 3) text = p[1]
+                            }
+                        }
+                    }
+                    Label { text: ":"; color: theme ? theme.textPrimary : "white"; font.bold: true }
+                    TextField {
+                        id: playbackExportStartSecondField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportStartSecondField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportStartFromFields()) {
+                                var p = root.playbackExportStartText.split(":")
+                                if (p.length === 3) text = p[2]
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: "끝"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 11
+                        Layout.preferredWidth: 30
+                    }
+
+                    TextField {
+                        id: playbackExportEndHourField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportEndHourField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportEndFromFields()) {
+                                var p = root.playbackExportEndText.split(":")
+                                if (p.length === 3) text = p[0]
+                            }
+                        }
+                    }
+                    Label { text: ":"; color: theme ? theme.textPrimary : "white"; font.bold: true }
+                    TextField {
+                        id: playbackExportEndMinuteField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportEndMinuteField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportEndFromFields()) {
+                                var p = root.playbackExportEndText.split(":")
+                                if (p.length === 3) text = p[1]
+                            }
+                        }
+                    }
+                    Label { text: ":"; color: theme ? theme.textPrimary : "white"; font.bold: true }
+                    TextField {
+                        id: playbackExportEndSecondField
+                        Layout.fillWidth: true
+                        enabled: !root.playbackPending
+                        inputMask: "00;_"
+                        text: "00"
+                        color: theme ? theme.textPrimary : "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        background: Rectangle {
+                            color: theme ? theme.bgSecondary : "#09090b"
+                            border.color: playbackExportEndSecondField.activeFocus ? theme.accent : theme.border
+                            border.width: 1
+                            radius: 6
+                        }
+                        onEditingFinished: {
+                            if (!root.syncExportEndFromFields()) {
+                                var p = root.playbackExportEndText.split(":")
+                                if (p.length === 3) text = p[2]
+                            }
+                        }
+                    }
+                }
+
+                ControlButton {
+                    text: "내보내기"
+                    Layout.fillWidth: true
+                    compact: true
+                    enabled: !root.playbackPending
+                             && /^\d{4}-\d{2}-\d{2}$/.test(root.playbackDateText)
+                             && root.isValidHmsText(root.playbackExportStartText)
+                             && root.isValidHmsText(root.playbackExportEndText)
+                             && (root.playbackExportStartText <= root.playbackExportEndText)
+                    onClicked: {
+                        if (!root.syncDateFromField())
+                            return
+                        if (!root.isValidHmsText(root.playbackExportStartText) || !root.isValidHmsText(root.playbackExportEndText))
+                            return
+                        if (root.playbackExportStartText > root.playbackExportEndText)
+                            return
+                        root.requestPlaybackExport(root.playbackChannelIndex,
+                                                   root.formatPlaybackDate(),
+                                                   root.playbackExportStartText,
+                                                   root.playbackExportEndText)
+                    }
+                }
+
             }
         }
 
@@ -1251,7 +1497,7 @@ Rectangle {
         }
 
         Item {
-            Layout.fillHeight: true
+            Layout.fillHeight: !root.showPlaybackControls
         }
     }
 }

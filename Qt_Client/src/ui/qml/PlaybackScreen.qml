@@ -11,6 +11,7 @@ Item {
     property int playbackCurrentSeconds: 0
     property var playbackSegments: []
     property string playbackTimelineInfoText: "녹화 구간 없음"
+    property int timelineTrackMargin: 9
 
     // 줌 레벨 단계(총 23단계: 0~22)
     // 0: 24h, 1~4: 점진 확대, 5~6: 15분 라벨, 7~10: 10분 라벨,
@@ -234,6 +235,8 @@ Item {
                         Rectangle {
                             anchors.left: parent.left
                             anchors.right: parent.right
+                            anchors.leftMargin: root.timelineTrackMargin
+                            anchors.rightMargin: root.timelineTrackMargin
                             anchors.bottom: parent.bottom
                             height: 1
                             color: theme ? theme.border : "#3f3f46"
@@ -242,9 +245,10 @@ Item {
                         Repeater {
                             model: root.timelineZoomLevel === 0 ? 24 : 0
                             delegate: Item {
-                                property real colW: parent.width / 24.0
-                                x: index * colW
-                                width: colW
+                                property real usableW: Math.max(1, parent.width - (root.timelineTrackMargin * 2))
+                                property real tickX: root.timelineTrackMargin + Math.round((index / 24.0) * usableW)
+                                x: tickX
+                                width: 1
                                 height: parent.height
 
                                 Rectangle {
@@ -262,9 +266,13 @@ Item {
                                     color: theme ? theme.textSecondary : "#a1a1aa"
                                     font.pixelSize: 10
                                     x: {
-                                        if (index === 0) return 0
-                                        if (index === 23) return parent.width - implicitWidth
-                                        return (parent.width - implicitWidth) / 2
+                                        // 라벨을 실제 시간 시작점(tick)에 맞춰 정렬
+                                        var raw = -Math.floor(implicitWidth / 2)
+                                        var minX = -tickX
+                                        var maxX = (timelineScale.width - implicitWidth) - tickX
+                                        if (raw < minX) return minX
+                                        if (raw > maxX) return maxX
+                                        return raw
                                     }
                                 }
                             }
@@ -277,7 +285,9 @@ Item {
                                 height: parent.height
                                 property real sec: root.labelSecondAt(index)
                                 property real range: Math.max(1, root.viewEndSec() - root.timelineViewStartSec)
-                                property real mapped: Math.round(((sec - root.timelineViewStartSec) / range) * (parent.width - 1))
+                                property real usableW: Math.max(1, parent.width - (root.timelineTrackMargin * 2))
+                                property real ratio: Math.max(0, Math.min(1, (sec - root.timelineViewStartSec) / range))
+                                property real mapped: root.timelineTrackMargin + Math.round(ratio * (usableW - 1))
                                 x: mapped
 
                                 Rectangle {
@@ -314,36 +324,45 @@ Item {
 
                             background: Item {
                                 implicitHeight: 12
-                                Rectangle {
+                                Item {
+                                    id: trackArea
                                     anchors.left: parent.left
                                     anchors.right: parent.right
+                                    anchors.leftMargin: root.timelineTrackMargin
+                                    anchors.rightMargin: root.timelineTrackMargin
                                     anchors.verticalCenter: parent.verticalCenter
                                     height: 8
-                                    radius: 4
-                                    color: "#3f3f46"
-                                }
-                                Repeater {
-                                    model: root.displaySegments()
-                                    delegate: Rectangle {
-                                        property real startSecRaw: Math.max(0, Math.min(86399, modelData.start || 0))
-                                        property real endSecRaw: Math.max(0, Math.min(86399, modelData.end || 0))
-                                        property real segLo: Math.min(startSecRaw, endSecRaw)
-                                        property real segHi: Math.max(startSecRaw, endSecRaw)
-                                        property real viewLo: root.timelineViewStartSec
-                                        property real viewHi: root.viewEndSec()
-                                        property real clipLo: Math.max(segLo, viewLo)
-                                        property real clipHi: Math.min(segHi, viewHi)
-                                        property real range: Math.max(1, viewHi - viewLo)
-                                        property real leftPos: ((clipLo - viewLo) / range) * parent.width
-                                        property real rightPos: ((clipHi - viewLo) / range) * parent.width
-                                        visible: clipHi >= clipLo
-                                        x: leftPos
-                                        width: Math.max(1, rightPos - leftPos)
-                                        y: (parent.height - 8) / 2
-                                        height: 8
-                                        radius: 2
-                                        color: "#65a30d"
-                                        opacity: 0.95
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 4
+                                        color: "#3f3f46"
+                                    }
+
+                                    Repeater {
+                                        model: root.displaySegments()
+                                        delegate: Rectangle {
+                                            property real startSecRaw: Math.max(0, Math.min(86399, modelData.start || 0))
+                                            property real endSecRaw: Math.max(0, Math.min(86399, modelData.end || 0))
+                                            property real segLo: Math.min(startSecRaw, endSecRaw)
+                                            property real segHi: Math.max(startSecRaw, endSecRaw)
+                                            property real viewLo: root.timelineViewStartSec
+                                            property real viewHi: root.viewEndSec()
+                                            property real clipLo: Math.max(segLo, viewLo)
+                                            property real clipHi: Math.min(segHi, viewHi)
+                                            property real range: Math.max(1, viewHi - viewLo)
+                                            property real leftPos: ((clipLo - viewLo) / range) * parent.width
+                                            // EndTime을 포함 구간으로 그려 마지막 초(23:59:59)도 트랙 끝까지 표시
+                                            property real rightPos: ((Math.min(viewHi, clipHi + 1) - viewLo) / range) * parent.width
+                                            visible: clipHi >= clipLo
+                                            x: leftPos
+                                            width: Math.max(1, rightPos - leftPos)
+                                            y: 0
+                                            height: parent.height
+                                            radius: 2
+                                            color: "#65a30d"
+                                            opacity: 0.95
+                                        }
                                     }
                                 }
                             }

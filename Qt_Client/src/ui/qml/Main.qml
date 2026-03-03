@@ -2,6 +2,7 @@
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtQuick.Dialogs
 
 ApplicationWindow {
     id: window
@@ -37,10 +38,28 @@ ApplicationWindow {
     property string playbackSourceUrl: ""
     property string playbackTitleText: "Playback Stream"
     property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
+    property int pendingExportChannel: -1
+    property string pendingExportDate: ""
+    property string pendingExportStart: ""
+    property string pendingExportEnd: ""
 
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
         return cameraNames[index]
+    }
+
+    function urlToLocalPath(u) {
+        var s = String(u || "")
+        if (s.indexOf("file:///") === 0) {
+            return decodeURIComponent(s.slice(8))
+        }
+        if (s.indexOf("file://") === 0) {
+            return decodeURIComponent(s.slice(7))
+        }
+        if (s.indexOf("file:/") === 0) {
+            return decodeURIComponent(s.slice(6))
+        }
+        return s
     }
 
     function teardownPlaybackSession() {
@@ -292,6 +311,7 @@ ApplicationWindow {
             theme: window.appTheme
             isDarkMode: window.isDarkMode
             isLoggedIn: backend.isLoggedIn
+            currentSection: stackLayout.currentIndex
             sessionRemainingSeconds: backend.sessionRemainingSeconds
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
@@ -349,6 +369,7 @@ ApplicationWindow {
                                     font.pixelSize: 18
                                     font.bold: true
                                     Layout.alignment: Qt.AlignVCenter
+                                    Layout.leftMargin: 8
                                 }
                                 
                                 Item { Layout.fillWidth: true }
@@ -383,6 +404,7 @@ ApplicationWindow {
                                         MouseArea {
                                             id: gridMouse
                                             anchors.fill: parent
+                                            hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: backend.isLoggedIn
                                             onClicked: {
@@ -392,6 +414,11 @@ ApplicationWindow {
                                                 stackLayout.currentIndex = 0
                                             }
                                         }
+
+                                        ToolTip.visible: gridMouse.containsMouse
+                                        ToolTip.text: "라이브 그리드 모니터링 화면"
+                                        ToolTip.delay: 250
+                                        ToolTip.timeout: 1800
                                     }
 
                                     Rectangle {
@@ -421,6 +448,7 @@ ApplicationWindow {
                                         MouseArea {
                                             id: playbackMouseArea
                                             anchors.fill: parent
+                                            hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: backend.isLoggedIn
                                             onClicked: {
@@ -430,6 +458,11 @@ ApplicationWindow {
                                                 stackLayout.currentIndex = 2
                                             }
                                         }
+
+                                        ToolTip.visible: playbackMouseArea.containsMouse
+                                        ToolTip.text: "녹화 재생 화면"
+                                        ToolTip.delay: 250
+                                        ToolTip.timeout: 1800
                                     }
 
                                     Rectangle {
@@ -457,6 +490,7 @@ ApplicationWindow {
                                         MouseArea {
                                             id: exportMouseArea
                                             anchors.fill: parent
+                                            hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 backend.resetSessionTimer()
@@ -465,6 +499,11 @@ ApplicationWindow {
                                                 stackLayout.currentIndex = 1
                                             }
                                         }
+
+                                        ToolTip.visible: exportMouseArea.containsMouse
+                                        ToolTip.text: "녹화 목록/내보내기 화면"
+                                        ToolTip.delay: 250
+                                        ToolTip.timeout: 1800
                                     }
                                 }
                             }
@@ -512,6 +551,7 @@ ApplicationWindow {
                                     playbackTimelineInfoText: rightSidebar.playbackTimelineInfoText
                                     onSeekRequested: function(seconds) {
                                         rightSidebar.syncTimeFromSeconds(seconds)
+                                        rightSidebar.applyExportRangeFromSecond(seconds)
                                         if (rightSidebar.playbackRunning && !rightSidebar.playbackPending) {
                                             var d = rightSidebar.formatPlaybackDate()
                                             var t = rightSidebar.formatPlaybackTime()
@@ -601,11 +641,6 @@ ApplicationWindow {
                     window.playbackSourceUrl = ""
                     backend.preparePlaybackRtsp(channelIndex, dateText, timeText)
                 }
-                onRequestPlaybackSeek: function(channelIndex, dateText, timeText) {
-                    window.playbackTitleText = "CH " + (channelIndex + 1) + " - " + dateText + " " + timeText
-                    window.playbackSourceUrl = ""
-                    backend.preparePlaybackRtsp(channelIndex, dateText, timeText)
-                }
                 onRequestPlaybackTimeline: function(channelIndex, dateText) {
                     backend.loadPlaybackTimeline(channelIndex, dateText)
                 }
@@ -617,6 +652,14 @@ ApplicationWindow {
                 }
                 onRequestPlaybackResume: {
                     playbackScreen.resumePlayback()
+                }
+                onRequestPlaybackExport: function(channelIndex, dateText, startTimeText, endTimeText) {
+                    pendingExportChannel = channelIndex
+                    pendingExportDate = dateText
+                    pendingExportStart = startTimeText
+                    pendingExportEnd = endTimeText
+                    playbackExportSaveDialog.currentFile = "playback_" + dateText + "_" + startTimeText.replace(/:/g, "-")
+                    playbackExportSaveDialog.open()
                 }
             }
         }
@@ -757,6 +800,35 @@ ApplicationWindow {
         }
         function onStreamingWsError(error) {
             console.warn("[PLAYBACK][WS] error:", error)
+        }
+        function onPlaybackExportStarted(message) {
+            console.log("[PLAYBACK][EXPORT]", message)
+        }
+        function onPlaybackExportProgress(percent, message) {
+            console.log("[PLAYBACK][EXPORT]", percent + "%", message)
+        }
+        function onPlaybackExportFinished(path) {
+            console.log("[PLAYBACK][EXPORT] saved:", path)
+        }
+        function onPlaybackExportFailed(error) {
+            console.warn("[PLAYBACK][EXPORT]", error)
+        }
+    }
+
+    FileDialog {
+        id: playbackExportSaveDialog
+        title: "Playback 내보내기 저장 경로 선택"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Video files (*.avi *.zip)", "All files (*)"]
+        onAccepted: {
+            var savePath = window.urlToLocalPath(selectedFile)
+            if (!savePath || savePath.length === 0)
+                return
+            backend.requestPlaybackExport(window.pendingExportChannel,
+                                          window.pendingExportDate,
+                                          window.pendingExportStart,
+                                          window.pendingExportEnd,
+                                          savePath)
         }
     }
 
