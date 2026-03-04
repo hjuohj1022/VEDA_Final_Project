@@ -5,10 +5,29 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
 ## Overview
 | Component | Role | Main File |
 |---|---|---|
-| Inference Server | RTSP 수신, CUDA 전처리, TensorRT 추론, TCP 제어 | `runtime/main.cu` |
+| Inference Server | RTSP 수신, CUDA 전처리, TensorRT 추론, TCP 제어 | `runtime/main.cpp` |
 | Desktop Client | 서버 제어 + 스트림 시각화 | `tools/client/client_gui.py` |
 | Model Export | DA3 safetensors -> ONNX | `tools/export/export_da3metric_onnx.py` |
 | Bootstrap Script | 의존성 다운로드 + 경로 설정 생성 | `tools/bootstrap/setup_dependencies.ps1` |
+
+## Runtime Module Map
+핵심 런타임 모듈은 아래처럼 책임을 분리했습니다.
+
+| Module | Responsibility |
+|---|---|
+| `runtime/main.cpp` | 엔트리포인트, accept loop, 요청 파싱/디스패치 호출 |
+| `runtime/server_runtime.*` | Winsock 초기화/바인드/리스닝/정리 |
+| `runtime/command_dispatcher.*` | 요청 분기 처리, worker/stream 스레드 제어 |
+| `runtime/depth_worker.cu` | CUDA 전처리 커널 + TensorRT 추론 루프 |
+| `runtime/request.*` | 요청 문자열 파싱 |
+| `runtime/request_validator.*` | 요청 유효성 검사 (채널/스트림 상호배타 등) |
+| `runtime/net_protocol.*` | TCP 응답/스트림 바이너리 송신 |
+| `runtime/trt_engine.*` | TensorRT 엔진/버퍼 초기화 |
+| `runtime/runtime_config.*` | 런타임 튜닝 파라미터 |
+
+참고:
+- 현재 분리 수준은 과한 편이 아니라 유지보수 관점에서 적정한 편입니다.
+- 각 파일이 의미 있는 책임 단위로 나뉘어 있어, 기능 변경 시 영향 범위를 예측하기 쉽습니다.
 
 ## Architecture Diagram
 ```text
@@ -22,7 +41,7 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
                                             v
 +-------------------+            +----------+-----------+            +------------------+
 | RTSP Cameras      | --RTSP-->  |    depth_trt.exe    | --depth--> | depth_stream     |
-| ch0..ch3          |            | (runtime/main.cu, TCP 9090) | --rgbd---> | rgbd_stream      |
+| ch0..ch3          |            | (runtime/main.cpp, TCP 9090) | --rgbd---> | rgbd_stream      |
 +-------------------+            |  CUDA + TensorRT     | --png----> | pc_stream        |
                                  +----------+-----------+            +------------------+
                                             |
@@ -74,8 +93,17 @@ python .\client_gui.py
 ```text
 CCTV/
   runtime/
-    main.cu
-    request.h runner.h pointcloud.h ...
+    main.cpp
+    server_runtime.h/.cpp
+    command_dispatcher.h/.cpp
+    depth_worker.cu
+    request.h/.cpp
+    request_validator.h/.cpp
+    net_protocol.h/.cpp
+    trt_engine.h/.cpp
+    runtime_config.h/.cpp
+    request_parser_smoke.cpp
+    runner.h pointcloud.h ...
   config/
     app_config.h(.example)
     local_paths.cmake(.example)
@@ -129,7 +157,7 @@ CCTV/
 ### `app_config.h`
 `app_config.h.example`를 기준으로 다음 항목을 설정합니다.
 
-- `ENGINE_PATH`: TensorRT 엔진 절대 경로
+- `ENGINE_PATH`: TensorRT 엔진 경로(프로젝트 루트 기준 상대경로 권장)
 - `RTSP_URLS`: 채널별 RTSP 주소
 - `RTSP_CHANNEL`: 기본 채널
 - `INPUT_HEIGHT`, `INPUT_WIDTH`: 엔진 입력 shape와 반드시 일치
@@ -151,6 +179,24 @@ Output:
 ```text
 build/Release/depth_trt.exe
 ```
+
+빌드 후 자동 복사:
+- `build/Release/ml_assets/engines/`로 `ml_assets/engines`가 자동 복사됩니다.
+- 따라서 `ENGINE_PATH=ml_assets/engines/...` 설정이면 `build/Release` 단독 실행 시에도 엔진 경로가 유지됩니다.
+
+## Test
+```powershell
+# 스모크 테스트 빌드 + 실행
+cmake --build build --config Release --target request_parser_smoke
+.\build\Release\request_parser_smoke.exe
+
+# ctest 통합 실행
+ctest --test-dir build -C Release --output-on-failure
+```
+
+VSCode:
+- 기본 빌드(`Ctrl+Shift+B`)는 `CMake Build+Test Release`로 설정되어 있어,
+  configure -> build -> ctest를 순차 실행합니다.
 
 ## Run
 서버:
