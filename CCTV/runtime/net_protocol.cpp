@@ -6,11 +6,20 @@
 #include "net_protocol.h"
 
 namespace {
+std::string FormatIoFailure(const char* op) {
+    const ClientIoErrorInfo ioErr = GetLastClientIoError();
+    if (ioErr.detail.empty()) return std::string(op) + " failed";
+    return std::string(op) + " failed: " + ioErr.detail;
+}
+
 bool SendAll(const ServerClient& client, const char* data, int bytes) {
     int offset = 0;
     while (offset < bytes) {
         int n = ClientSend(client, data + offset, bytes - offset);
-        if (n <= 0) return false;
+        if (n <= 0) {
+            LogWarn("[NET] " + FormatIoFailure("send"));
+            return false;
+        }
         offset += n;
     }
     return true;
