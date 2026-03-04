@@ -36,7 +36,18 @@ bool MqttManager::publishMessage(const std::string& topic, const std::string& pa
 void MqttManager::on_connect(int rc) {
     if (rc == 0) {
         std::cout << "[MQTT] Connected successfully!" << std::endl;
+        // 열화상 데이터 토픽 구독
+        subscribe(NULL, "lepton/frame/#", 0);
+        std::cout << "[MQTT] Subscribed to lepton/frame/#" << std::endl;
     } else {
         std::cerr << "[MQTT] Connection failed. Error: " << rc << std::endl;
+    }
+}
+
+void MqttManager::on_message(const struct mosquitto_message* message) {
+    if (message_cb_) {
+        std::string topic(message->topic);
+        std::string payload(static_cast<const char*>(message->payload), message->payloadlen);
+        message_cb_(topic, payload);
     }
 }
