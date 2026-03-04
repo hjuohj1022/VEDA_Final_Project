@@ -1,8 +1,6 @@
 #include <string>
 #include <mutex>
 
-#include <winsock2.h>
-
 #include "app_config.h"
 #include "command_dispatcher.h"
 #include "logging.h"
@@ -13,23 +11,21 @@
 namespace {
 class ClientSocketHandle {
 public:
-    explicit ClientSocketHandle(SOCKET s) : socket_(s) {}
+    explicit ClientSocketHandle(ServerClient s) : client_(s) {}
     ~ClientSocketHandle() {
-        if (socket_ != INVALID_SOCKET) {
-            closesocket(socket_);
-        }
+        CloseServerClient(client_);
     }
 
-    SOCKET get() const { return socket_; }
+    const ServerClient& get() const { return client_; }
 
-    SOCKET Release() {
-        SOCKET out = socket_;
-        socket_ = INVALID_SOCKET;
+    ServerClient Release() {
+        ServerClient out = client_;
+        client_ = ServerClient{};
         return out;
     }
 
 private:
-    SOCKET socket_ = INVALID_SOCKET;
+    ServerClient client_{};
 };
 
 void StopDepthStreamThread(ServerRuntimeContext& ctx) {
@@ -69,7 +65,7 @@ void StopWorker(ServerRuntimeContext& ctx) {
     ctx.workerRunning = false;
 }
 
-void HandlePcViewRequest(SOCKET client, const Request& req, ServerRuntimeContext& ctx) {
+void HandlePcViewRequest(const ServerClient& client, const Request& req, ServerRuntimeContext& ctx) {
     float rxNow = 0.0f;
     float ryNow = 0.0f;
     bool fxNow = false;
@@ -106,7 +102,7 @@ void HandlePcViewRequest(SOCKET client, const Request& req, ServerRuntimeContext
                      " mesh=" + std::to_string(meshNow ? 1 : 0) + "\n");
 }
 
-void HandlePauseRequest(SOCKET client, const Request& req, ServerRuntimeContext& ctx) {
+void HandlePauseRequest(const ServerClient& client, const Request& req, ServerRuntimeContext& ctx) {
     bool pausedNow = false;
     {
         std::lock_guard<std::mutex> lock(ctx.viewParams.mu);
@@ -136,7 +132,7 @@ void ShutdownRuntime(ServerRuntimeContext& ctx) {
     StopPcStreamThread(ctx);
 }
 
-void HandleClientRequest(SOCKET client, const Request& req, ServerRuntimeContext& ctx) {
+void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeContext& ctx) {
     ClientSocketHandle clientSocket(client);
 
     RequestValidationResult valid = ValidateRequest(req);
@@ -148,7 +144,7 @@ void HandleClientRequest(SOCKET client, const Request& req, ServerRuntimeContext
 
     if (req.depthStream) {
         StopDepthStreamThread(ctx);
-        SOCKET streamClient = clientSocket.Release();
+        ServerClient streamClient = clientSocket.Release();
         ctx.depthStreamThread = std::thread([streamClient, &ctx]() {
             DepthStreamWorker(streamClient, &ctx.depthStream, &ctx.depthStreamActive);
         });
@@ -157,7 +153,7 @@ void HandleClientRequest(SOCKET client, const Request& req, ServerRuntimeContext
 
     if (req.rgbdStream) {
         StopRgbdStreamThread(ctx);
-        SOCKET streamClient = clientSocket.Release();
+        ServerClient streamClient = clientSocket.Release();
         ctx.rgbdStreamThread = std::thread([streamClient, &ctx]() {
             RgbdStreamWorker(streamClient, &ctx.rgbdStream, &ctx.rgbdStreamActive);
         });
@@ -166,7 +162,7 @@ void HandleClientRequest(SOCKET client, const Request& req, ServerRuntimeContext
 
     if (req.pcStream) {
         StopPcStreamThread(ctx);
-        SOCKET streamClient = clientSocket.Release();
+        ServerClient streamClient = clientSocket.Release();
         ctx.pcStreamThread = std::thread([streamClient, &ctx]() {
             PcImageStreamWorker(streamClient, &ctx.pcStream, &ctx.pcStreamActive);
         });

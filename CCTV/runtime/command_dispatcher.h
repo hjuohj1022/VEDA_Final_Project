@@ -3,10 +3,9 @@
 #include <atomic>
 #include <thread>
 
-#include <winsock2.h>
-
 #include "request.h"
 #include "runtime_types.h"
+#include "server_runtime.h"
 
 struct ServerRuntimeContext {
     std::thread& worker;
@@ -26,4 +25,4 @@ struct ServerRuntimeContext {
 
 void JoinFinishedStreamThreads(ServerRuntimeContext& ctx);
 void ShutdownRuntime(ServerRuntimeContext& ctx);
-void HandleClientRequest(SOCKET client, const Request& req, ServerRuntimeContext& ctx);
+void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeContext& ctx);

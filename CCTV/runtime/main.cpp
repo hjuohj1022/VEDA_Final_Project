@@ -26,12 +26,22 @@ int main(int argc, char** argv) {
         }
     }
 
+    TlsServerConfig tlsCfg;
+    tlsCfg.enabled = cfg.control_mtls_enabled;
+    tlsCfg.requireClientCert = cfg.control_mtls_require_client_cert;
+    tlsCfg.caFile = cfg.control_tls_ca_file;
+    tlsCfg.certFile = cfg.control_tls_cert_file;
+    tlsCfg.keyFile = cfg.control_tls_key_file;
+    tlsCfg.sslDll = cfg.control_tls_ssl_dll;
+    tlsCfg.cryptoDll = cfg.control_tls_crypto_dll;
+
     ServerSocketContext serverCtx;
-    if (!InitServerSocket(port, cfg.server_listen_backlog, serverCtx)) {
+    if (!InitServerSocket(port, cfg.server_listen_backlog, &tlsCfg, serverCtx)) {
         return 1;
     }
 
-    LogInfo("Listening on port " + std::to_string(port));
+    LogInfo("Listening on port " + std::to_string(port) +
+            (cfg.control_mtls_enabled ? " (mTLS)" : " (plain TCP)"));
 
     std::thread worker;
     std::thread streamThread;
@@ -66,14 +76,14 @@ int main(int argc, char** argv) {
         JoinFinishedStreamThreads(runtimeCtx);
         sockaddr_in clientAddr{};
         int clientLen = sizeof(clientAddr);
-        SOCKET client = accept(serverCtx.server, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
-        if (client == INVALID_SOCKET) continue;
+        ServerClient client;
+        if (!AcceptServerClient(serverCtx, client, &clientAddr, &clientLen)) continue;
 
         char buf[1024];
-        int len = recv(client, buf, sizeof(buf) - 1, 0);
+        int len = ClientRecv(client, buf, sizeof(buf) - 1);
         if (len <= 0) {
             LogWarn("Client connected but sent no data");
-            closesocket(client);
+            CloseServerClient(client);
             continue;
         }
         buf[len] = '\0';

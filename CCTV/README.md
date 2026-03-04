@@ -162,6 +162,14 @@ CCTV/
 - `RTSP_CHANNEL`: 기본 채널
 - `INPUT_HEIGHT`, `INPUT_WIDTH`: 엔진 입력 shape와 반드시 일치
 
+### RTSPS(mTLS)
+- 기본 URL 예시는 `rtsps://...` 스킴을 사용합니다.
+- 런타임 기본 FFmpeg 캡처 옵션에 mTLS 설정이 포함됩니다.
+  - `tls_verify;1`
+  - `ca_file;certs/rootCA.crt`
+  - `cert_file;certs/cctv.crt`
+  - `key_file;certs/cctv.key`
+
 ### `config/local_paths.cmake`
 자동 생성 파일이며, 수동 편집 시 아래 경로를 정확히 지정해야 합니다.
 
@@ -183,6 +191,7 @@ build/Release/depth_trt.exe
 빌드 후 자동 복사:
 - `build/Release/ml_assets/engines/`로 `ml_assets/engines`가 자동 복사됩니다.
 - 따라서 `ENGINE_PATH=ml_assets/engines/...` 설정이면 `build/Release` 단독 실행 시에도 엔진 경로가 유지됩니다.
+- `build/Release/certs/`로 `certs`가 자동 복사됩니다(mTLS 인증서/키 배포용).
 
 ## Test
 ```powershell
@@ -208,6 +217,24 @@ VSCode:
 ```powershell
 python .\client_gui.py
 ```
+
+보안 연결(mTLS):
+- `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
+- 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
+  - `certs/rootCA.crt`
+  - `certs/client.crt`
+  - `certs/client.key`
+
+서버 제어채널 mTLS:
+- `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
+- 런타임 설정(`runtime/runtime_config.h`) 기본값:
+  - `control_mtls_enabled=true`
+  - `control_mtls_require_client_cert=true`
+  - `control_tls_ca_file=certs/rootCA.crt`
+  - `control_tls_cert_file=certs/cctv.crt`
+  - `control_tls_key_file=certs/cctv.key`
+  - `control_tls_ssl_dll=libssl-1_1-x64.dll`
+  - `control_tls_crypto_dll=libcrypto-1_1-x64.dll`
 
 ## TCP Command Reference
 기본 명령 예시:

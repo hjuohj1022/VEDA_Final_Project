@@ -30,6 +30,7 @@
 # ---------------------------
 /config/local_paths.cmake
 /config/app_config.h
+/certs/
 
 # ---------------------------
 # External SDKs / downloaded deps

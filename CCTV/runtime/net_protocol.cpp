@@ -2,18 +2,28 @@
 #include <string>
 #include <vector>
 
-#include <winsock2.h>
-
 #include "logging.h"
 #include "net_protocol.h"
 
-void SendResponse(SOCKET client, const std::string& msg) {
-    send(client, msg.c_str(), static_cast<int>(msg.size()), 0);
+namespace {
+bool SendAll(const ServerClient& client, const char* data, int bytes) {
+    int offset = 0;
+    while (offset < bytes) {
+        int n = ClientSend(client, data + offset, bytes - offset);
+        if (n <= 0) return false;
+        offset += n;
+    }
+    return true;
+}
+}  // namespace
+
+void SendResponse(const ServerClient& client, const std::string& msg) {
+    SendAll(client, msg.c_str(), static_cast<int>(msg.size()));
 }
 
-void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::atomic<bool>* active) {
+void DepthStreamWorker(ServerClient client, DepthStreamBuffer* streamBuf, std::atomic<bool>* active) {
     if (!streamBuf) {
-        closesocket(client);
+        CloseServerClient(client);
         return;
     }
 
@@ -22,7 +32,11 @@ void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::atomic<
     streamBuf->stop = false;
 
     std::string ok = "OK depth_stream\n";
-    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
+        if (active) active->store(false);
+        CloseServerClient(client);
+        return;
+    }
 
     while (true) {
         std::vector<float> local;
@@ -41,20 +55,18 @@ void DepthStreamWorker(SOCKET client, DepthStreamBuffer* streamBuf, std::atomic<
 
         const uint32_t payloadBytes = static_cast<uint32_t>(local.size() * sizeof(float));
         uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
-        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
-        if (sent <= 0) break;
-        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
-        if (sent <= 0) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(local.data()), static_cast<int>(payloadBytes))) break;
     }
 
     LogWarn("Depth stream client disconnected.");
     if (active) active->store(false);
-    closesocket(client);
+    CloseServerClient(client);
 }
 
-void RgbdStreamWorker(SOCKET client, RgbdStreamBuffer* streamBuf, std::atomic<bool>* active) {
+void RgbdStreamWorker(ServerClient client, RgbdStreamBuffer* streamBuf, std::atomic<bool>* active) {
     if (!streamBuf) {
-        closesocket(client);
+        CloseServerClient(client);
         return;
     }
 
@@ -63,7 +75,11 @@ void RgbdStreamWorker(SOCKET client, RgbdStreamBuffer* streamBuf, std::atomic<bo
     streamBuf->stop = false;
 
     std::string ok = "OK rgbd_stream fmt=depth32f+bgr24\n";
-    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
+        if (active) active->store(false);
+        CloseServerClient(client);
+        return;
+    }
 
     while (true) {
         std::vector<float> localDepth;
@@ -85,22 +101,19 @@ void RgbdStreamWorker(SOCKET client, RgbdStreamBuffer* streamBuf, std::atomic<bo
         const uint32_t depthBytes = static_cast<uint32_t>(localDepth.size() * sizeof(float));
         const uint32_t bgrBytes = static_cast<uint32_t>(localBgr.size());
         uint32_t header[5] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), depthBytes, bgrBytes};
-        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
-        if (sent <= 0) break;
-        sent = send(client, reinterpret_cast<const char*>(localDepth.data()), depthBytes, 0);
-        if (sent <= 0) break;
-        sent = send(client, reinterpret_cast<const char*>(localBgr.data()), bgrBytes, 0);
-        if (sent <= 0) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(localDepth.data()), static_cast<int>(depthBytes))) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(localBgr.data()), static_cast<int>(bgrBytes))) break;
     }
 
     LogWarn("RGBD stream client disconnected.");
     if (active) active->store(false);
-    closesocket(client);
+    CloseServerClient(client);
 }
 
-void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomic<bool>* active) {
+void PcImageStreamWorker(ServerClient client, ImageStreamBuffer* streamBuf, std::atomic<bool>* active) {
     if (!streamBuf) {
-        closesocket(client);
+        CloseServerClient(client);
         return;
     }
 
@@ -109,7 +122,11 @@ void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomi
     streamBuf->stop = false;
 
     std::string ok = "OK pc_stream fmt=png\n";
-    send(client, ok.c_str(), static_cast<int>(ok.size()), 0);
+    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
+        if (active) active->store(false);
+        CloseServerClient(client);
+        return;
+    }
 
     while (true) {
         std::vector<unsigned char> local;
@@ -128,13 +145,11 @@ void PcImageStreamWorker(SOCKET client, ImageStreamBuffer* streamBuf, std::atomi
 
         const uint32_t payloadBytes = static_cast<uint32_t>(local.size());
         uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
-        int sent = send(client, reinterpret_cast<const char*>(header), sizeof(header), 0);
-        if (sent <= 0) break;
-        sent = send(client, reinterpret_cast<const char*>(local.data()), payloadBytes, 0);
-        if (sent <= 0) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
+        if (!SendAll(client, reinterpret_cast<const char*>(local.data()), static_cast<int>(payloadBytes))) break;
     }
 
     LogWarn("PC image stream client disconnected.");
     if (active) active->store(false);
-    closesocket(client);
+    CloseServerClient(client);
 }
