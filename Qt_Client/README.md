@@ -28,6 +28,14 @@
 - `/stream?file=` 재생/다운로드
 - 카메라 SUNAPI 응답 기반 SD 저장소 용량 표시
 
+### 4. 인증 (Login / Sign Up)
+- 로그인 화면에서 `Sign In`/`Sign Up` 모드 전환 지원
+- Sign Up 전용 입력 폼(`ID`, `Password`, `Confirm Password`) 제공
+- 비밀번호 확인 불일치/빈 입력값 클라이언트 검증
+- `POST /register` 성공 시 로그인 화면으로 자동 복귀 및 입력값 초기화
+- `Back to Sign In` 클릭 시 회원가입 입력값 초기화
+- 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
+
 ## Playback 작동 원리
 
 1. 사용자가 채널/날짜/시간 선택 후 재생 요청  
@@ -73,6 +81,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 주요 항목:
 - API/SSL
   - `API_URL`
+  - `LOGIN_TIMEOUT_MS`, `REGISTER_TIMEOUT_MS`
   - `SSL_CA_CERT`, `SSL_CLIENT_CERT`, `SSL_CLIENT_KEY`
   - `SSL_VERIFY_PEER`, `SSL_IGNORE_ERRORS`
 - Live RTSP(MediaMTX)
@@ -82,7 +91,12 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 - SUNAPI/Playback
   - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
   - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_PORT`
+  - `SUNAPI_STORAGE_CGI`, `SUNAPI_STORAGE_SUBMENU`, `SUNAPI_STORAGE_ACTION`, `SUNAPI_STORAGE_QUERY`
+  - `SUNAPI_EXPORT_CREATE_*`, `SUNAPI_EXPORT_POLL_*`, `SUNAPI_EXPORT_DOWNLOAD_*`
+  - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
+  - `PLAYBACK_WS_DIGEST_RESPONSE`, `PLAYBACK_WS_HEX1`, `PLAYBACK_WS_HEX2`, `PLAYBACK_WS_HEX3`
+  - `PLAYBACK_WS_SDP_FILE_PROTOCOL`
   - `PLAYBACK_EXPORT_FFMPEG_PATH` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
 
 ffmpeg 배치/버전 관리:
@@ -97,6 +111,7 @@ ffmpeg 배치/버전 관리:
 | Method | Endpoint | 설명 |
 | :--- | :--- | :--- |
 | `POST` | `/login` | 로그인 |
+| `POST` | `/register` | 회원가입 |
 | `GET` | `/recordings` | 녹화 목록 조회 |
 | `DELETE` | `/recordings?file={name}` | 녹화 파일 삭제 |
 | `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
@@ -119,7 +134,9 @@ Team3VideoReceiver/
 │  ├─ app/
 │  │  └─ main.cpp
 │  ├─ core/
-│  │  ├─ BackendAuth.cpp
+│  │  ├─ BackendAuthLogin.cpp
+│  │  ├─ BackendAuthRegister.cpp
+│  │  ├─ BackendAuthSession.cpp
 │  │  ├─ BackendCoreApi.cpp
 │  │  ├─ BackendCoreEnv.cpp
 │  │  ├─ BackendCoreMqtt.cpp
