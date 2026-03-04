@@ -3,14 +3,19 @@ project(CrowMqttServer)
 
 set(CMAKE_CXX_STANDARD 17)
 
-# 외부 라이브러리 가져오기 (jwt-cpp)
+# 외부 라이브러리 가져오기
 include(FetchContent)
 FetchContent_Declare(
   jwt-cpp
   GIT_REPOSITORY https://github.com/Thalhammer/jwt-cpp.git
   GIT_TAG v0.6.0
 )
-FetchContent_MakeAvailable(jwt-cpp)
+FetchContent_Declare(
+  Crow
+  GIT_REPOSITORY https://github.com/CrowCpp/Crow.git
+  GIT_TAG v1.2.0
+)
+FetchContent_MakeAvailable(jwt-cpp Crow)
 
 # MariaDB 및 OpenSSL 라이브러리 찾기
 find_package(PkgConfig REQUIRED)
@@ -28,6 +33,7 @@ target_link_libraries(crow_server
     pthread 
     mosquitto 
     mosquittopp 
+    Crow::Crow
     ${MYSQL_LIBRARIES}
     OpenSSL::SSL
     OpenSSL::Crypto

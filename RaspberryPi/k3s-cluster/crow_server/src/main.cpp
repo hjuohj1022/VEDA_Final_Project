@@ -1,5 +1,5 @@
 #define CROW_ENABLE_WEBSOCKETS
-#include "../include/crow_all.h"
+#include "crow.h"
 #include "../include/MqttManager.h"
 #include <jwt-cpp/jwt.h> 
 #include <filesystem>
@@ -204,7 +204,7 @@ int main()
     // ==========================================
     // 열화상 스트리밍 WebSocket API
     // ==========================================
-    app.websocket_route("/thermal-stream")
+    CROW_WEBSOCKET_ROUTE(app, "/thermal-stream")
         .onopen([&](crow::websocket::connection& conn) {
             std::lock_guard<std::mutex> lock(clients_mutex);
             thermal_clients.insert(&conn);
