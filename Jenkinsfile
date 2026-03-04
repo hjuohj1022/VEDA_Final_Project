@@ -1,25 +1,46 @@
 pipeline {
     agent any
+    
     environment {
-        // 본인 설정에 맞게 수정
-        GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project.git' 
+        // === 1. 버전 관리 설정 (여기서 메이저/마이너 관리) ===
+        MAJOR_VER = '1'
+        MINOR_VER = '0'
+        
+        GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project' 
         DOCKER_CRED = 'docker-hub-login'
         KUBE_CONFIG = 'k3s-kubeconfig'
+        GIT_CREDENTIAL_ID = 'github-access-token'
     }
+
     stages {
-        stage('소스 가져오기') {
+        // 🏁 0. 초기화 및 버전 계산
+        stage('초기화 및 버전 설정') {
             steps {
+                script {
+                    // Git Short Hash 계산
+                    def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                    
+                    // Docker용 풀 버전: 1.0.50-a1b2c3d
+                    env.DOCKER_VER = "${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}-${gitHash}"
+                    
+                    // Git 태그용 버전: v1.0.50
+                    env.GIT_TAG_VER = "v${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}"
+                    
+                    echo "ℹ️ 이번 빌드 버전: ${env.DOCKER_VER}"
+                }
+                
                 slackSend (
                     channel: 'C0ADS8RQAL9', 
-                    color: '#439FE0', // 파란색 (시작 알림용)
+                    color: '#439FE0',
                     botUser: true, 
-                    message: "🚀 배포 시작: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
+                    message: "🚀 배포 시작: [${env.JOB_NAME}] Ver ${env.DOCKER_VER} (<${env.BUILD_URL}|상세보기>)"
                 )
+                
                 git branch: 'develop', url: GIT_URL
             }
         }
 
-        // 🔐 0. 인증서 및 공통 설정 준비 (하나의 압축 번들로 효율적 관리)
+        // 🔐 1. 인증서 준비
         stage('인증서 준비') {
             when {
                 anyOf {
@@ -32,27 +53,19 @@ pipeline {
             }
             steps {
                 script {
-                    // 디렉터리 생성 및 클린업
                     sh "mkdir -p RaspberryPi/k3s-cluster/security/certs"
-                    
                     dir('RaspberryPi/k3s-cluster/security/certs') {
-                        echo "🔐 Jenkins Credentials에서 인증서 번들을 가져와 압축을 푸는 중..."
                         withCredentials([file(credentialsId: 'all-certs-bundle', variable: 'CERTS_BUNDLE')]) {
-                            // tar.gz 압축 해제 (파일들이 바로 certs 폴더 안에 풀리도록 함)
                             sh "tar -xzvf '$CERTS_BUNDLE'"
                         }
                     }
-                    
-                    // 다른 스테이지(Windows 등)에서 사용할 수 있도록 인증서 보관
                     stash name: 'certs-stash', includes: 'RaspberryPi/k3s-cluster/security/certs/**'
-                    
-                    // 클라이언트 배포용으로 산출물 보관
                     archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/**', fingerprint: true
                 }
             }
         }
         
-        // 🦅 1. Crow Server (폴더명: crow_server)
+        // 🦅 2. Crow Server
         stage('Crow Server 배포') {
             when { 
                 anyOf {
@@ -63,10 +76,11 @@ pipeline {
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/crow_server') { 
-                        echo "🦅 Crow Server 빌드 시작..."
+                        echo "🦅 Crow Server 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/crow-server:latest --push ."
+                            // ★ 수정됨: 버전 태그와 latest 태그 동시 푸시
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/crow-server:${env.DOCKER_VER} -t hjuohj/crow-server:latest --push ."
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
@@ -77,7 +91,7 @@ pipeline {
             }
         }
 
-        // 📡 2. Mosquitto (폴더명: mosquitto)
+        // 📡 3. MQTT
         stage('MQTT 배포') {
             when { 
                 anyOf {
@@ -89,16 +103,15 @@ pipeline {
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mosquitto') {
-                        echo "📡 MQTT 빌드 시작..."
+                        echo "📡 MQTT 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:latest --push ."
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mqtt-broker:${env.DOCKER_VER} -t hjuohj/mqtt-broker:latest --push ."
                         }
                     }
-
-                    // 1. K8s Secret 업데이트 (mqtt-certs) - 통합 인증서(security/certs) 사용
+                    
+                    // Secret 및 배포 적용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        echo "🔑 MQTT K8s Secret 업데이트 중 (통합 인증서 사용)..."
                         sh """
                             kubectl --kubeconfig=$KUBECONFIG create secret generic mqtt-certs \
                                 --from-file=ca.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
@@ -106,19 +119,15 @@ pipeline {
                                 --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key \
                                 --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                         """
-                        
-                        // 3. 배포 적용
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
-
-                    // 4. 클라이언트용 인증서 보관 (통합된 위치에서 가져옴)
                     archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }
 
-        // 🎥 3. MediaMTX (폴더명: mediamtx)
+        // 🎥 4. MediaMTX
         stage('MediaMTX 배포') {
             when {
                 anyOf {
@@ -128,49 +137,33 @@ pipeline {
             }
             steps {
                 script {
-                    // RTSP Read 인증 (Username with password) Credentials ID
-                    def MTX_CRED = 'mediamtx-rtsp-read'  // <- 너가 만든 Jenkins credential ID로 변경
-
-                    // 1) 카메라 접속 정보 치환에 필요한 값 가져오기
+                    def MTX_CRED = 'mediamtx-rtsp-read'
                     withCredentials([
                         string(credentialsId: 'cctv-camera-ip', variable: 'REAL_IP'),
                         string(credentialsId: 'cctv-camera-user', variable: 'REAL_USER'),
                         string(credentialsId: 'cctv-camera-pw', variable: 'REAL_PW'),
                         usernamePassword(credentialsId: MTX_CRED, usernameVariable: 'MTX_READ_USER', passwordVariable: 'MTX_READ_PASS')
                     ]) {
-                        // 2) 원본 mediamtx.yaml을 직접 sed -i로 바꾸지 말고, 임시 파일로 만들어 치환
                         sh '''
                             set -e
-
                             SRC=RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
                             OUT=/tmp/mediamtx.rendered.yaml
-
-                            # 원본 -> 임시 파일 복사
                             cp "$SRC" "$OUT"
-
-                            # 카메라 정보 치환 (템플릿에 __CAMERA_*__ 가 존재해야 함)
                             sed -i "s|__CAMERA_IP__|${REAL_IP}|g" "$OUT"
                             sed -i "s|__CAMERA_USER__|${REAL_USER}|g" "$OUT"
                             sed -i "s|__CAMERA_PASSWORD__|${REAL_PW}|g" "$OUT"
-
-                            # RTSP Read 인증 치환 (템플릿에 ${MTX_READ_USER}, ${MTX_READ_PASS}가 있어야 함)
                             sed -i "s|\\${MTX_READ_USER}|${MTX_READ_USER}|g" "$OUT"
                             sed -i "s|\\${MTX_READ_PASS}|${MTX_READ_PASS}|g" "$OUT"
-
-                            echo "[Rendered mediamtx.yaml head]"
-                            sed -n '1,40p' "$OUT"
                         '''
 
-                        // 3) 이미지 빌드/푸시 (기존 유지)
                         dir('RaspberryPi/k3s-cluster/mediamtx') {
-                            echo "🎥 MediaMTX 빌드 시작..."
+                            echo "🎥 MediaMTX 빌드: ${env.DOCKER_VER}"
                             withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                                 sh "echo $PASS | docker login -u $USER --password-stdin"
-                                sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:latest --push ."
+                                sh "docker buildx build --platform linux/arm64 -t hjuohj/mediamtx-server:${env.DOCKER_VER} -t hjuohj/mediamtx-server:latest --push ."
                             }
                         }
 
-                        // 4) 렌더링된 yaml로 apply + rollout restart
                         withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                             sh '''
                                 set -e
@@ -183,7 +176,7 @@ pipeline {
             }
         }
 
-        // 🐬 4. MariaDB (폴더명: mariadb)
+        // 🐬 5. MariaDB
         stage('MariaDB 배포') {
             when { 
                 anyOf {
@@ -194,10 +187,10 @@ pipeline {
             steps {
                 script {
                     dir('RaspberryPi/k3s-cluster/mariadb') {
-                        echo "🐬 MariaDB 빌드 시작..."
+                        echo "🐬 MariaDB 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:latest --push ."
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:${env.DOCKER_VER} -t hjuohj/mariadb-server:latest --push ."
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
@@ -209,7 +202,7 @@ pipeline {
             }
         }
 
-        // 🛡️ 5. Nginx Gateway (폴더명: nginx)
+        // 🛡️ 6. Nginx Gateway
         stage('Nginx Gateway 배포') {
             when { 
                 anyOf {
@@ -220,11 +213,8 @@ pipeline {
             }
             steps {
                 script {
-                    unstash 'certs-stash' // 보관된 인증서 가져오기
-
-                    // 2. K8s Secret 업데이트 (이미지에 넣지 않고 클러스터에 직접 등록)
+                    unstash 'certs-stash'
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        echo "🔑 K8s Secret 업데이트 중..."
                         sh """
                             kubectl --kubeconfig=$KUBECONFIG create secret generic nginx-certs \
                                 --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
@@ -237,16 +227,14 @@ pipeline {
                         """
                     }
 
-                    // 3. Nginx 이미지 빌드 및 푸시 (인증서 없이 설정파일만 포함)
                     dir('RaspberryPi/k3s-cluster/nginx') {
-                        echo "🛡️ Nginx Gateway 빌드 시작..."
+                        echo "🛡️ Nginx Gateway 빌드: ${env.DOCKER_VER}"
                         withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:latest --push ."
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/nginx-gateway:${env.DOCKER_VER} -t hjuohj/nginx-gateway:latest --push ."
                         }
                     }
 
-                    // 4. K8s 배포 적용
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/nginx-gateway"
@@ -254,8 +242,8 @@ pipeline {
                 }
             }
         }
-
-        // // 🖥️ 6. Qt Client (Windows)
+        
+         // // 🖥️ 6. Qt Client (Windows)
         // stage('Qt Client (Windows CMake)') {
         //     agent { label 'windows-qt' } 
             
@@ -346,22 +334,42 @@ pipeline {
         //     }
         // }
     }
-    // post {
-    //     success {
-    //         slackSend (
-    //             channel: 'C0ADS8RQAL9', 
-    //             color: 'good',
-    //             botUser: true, 
-    //             message: "✅ 배포 성공: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
-    //         )
-    //     }
-    //     failure {
-    //         slackSend (
-    //             channel: 'C0ADS8RQAL9', 
-    //             color: 'danger', 
-    //             botUser: true,
-    //             message: "❌ 배포 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|상세보기>)"
-    //         )
-    //     }
-    // }
+
+    // === 🏁 빌드 후 처리 (성공 시에만 버전 태그 생성) ===
+    post {
+        success {
+            script {
+                echo "✅ 빌드 및 배포 성공! Git Tag 생성 중... (${env.GIT_TAG_VER})"
+                
+                // Git Tag 생성 및 푸시
+                withCredentials([usernamePassword(credentialsId: GIT_CREDENTIAL_ID, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        git config user.email "jenkins@your-server.com"
+                        git config user.name "Jenkins Bot"
+                        
+                        # 이미 태그가 있으면 덮어쓰지 않도록 체크하거나 force 사용
+                        # 여기선 중복 방지를 위해 단순 생성 시도
+                        git tag -a ${env.GIT_TAG_VER} -m "Release ${env.DOCKER_VER} (Jenkins #${env.BUILD_NUMBER})"
+                        git push https://${GIT_USER}:${GIT_PASS}@github.com/hjuohj1022/VEDA_Final_Project.git ${env.GIT_TAG_VER}
+                    """
+                }
+            }
+            
+            slackSend (
+                channel: 'C0ADS8RQAL9', 
+                color: 'good',
+                botUser: true, 
+                message: "✅ 배포 완료: Ver ${env.GIT_TAG_VER} (${env.JOB_NAME} #${env.BUILD_NUMBER})\nDocker Tag: ${env.DOCKER_VER}"
+            )
+        }
+        failure {
+            slackSend (
+                channel: 'C0ADS8RQAL9', 
+                color: 'danger', 
+                botUser: true,
+                message: "❌ 배포 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|로그 확인>)"
+            )
+        }
+    }
 }
+
