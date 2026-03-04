@@ -6,18 +6,32 @@ set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT ALL_BUILD)
 set(CMAKE_CXX_STANDARD 17)
 
 # 2. 경로 설정 (로컬 설정 파일 로드)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/local_paths.cmake")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/local_paths.cmake")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config/local_paths.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/config/local_paths.cmake")
 else()
-    message(FATAL_ERROR "local_paths.cmake not found! Copy local_paths.cmake.example to local_paths.cmake and set your paths.")
+    message(FATAL_ERROR "config/local_paths.cmake not found! Copy config/local_paths.cmake.example and set your paths.")
 endif()
 
 set(NVCC_PATH "${CUDA_PATH}/bin/nvcc.exe")
+
+# local_paths.cmake can contain relative paths.
+# Resolve them against project root so custom commands run from build dir still work.
+if(NOT IS_ABSOLUTE "${TRT_PATH}")
+    set(TRT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${TRT_PATH}")
+endif()
+if(NOT IS_ABSOLUTE "${OPENCV_PATH}")
+    set(OPENCV_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${OPENCV_PATH}")
+endif()
+if(NOT IS_ABSOLUTE "${CUDA_PATH}")
+    set(CUDA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${CUDA_PATH}")
+endif()
 
 # 3. Include
 include_directories(${TRT_PATH}/include)
 include_directories(${CUDA_PATH}/include)
 include_directories(${OPENCV_PATH}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/config)
 
 # 4. Lib
 link_directories(${TRT_PATH}/lib)
@@ -35,9 +49,10 @@ set(CUDA_INCLUDE "${CUDA_PATH}/include")
 add_custom_command(
     OUTPUT ${CUDA_OBJ}
     COMMAND "${NVCC_PATH}"
-    ARGS -c "${CMAKE_CURRENT_SOURCE_DIR}/main.cu"
+    ARGS -c "${CMAKE_CURRENT_SOURCE_DIR}/runtime/main.cu"
          -o "${CUDA_OBJ}"
-         -I"${CMAKE_CURRENT_SOURCE_DIR}"
+         -I"${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+         -I"${CMAKE_CURRENT_SOURCE_DIR}/config"
          -I"${TRT_INCLUDE}"
          -I"${CUDA_INCLUDE}"
          -I"${OPENCV_INCLUDE}"
@@ -45,12 +60,12 @@ add_custom_command(
          -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
          -Xcompiler "/MD"
          -O3
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/main.cu" "${CMAKE_CURRENT_SOURCE_DIR}/app_config.h"
-    COMMENT "Compiling CUDA source main.cu manually..."
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/runtime/main.cu" "${CMAKE_CURRENT_SOURCE_DIR}/config/app_config.h"
+    COMMENT "Compiling CUDA source runtime/main.cu manually..."
 )
 
 # 6. 실행 파일 (오브젝트 파일 링크 + 링커 유도용 dummy)
-add_executable(depth_trt ${CUDA_OBJ} dummy.cpp)
+add_executable(depth_trt ${CUDA_OBJ} runtime/dummy.cpp)
 
 # 7. 링크
 target_link_libraries(depth_trt debug ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100d.lib)

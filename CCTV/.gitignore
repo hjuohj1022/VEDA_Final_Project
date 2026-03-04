@@ -28,8 +28,8 @@ build-vs143/
 *.user
 
 # Ignore Local Configs (Secrets)
-local_paths.cmake
-app_config.h
+config/local_paths.cmake
+config/app_config.h
 
 # Large libraries and SDKs
 opencv/
@@ -38,7 +38,7 @@ Depth-Anything-V2/TensorRT-*/
 Depth-Anything-V2/checkpoints/
 
 # Old and Legacy files
-old/
+archive/old/
 
 # Large Model Files
 *.onnx

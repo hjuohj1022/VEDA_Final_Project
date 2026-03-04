@@ -111,22 +111,23 @@ class DepthExportWrapper(torch.nn.Module):
 
 
 def parse_args() -> argparse.Namespace:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
     parser = argparse.ArgumentParser(
         description="Export DA3 Metric safetensors checkpoint to ONNX depth output."
     )
     parser.add_argument(
         "--model-dir",
-        default=os.path.join(base_dir, "checkpoints", "DA3METRIC-LARGE"),
+        default=os.path.join(project_root, "ml_assets", "checkpoints", "DA3METRIC-LARGE"),
         help="Local HF-format DA3 metric model directory containing model.safetensors/config.json",
     )
     parser.add_argument(
         "--output",
-        default=os.path.join(base_dir, "da3metric_490x868.onnx"),
+        default=os.path.join(project_root, "ml_assets", "onnx", "da3metric_560x1008.onnx"),
         help="Output ONNX file path",
     )
-    parser.add_argument("--height", type=int, default=490, help="Input height")
-    parser.add_argument("--width", type=int, default=868, help="Input width")
+    parser.add_argument("--height", type=int, default=560, help="Input height")
+    parser.add_argument("--width", type=int, default=1008, help="Input width")
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset version")
     parser.add_argument(
         "--device",

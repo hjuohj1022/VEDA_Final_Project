@@ -8,7 +8,7 @@
 // =========================================================
 
 // TensorRT 엔진 파일 경로
-const std::string ENGINE_PATH = "C:/path/to/your/model.engine";
+const std::string ENGINE_PATH = "ml_assets/engines/your_model.engine";
 
 // RTSP 채널 목록 (0~3)
 const std::array<std::string, 4> RTSP_URLS = {
