@@ -5,15 +5,15 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
 ## Overview
 | Component | Role | Main File |
 |---|---|---|
-| Inference Server | RTSP 수신, CUDA 전처리, TensorRT 추론, TCP 제어 | `main.cu` |
-| Desktop Client | 서버 제어 + 스트림 시각화 | `client_gui.py` |
-| Model Export | DA3 safetensors -> ONNX | `fact/export_da3metric_onnx.py` |
-| Bootstrap Script | 의존성 다운로드 + 경로 설정 생성 | `setup_dependencies.ps1` |
+| Inference Server | RTSP 수신, CUDA 전처리, TensorRT 추론, TCP 제어 | `runtime/main.cu` |
+| Desktop Client | 서버 제어 + 스트림 시각화 | `tools/client/client_gui.py` |
+| Model Export | DA3 safetensors -> ONNX | `tools/export/export_da3metric_onnx.py` |
+| Bootstrap Script | 의존성 다운로드 + 경로 설정 생성 | `tools/bootstrap/setup_dependencies.ps1` |
 
 ## Architecture Diagram
 ```text
                            +----------------------------------+
-                           |          client_gui.py           |
+                           |     tools/client/client_gui.py   |
                            |  - Start/Stop/Pause/Resume       |
                            |  - View PC (Server/Client)       |
                            +----------------+-----------------+
@@ -22,7 +22,7 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
                                             v
 +-------------------+            +----------+-----------+            +------------------+
 | RTSP Cameras      | --RTSP-->  |    depth_trt.exe    | --depth--> | depth_stream     |
-| ch0..ch3          |            | (main.cu, TCP 9090) | --rgbd---> | rgbd_stream      |
+| ch0..ch3          |            | (runtime/main.cu, TCP 9090) | --rgbd---> | rgbd_stream      |
 +-------------------+            |  CUDA + TensorRT     | --png----> | pc_stream        |
                                  +----------+-----------+            +------------------+
                                             |
@@ -35,18 +35,18 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
                                             ^
                                             | ONNX export
                             +---------------+----------------+
-                            | fact/export_da3metric_onnx.py |
+                            | tools/export/export_da3metric_onnx.py |
                             | + DA3 checkpoint              |
                             +--------------------------------+
 ```
 
 ## Quick Start
 ```powershell
-# 1) 의존성 자동 설치 (OpenCV/TensorRT/DA3Metric + local_paths.cmake)
+# 1) 의존성 자동 설치 (OpenCV/TensorRT/DA3Metric + config/local_paths.cmake)
 powershell -ExecutionPolicy Bypass -File .\setup_dependencies.ps1
 
 # 2) 환경 설정 (필수)
-# - app_config.h: ENGINE_PATH, RTSP_URLS, INPUT_HEIGHT/WIDTH 점검
+# - config/app_config.h: ENGINE_PATH, RTSP_URLS, INPUT_HEIGHT/WIDTH 점검
 
 # 3) 빌드
 cmake -S . -B build
@@ -73,15 +73,24 @@ python .\client_gui.py
 ## Directory Layout
 ```text
 CCTV/
-  main.cu
-  app_config.h
-  app_config.h.example
+  runtime/
+    main.cu
+    request.h runner.h pointcloud.h ...
+  config/
+    app_config.h(.example)
+    local_paths.cmake(.example)
+  tools/
+    bootstrap/setup_dependencies.ps1
+    client/client_gui.py
+    export/export_da3metric_onnx.py
+  ml_assets/
+    checkpoints/
+    onnx/
+    engines/
+    sources/
   CMakeLists.txt
-  setup_dependencies.ps1
-  client_gui.py
-  local_paths.cmake.example
-  fact/
-    export_da3metric_onnx.py
+  setup_dependencies.ps1      # wrapper
+  client_gui.py               # wrapper
 ```
 
 ## Requirements
@@ -104,8 +113,8 @@ CCTV/
 - TensorRT 10.15.1.29 다운로드/압축해제
   - `-TensorRtUrl` 미지정 시 `-CudaPath`의 CUDA 버전 태그로 URL 자동 선택
   - 예: CUDA `v12.1` -> `cuda-12.1` 우선, 실패 시 `cuda-12.9` fallback
-- DA3Metric 체크포인트 다운로드 (`fact/checkpoints/DA3METRIC-LARGE`)
-- `local_paths.cmake` 자동 생성
+- DA3Metric 체크포인트 다운로드 (`ml_assets/checkpoints/DA3METRIC-LARGE`)
+- `config/local_paths.cmake` 자동 생성
 
 자주 쓰는 옵션:
 ```powershell
@@ -125,7 +134,7 @@ CCTV/
 - `RTSP_CHANNEL`: 기본 채널
 - `INPUT_HEIGHT`, `INPUT_WIDTH`: 엔진 입력 shape와 반드시 일치
 
-### `local_paths.cmake`
+### `config/local_paths.cmake`
 자동 생성 파일이며, 수동 편집 시 아래 경로를 정확히 지정해야 합니다.
 
 - `TRT_PATH`
@@ -191,14 +200,14 @@ pc_stream
 
 2. ONNX export:
 ```powershell
-python .\fact\export_da3metric_onnx.py --height 560 --width 1008
+python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 ```
 
 3. 엔진 생성:
 ```powershell
 .\TensorRT-10.15.1.29\bin\trtexec.exe `
-  --onnx=fact/da3metric_560x1008.onnx `
-  --saveEngine=fact/da3metric_560x1008_fp16.engine `
+  --onnx=ml_assets/onnx/da3metric_560x1008.onnx `
+  --saveEngine=ml_assets/engines/da3metric_560x1008_fp16.engine `
   --fp16 --verbose
 ```
 
@@ -212,7 +221,7 @@ python .\fact\export_da3metric_onnx.py --height 560 --width 1008
 - DLL 관련 실행 오류: 빌드 산출물 폴더에 TensorRT/OpenCV DLL 복사 여부 확인
 
 ## Operational Checklist
-- `local_paths.cmake` 경로가 실제 설치 경로와 일치하는가?
+- `config/local_paths.cmake` 경로가 실제 설치 경로와 일치하는가?
 - `app_config.h`의 엔진/RTSP/입력 해상도가 현재 배포 아티팩트와 일치하는가?
 - 서버 로그에 `Listening on port ...`가 출력되는가?
 - 클라이언트 `Start` 응답이 `OK started ...`로 오는가?

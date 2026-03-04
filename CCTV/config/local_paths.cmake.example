@@ -4,10 +4,10 @@
 # =========================================================
 
 # TensorRT 경로
-set(TRT_PATH "C:/path/to/TensorRT-10.x.x.x")
+set(TRT_PATH "TensorRT-10.x.x.x")
 
 # OpenCV 경로
-set(OPENCV_PATH "C:/path/to/opencv/build")
+set(OPENCV_PATH "opencv/build")
 
 # CUDA 경로
 set(CUDA_PATH "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.x")
