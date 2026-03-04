@@ -42,6 +42,9 @@ ApplicationWindow {
     property string pendingExportDate: ""
     property string pendingExportStart: ""
     property string pendingExportEnd: ""
+    property bool exportProgressVisible: false
+    property int exportProgressPercent: 0
+    property string exportProgressText: ""
 
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
@@ -313,6 +316,9 @@ ApplicationWindow {
             isLoggedIn: backend.isLoggedIn
             currentSection: stackLayout.currentIndex
             sessionRemainingSeconds: backend.sessionRemainingSeconds
+            exportProgressVisible: window.exportProgressVisible
+            exportProgressPercent: window.exportProgressPercent
+            exportProgressText: window.exportProgressText
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {
@@ -332,6 +338,9 @@ ApplicationWindow {
                 rtspConfigError = ""
                 rtspConfigIsError = false
                 rtspSettingsPopup.visible = true
+            }
+            onRequestExportCancel: {
+                backend.cancelPlaybackExport()
             }
         }
         // 메인 컨텐츠(중앙 화면 + 우측 사이드바)
@@ -803,15 +812,30 @@ ApplicationWindow {
         }
         function onPlaybackExportStarted(message) {
             console.log("[PLAYBACK][EXPORT]", message)
+            exportProgressHideTimer.stop()
+            window.exportProgressVisible = true
+            window.exportProgressPercent = 0
+            window.exportProgressText = message
         }
         function onPlaybackExportProgress(percent, message) {
             console.log("[PLAYBACK][EXPORT]", percent + "%", message)
+            exportProgressHideTimer.stop()
+            window.exportProgressVisible = true
+            window.exportProgressPercent = Math.max(0, Math.min(100, percent))
+            window.exportProgressText = message
         }
         function onPlaybackExportFinished(path) {
             console.log("[PLAYBACK][EXPORT] saved:", path)
+            window.exportProgressVisible = true
+            window.exportProgressPercent = 100
+            window.exportProgressText = "내보내기 완료"
+            exportProgressHideTimer.restart()
         }
         function onPlaybackExportFailed(error) {
             console.warn("[PLAYBACK][EXPORT]", error)
+            window.exportProgressVisible = true
+            window.exportProgressText = "내보내기 실패"
+            exportProgressHideTimer.restart()
         }
     }
 
@@ -829,6 +853,16 @@ ApplicationWindow {
                                           window.pendingExportStart,
                                           window.pendingExportEnd,
                                           savePath)
+        }
+    }
+
+    Timer {
+        id: exportProgressHideTimer
+        interval: 3500
+        repeat: false
+        running: false
+        onTriggered: {
+            window.exportProgressVisible = false
         }
     }
 

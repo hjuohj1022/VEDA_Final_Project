@@ -1,6 +1,7 @@
 ﻿#include "Backend.h"
 
 #include <QDebug>
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,10 +16,31 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QTimer>
+#include <QTcpSocket>
+#include <QRandomGenerator>
+#include <QWebSocket>
+#include <QHostAddress>
+#include <QProcess>
+#include <QStandardPaths>
 #include <algorithm>
 #include <memory>
 
 namespace {
+void removeFileWithRetry(QObject *ctx, const QString &path, int retries = 120, int intervalMs = 250) {
+    if (!ctx || path.isEmpty()) {
+        return;
+    }
+    if (QFile::remove(path)) {
+        return;
+    }
+    if (retries <= 0) {
+        return;
+    }
+    QTimer::singleShot(intervalMs, ctx, [ctx, path, retries, intervalMs]() {
+        removeFileWithRetry(ctx, path, retries - 1, intervalMs);
+    });
+}
+
 QString extractKvValue(const QString &text, const QStringList &keys) {
     for (const QString &k : keys) {
         QRegularExpression re(QString("(^|\\s|\\r|\\n)%1\\s*=\\s*([^\\r\\n]+)")
@@ -53,6 +75,35 @@ int parseHmsToSec(const QString &hms) {
     const int s = m.captured(3).toInt();
     if (h < 0 || h > 23 || mm < 0 || mm > 59 || s < 0 || s > 59) return -1;
     return (h * 3600) + (mm * 60) + s;
+}
+
+QString resolveFfmpegBinary(const QMap<QString, QString> &env) {
+    const QString envBin = env.value("FFMPEG_BIN").trimmed();
+    if (!envBin.isEmpty() && QFileInfo::exists(envBin)) {
+        return envBin;
+    }
+
+    const QString fromPathExe = QStandardPaths::findExecutable("ffmpeg.exe");
+    if (!fromPathExe.isEmpty()) return fromPathExe;
+
+    const QString fromPath = QStandardPaths::findExecutable("ffmpeg");
+    if (!fromPath.isEmpty()) return fromPath;
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        appDir + "/ffmpeg.exe",
+        appDir + "/tools/ffmpeg.exe",
+        appDir + "/tools/ffmpeg/bin/ffmpeg.exe",
+        QDir::currentPath() + "/ffmpeg.exe",
+        QDir::currentPath() + "/tools/ffmpeg.exe",
+        QDir::currentPath() + "/tools/ffmpeg/bin/ffmpeg.exe"
+    };
+    for (const QString &c : candidates) {
+        if (QFileInfo::exists(c)) return c;
+    }
+
+    // 마지막 fallback: 시스템 PATH에서 찾도록 이름 반환
+    return "ffmpeg";
 }
 } // namespace
 
@@ -849,6 +900,7 @@ void Backend::requestPlaybackExport(int channelIndex,
         QNetworkRequest req(downloadUrl);
         applySslIfNeeded(req);
         QNetworkReply *dl = m_manager->get(req);
+        m_playbackExportDownloadReply = dl;
         attachIgnoreSslErrors(dl, "SUNAPI_EXPORT_DOWNLOAD");
 
         connect(dl, &QNetworkReply::downloadProgress, this, [this](qint64 rec, qint64 total) {
@@ -858,7 +910,13 @@ void Backend::requestPlaybackExport(int channelIndex,
         });
 
         connect(dl, &QNetworkReply::finished, this, [this, dl, outPath]() {
+            m_playbackExportDownloadReply = nullptr;
+            if (m_playbackExportCancelRequested) {
+                dl->deleteLater();
+                return;
+            }
             if (dl->error() != QNetworkReply::NoError) {
+                m_playbackExportInProgress = false;
                 emit playbackExportFailed(QString("다운로드 실패: %1").arg(dl->errorString()));
                 dl->deleteLater();
                 return;
@@ -868,28 +926,186 @@ void Backend::requestPlaybackExport(int channelIndex,
             const QFileInfo fi(outPath);
             QDir().mkpath(fi.absolutePath());
             if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                m_playbackExportInProgress = false;
                 emit playbackExportFailed(QString("저장 실패: %1").arg(out.errorString()));
                 dl->deleteLater();
                 return;
             }
             out.write(bytes);
             out.close();
+            m_playbackExportInProgress = false;
+            m_playbackExportOutPath.clear();
+            m_playbackExportFinalPath.clear();
             emit playbackExportFinished(outPath);
             dl->deleteLater();
         });
     };
 
+    m_playbackExportCancelRequested = false;
+    m_playbackExportInProgress = true;
+    m_playbackExportOutPath = outPath;
+    m_playbackExportFinalPath = outPath;
     emit playbackExportStarted("내보내기 요청 시작");
+
+    auto startFfmpegBackup = [this, channelIndex, dateText, startTimeText, endTimeText, outPath](std::function<void()> onFailedFallback) -> bool {
+        const QString host = m_env.value("SUNAPI_IP").trimmed();
+        const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
+        const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : m_env.value("SUNAPI_PASSWORD").trimmed();
+        if (host.isEmpty() || user.isEmpty()) {
+            return false;
+        }
+
+        QString ffOutPath = outPath.trimmed();
+        if (ffOutPath.startsWith("file:", Qt::CaseInsensitive)) {
+            ffOutPath = QUrl(ffOutPath).toLocalFile();
+        }
+        if (ffOutPath.isEmpty()) {
+            return false;
+        }
+        if (QFileInfo(ffOutPath).suffix().trimmed().isEmpty()) {
+            ffOutPath += ".avi";
+        }
+        QDir().mkpath(QFileInfo(ffOutPath).absolutePath());
+        m_playbackExportOutPath = ffOutPath;
+        m_playbackExportFinalPath = ffOutPath;
+
+        const QString startCompact = dateText.trimmed().remove('-') + startTimeText.trimmed().remove(':');
+        const QString endCompact = dateText.trimmed().remove('-') + endTimeText.trimmed().remove(':');
+
+        bool rtspPortOk = false;
+        const int rtspPort = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed().toInt(&rtspPortOk);
+        const int rtspPortFinal = rtspPortOk ? rtspPort : 554;
+
+        const QString authUser = QString::fromUtf8(QUrl::toPercentEncoding(user));
+        const QString authPass = QString::fromUtf8(QUrl::toPercentEncoding(pass));
+        const QString rtspUrl = QString("rtsp://%1:%2@%3:%4/%5/recording/%6-%7/OverlappedID=0/backup.smp")
+                                    .arg(authUser,
+                                         authPass,
+                                         host,
+                                         QString::number(rtspPortFinal),
+                                         QString::number(channelIndex),
+                                         startCompact,
+                                         endCompact);
+
+        const QString ffmpegBin = resolveFfmpegBinary(m_env);
+        QProcess *proc = new QProcess(this);
+        m_playbackExportFfmpegProc = proc;
+        auto ffHandled = std::make_shared<bool>(false);
+        proc->setProcessChannelMode(QProcess::MergedChannels);
+        QStringList args;
+        args << "-y"
+             << "-hide_banner"
+             << "-loglevel"
+             << "error"
+             << "-rtsp_transport"
+             << "tcp"
+             << "-i"
+             << rtspUrl
+             << "-map"
+             << "0"
+             << "-c"
+             << "copy"
+             << "-f"
+             << "avi"
+             << ffOutPath;
+
+        emit playbackExportProgress(8, "내보내기 ffmpeg 추출 시작");
+
+        connect(proc, &QProcess::errorOccurred, this, [this, proc, onFailedFallback, ffHandled](QProcess::ProcessError) {
+            if (*ffHandled) return;
+            *ffHandled = true;
+            const QString err = proc->errorString();
+            qWarning() << "[SUNAPI][EXPORT][FFMPEG] process error:" << err;
+            m_playbackExportFfmpegProc = nullptr;
+            proc->deleteLater();
+            if (m_playbackExportCancelRequested) {
+                m_playbackExportInProgress = false;
+                return;
+            }
+            if (onFailedFallback) {
+                emit playbackExportProgress(9, "ffmpeg 실패, WS fallback 전환");
+                onFailedFallback();
+            } else {
+                m_playbackExportInProgress = false;
+                emit playbackExportFailed(QString("내보내기 실패: ffmpeg 실행 오류 (%1)").arg(err));
+            }
+        });
+
+        connect(proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, proc, ffOutPath, onFailedFallback, ffHandled](int exitCode, QProcess::ExitStatus exitStatus) {
+                    if (*ffHandled) return;
+                    *ffHandled = true;
+                    const QString logs = QString::fromUtf8(proc->readAll()).trimmed();
+                    m_playbackExportFfmpegProc = nullptr;
+                    proc->deleteLater();
+                    if (m_playbackExportCancelRequested) {
+                        m_playbackExportInProgress = false;
+                        return;
+                    }
+                    if (exitStatus == QProcess::NormalExit && exitCode == 0 && QFileInfo::exists(ffOutPath) && QFileInfo(ffOutPath).size() > 0) {
+                        m_playbackExportInProgress = false;
+                        m_playbackExportOutPath.clear();
+                        m_playbackExportFinalPath.clear();
+                        emit playbackExportProgress(100, "내보내기 완료");
+                        emit playbackExportFinished(ffOutPath);
+                        return;
+                    }
+
+                    qWarning() << "[SUNAPI][EXPORT][FFMPEG] failed:"
+                               << "exitCode=" << exitCode
+                               << "status=" << static_cast<int>(exitStatus)
+                               << "log=" << logs.left(300);
+                    if (onFailedFallback) {
+                        emit playbackExportProgress(9, "ffmpeg 실패, WS fallback 전환");
+                        onFailedFallback();
+                    } else {
+                        m_playbackExportInProgress = false;
+                        emit playbackExportFailed("내보내기 실패: ffmpeg 추출 실패");
+                    }
+                });
+
+        proc->start(ffmpegBin, args);
+        if (!proc->waitForStarted(1500)) {
+            const QString err = proc->errorString();
+            m_playbackExportFfmpegProc = nullptr;
+            proc->deleteLater();
+            qWarning() << "[SUNAPI][EXPORT][FFMPEG] start failed:" << err;
+            return false;
+        }
+
+        return true;
+    };
 
     const auto lastCreateReason = std::make_shared<QString>();
     const auto tryCreate = std::make_shared<std::function<void(int)>>();
     *tryCreate = [=](int idx) {
+        if (m_playbackExportCancelRequested) {
+            m_playbackExportInProgress = false;
+            return;
+        }
         if (idx < 0 || idx >= createCandidates.size()) {
             if (lastCreateReason->contains("Error Code: 608", Qt::CaseInsensitive)) {
-                emit playbackExportFailed("내보내기 실패: 카메라가 SUNAPI export 기능을 지원하지 않음(Error 608)");
+                qInfo() << "[SUNAPI][EXPORT] fallback to RTSP-over-WS backup.smp path (Error 608)";
+                const bool started = startFfmpegBackup(
+                    [this, channelIndex, dateText, startTimeText, endTimeText, outPath]() {
+                        if (m_playbackExportCancelRequested) {
+                            m_playbackExportInProgress = false;
+                            return;
+                        }
+                        requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
+                    });
+                if (!started) {
+                    if (m_playbackExportCancelRequested) {
+                        m_playbackExportInProgress = false;
+                        return;
+                    }
+                    requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
+                }
             } else if (!lastCreateReason->trimmed().isEmpty()) {
+                m_playbackExportInProgress = false;
                 emit playbackExportFailed(QString("내보내기 실패: create 엔드포인트 호환 실패 (%1)").arg(*lastCreateReason));
             } else {
+                m_playbackExportInProgress = false;
                 emit playbackExportFailed("내보내기 실패: create 엔드포인트 호환 실패");
             }
             return;
@@ -947,6 +1163,7 @@ void Backend::requestPlaybackExport(int channelIndex,
             }
 
             if (jobId.isEmpty()) {
+                m_playbackExportInProgress = false;
                 emit playbackExportFailed("내보내기 실패: JobID/다운로드 URL 없음");
                 return;
             }
@@ -966,6 +1183,7 @@ void Backend::requestPlaybackExport(int channelIndex,
             *pollOnce = [=]() {
                 const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startMs;
                 if (elapsed > timeoutMs) {
+                    m_playbackExportInProgress = false;
                     emit playbackExportFailed("내보내기 실패: 상태 조회 시간 초과");
                     return;
                 }
@@ -998,6 +1216,7 @@ void Backend::requestPlaybackExport(int channelIndex,
                     }
 
                     if (failed) {
+                        m_playbackExportInProgress = false;
                         emit playbackExportFailed(QString("내보내기 실패: %1").arg(reason2.isEmpty() ? "장비 오류" : reason2));
                         pollReply->deleteLater();
                         return;
@@ -1038,4 +1257,684 @@ void Backend::requestPlaybackExport(int channelIndex,
     };
 
     (*tryCreate)(0);
+}
+
+void Backend::cancelPlaybackExport() {
+    if (!m_playbackExportInProgress) {
+        return;
+    }
+
+    m_playbackExportCancelRequested = true;
+    m_playbackExportInProgress = false;
+
+    if (m_playbackExportWs) {
+        if (m_playbackExportWs->state() == QAbstractSocket::ConnectedState
+            || m_playbackExportWs->state() == QAbstractSocket::ConnectingState) {
+            m_playbackExportWs->close();
+        }
+        // WS sender 해제를 강제해 연결/타이머 람다 참조를 끊고 파일 핸들 정리 유도
+        m_playbackExportWs->deleteLater();
+        m_playbackExportWs = nullptr;
+    }
+    if (m_playbackExportFfmpegProc) {
+        m_playbackExportFfmpegProc->disconnect(this);
+        if (m_playbackExportFfmpegProc->state() != QProcess::NotRunning) {
+            m_playbackExportFfmpegProc->kill();
+            m_playbackExportFfmpegProc->waitForFinished(300);
+        }
+        m_playbackExportFfmpegProc->deleteLater();
+        m_playbackExportFfmpegProc = nullptr;
+    }
+    if (m_playbackExportDownloadReply) {
+        m_playbackExportDownloadReply->disconnect(this);
+        if (m_playbackExportDownloadReply->isRunning()) {
+            m_playbackExportDownloadReply->abort();
+        }
+        m_playbackExportDownloadReply->deleteLater();
+        m_playbackExportDownloadReply = nullptr;
+    }
+
+    const QString outPath = m_playbackExportOutPath;
+    const QString finalPath = m_playbackExportFinalPath;
+    if (!outPath.isEmpty()) {
+        removeFileWithRetry(this, outPath);
+    }
+    if (!finalPath.isEmpty() && finalPath != outPath) {
+        removeFileWithRetry(this, finalPath);
+    }
+    m_playbackExportOutPath.clear();
+    m_playbackExportFinalPath.clear();
+
+    emit playbackExportFailed("내보내기 취소됨");
+}
+
+void Backend::requestPlaybackExportViaWs(int channelIndex,
+                                         const QString &dateText,
+                                         const QString &startTimeText,
+                                         const QString &endTimeText,
+                                         const QString &savePath) {
+    if (m_playbackExportCancelRequested) {
+        m_playbackExportInProgress = false;
+        return;
+    }
+    m_playbackExportInProgress = true;
+
+    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
+    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : m_env.value("SUNAPI_PASSWORD").trimmed();
+    if (host.isEmpty() || user.isEmpty()) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: SUNAPI 접속 정보 누락");
+        return;
+    }
+
+    const int startSec = parseHmsToSec(startTimeText);
+    const int endSec = parseHmsToSec(endTimeText);
+    if (startSec < 0 || endSec < 0 || endSec < startSec) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: 시작/종료 시간 형식 오류");
+        return;
+    }
+    const int durationSec = qMax(1, (endSec - startSec) + 1);
+
+    const QDateTime dtStart = QDateTime::fromString(dateText.trimmed() + " " + startTimeText.trimmed(), "yyyy-MM-dd HH:mm:ss");
+    const QDateTime dtEnd = QDateTime::fromString(dateText.trimmed() + " " + endTimeText.trimmed(), "yyyy-MM-dd HH:mm:ss");
+    if (!dtStart.isValid() || !dtEnd.isValid()) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: 날짜/시간 파싱 오류");
+        return;
+    }
+
+    const QString tsStart = dtStart.toString("yyyyMMddHHmmss");
+    const QString tsEnd = dtEnd.toString("yyyyMMddHHmmss");
+    const QString rtspUri = QString("rtsp://%1/%2/recording/%3-%4/OverlappedID=0/backup.smp")
+            .arg(host, QString::number(channelIndex), tsStart, tsEnd);
+
+    QString requestedOutPath = savePath.trimmed();
+    if (requestedOutPath.startsWith("file:", Qt::CaseInsensitive)) {
+        requestedOutPath = QUrl(requestedOutPath).toLocalFile();
+    }
+    if (requestedOutPath.isEmpty()) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: 저장 경로 비어 있음");
+        return;
+    }
+
+    QFileInfo requestedFi(requestedOutPath);
+    QString requestedExt = requestedFi.suffix().trimmed().toLower();
+    if (requestedExt.isEmpty()) {
+        requestedExt = "avi";
+        requestedOutPath += ".avi";
+    }
+
+    const bool wantsAvi = (requestedExt == "avi");
+    const QString finalOutPath = requestedOutPath;
+
+    QString outPath = requestedOutPath;
+    if (wantsAvi || !outPath.endsWith(".h264", Qt::CaseInsensitive)) {
+        outPath = QFileInfo(requestedOutPath).absolutePath() + "/" + QFileInfo(requestedOutPath).completeBaseName() + ".h264";
+    }
+    QDir().mkpath(QFileInfo(outPath).absolutePath());
+    m_playbackExportOutPath = outPath;
+    m_playbackExportFinalPath = finalOutPath;
+
+    // 1) RTSP OPTIONS 챌린지 확보
+    bool rtspPortOk = false;
+    const int rtspPort = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed().toInt(&rtspPortOk);
+    const int rtspPortFinal = rtspPortOk ? rtspPort : 554;
+    QTcpSocket socket;
+    socket.connectToHost(host, static_cast<quint16>(rtspPortFinal));
+    if (!socket.waitForConnected(2000)) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed(QString("내보내기 실패: RTSP 연결 실패 (%1)").arg(socket.errorString()));
+        return;
+    }
+
+    QByteArray optReq;
+    optReq += "OPTIONS " + rtspUri.toUtf8() + " RTSP/1.0\r\n";
+    optReq += "CSeq: 1\r\n";
+    optReq += "User-Agent: UWC[undefined]\r\n";
+    optReq += "\r\n";
+    socket.write(optReq);
+    socket.flush();
+    if (!socket.waitForReadyRead(2000)) {
+        socket.disconnectFromHost();
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: RTSP 챌린지 응답 대기 시간 초과");
+        return;
+    }
+    QByteArray challengeResp = socket.readAll();
+    while (socket.waitForReadyRead(120)) {
+        challengeResp += socket.readAll();
+    }
+    socket.disconnectFromHost();
+
+    const QString challengeText = QString::fromUtf8(challengeResp);
+    const QRegularExpression realmRe("realm\\s*=\\s*\"([^\"]+)\"", QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpression nonceRe("nonce\\s*=\\s*\"([^\"]+)\"", QRegularExpression::CaseInsensitiveOption);
+    const QString realm = realmRe.match(challengeText).captured(1).trimmed();
+    const QString nonce = nonceRe.match(challengeText).captured(1).trimmed();
+    if (realm.isEmpty() || nonce.isEmpty()) {
+        m_playbackExportInProgress = false;
+        emit playbackExportFailed("내보내기 실패: RTSP Digest challenge 파싱 실패");
+        return;
+    }
+
+    // 2) security.cgi digestauth로 response 생성
+    const QString cnonce = QString::number(QRandomGenerator::global()->generate(), 16).left(8).toUpper();
+    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
+    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
+    const int defaultPort = (scheme == "https") ? 443 : 80;
+    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+    QUrl digestUrl;
+    digestUrl.setScheme(scheme);
+    digestUrl.setHost(host);
+    if (httpPort > 0) {
+        digestUrl.setPort(httpPort);
+    }
+    digestUrl.setPath("/stw-cgi/security.cgi");
+    QUrlQuery dq;
+    dq.addQueryItem("msubmenu", "digestauth");
+    dq.addQueryItem("action", "view");
+    dq.addQueryItem("Method", "OPTIONS");
+    dq.addQueryItem("Realm", realm);
+    dq.addQueryItem("Nonce", nonce);
+    dq.addQueryItem("Uri", rtspUri);
+    dq.addQueryItem("username", user);
+    dq.addQueryItem("password", "");
+    dq.addQueryItem("Nc", "00000001");
+    dq.addQueryItem("Cnonce", cnonce);
+    dq.addQueryItem("SunapiSeqId", QString::number(QRandomGenerator::global()->bounded(100000, 999999)));
+    digestUrl.setQuery(dq);
+
+    QNetworkRequest digestReq(digestUrl);
+    applySslIfNeeded(digestReq);
+    digestReq.setRawHeader("Accept", "application/json");
+    digestReq.setRawHeader("X-Secure-Session", "Normal");
+    QNetworkReply *digestReply = m_manager->get(digestReq);
+    attachIgnoreSslErrors(digestReply, "SUNAPI_EXPORT_WS_DIGEST");
+
+    connect(digestReply, &QNetworkReply::finished, this, [=]() {
+        if (digestReply->error() != QNetworkReply::NoError) {
+            const QString e = digestReply->errorString();
+            digestReply->deleteLater();
+            m_playbackExportInProgress = false;
+            emit playbackExportFailed(QString("내보내기 실패: digestauth 요청 실패 (%1)").arg(e));
+            return;
+        }
+
+        QString digestResponse;
+        const QByteArray body = digestReply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            digestResponse = doc.object().value("Response").toString().trimmed();
+        }
+        digestReply->deleteLater();
+        if (digestResponse.isEmpty()) {
+            m_playbackExportInProgress = false;
+            emit playbackExportFailed("내보내기 실패: digest response 누락");
+            return;
+        }
+
+        emit playbackExportProgress(3, "내보내기 세션 연결 준비");
+
+        struct WsExportState {
+            QPointer<QWebSocket> ws;
+            QPointer<QTimer> keepAliveTimer;
+            QPointer<QTimer> hardTimeoutTimer;
+            QFile outFile;
+            QString authHeader;
+            QString uri;
+            QString session;
+            int nextCseq = 1;
+            int setupDoneCount = 0;
+            int setupExpected = 9;
+            int h264RtpChannel = 2;
+            QByteArray interleavedBuf;
+            QByteArray fuBuffer;
+            int fuNalType = 0;
+            bool playSent = false;
+            bool playAck = false;
+            bool teardownSent = false;
+            bool finished = false;
+            bool gotRtp = false;
+            quint32 firstTs = 0;
+            quint32 lastTs = 0;
+            qint64 targetTsDelta = 0;
+            qint64 writtenBytes = 0;
+            qint64 startMs = 0;
+            qint64 lastRtpMs = 0;
+            int lastProgress = 0;
+            qint64 lastProgressMs = 0;
+            QString outPath;
+            QString finalOutPath;
+            bool needsAviRemux = false;
+            QHash<int, QString> setupCseqTrack; // cseq -> track
+            QHash<QString, QByteArray> trackInterleaved; // track -> "x-y"
+        };
+
+        auto st = std::make_shared<WsExportState>();
+        st->uri = rtspUri;
+        st->authHeader = QString("Authorization: Digest username=\"%1\", realm=\"%2\", uri=\"%3\", nonce=\"%4\", response=\"%5\"")
+                .arg(user, realm, rtspUri, nonce, digestResponse);
+        st->targetTsDelta = static_cast<qint64>(durationSec) * 90000LL;
+        st->outPath = outPath;
+        st->finalOutPath = finalOutPath;
+        st->needsAviRemux = wantsAvi;
+        st->outFile.setFileName(outPath);
+        if (!st->outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            emit playbackExportFailed(QString("내보내기 실패: 파일 열기 실패 (%1)").arg(st->outFile.errorString()));
+            return;
+        }
+
+        auto sendRtsp = [this, st](const QByteArray &rtspText) {
+            if (!st->ws || st->ws->state() != QAbstractSocket::ConnectedState) {
+                return;
+            }
+            st->ws->sendBinaryMessage(rtspText);
+        };
+
+        auto buildReq = [st](const QByteArray &method, const QByteArray &uri, bool withSession = false) {
+            QByteArray req;
+            req += method + " " + uri + " RTSP/1.0\r\n";
+            req += "CSeq: " + QByteArray::number(st->nextCseq++) + "\r\n";
+            if (!st->authHeader.isEmpty()) {
+                req += st->authHeader.toUtf8() + "\r\n";
+            }
+            req += "User-Agent: UWC[undefined]\r\n";
+            if (withSession && !st->session.isEmpty()) {
+                req += "Session: " + st->session.toUtf8() + "\r\n";
+            }
+            return req;
+        };
+
+        auto finishWith = [this, st](bool ok, const QString &message) {
+            if (st->finished) {
+                return;
+            }
+            st->finished = true;
+            m_playbackExportInProgress = false;
+
+            if (st->keepAliveTimer) {
+                st->keepAliveTimer->stop();
+                st->keepAliveTimer->deleteLater();
+                st->keepAliveTimer = nullptr;
+            }
+            if (st->hardTimeoutTimer) {
+                st->hardTimeoutTimer->stop();
+                st->hardTimeoutTimer->deleteLater();
+                st->hardTimeoutTimer = nullptr;
+            }
+
+            if (st->ws && st->ws->state() == QAbstractSocket::ConnectedState
+                && !st->teardownSent && !st->session.isEmpty()) {
+                QByteArray td;
+                td += "TEARDOWN " + st->uri.toUtf8() + " RTSP/1.0\r\n";
+                td += "CSeq: " + QByteArray::number(st->nextCseq++) + "\r\n";
+                if (!st->authHeader.isEmpty()) {
+                    td += st->authHeader.toUtf8() + "\r\n";
+                }
+                td += "User-Agent: UWC[undefined]\r\n";
+                td += "Session: " + st->session.toUtf8() + "\r\n";
+                td += "\r\n";
+                st->ws->sendBinaryMessage(td);
+                st->teardownSent = true;
+            }
+
+            if (st->ws) {
+                st->ws->close();
+                st->ws->deleteLater();
+                st->ws = nullptr;
+            }
+            m_playbackExportWs = nullptr;
+
+            st->outFile.flush();
+            st->outFile.close();
+
+            if (ok) {
+                if (st->needsAviRemux) {
+                    emit playbackExportProgress(99, "AVI 변환 중");
+                    const QString ffmpegBin = resolveFfmpegBinary(m_env);
+                    QProcess ff;
+                    QStringList args;
+                    args << "-y"
+                         << "-loglevel" << "error"
+                         << "-f" << "h264"
+                         << "-i" << st->outPath
+                         << "-c:v" << "copy"
+                         << "-an"
+                         << st->finalOutPath;
+                    ff.start(ffmpegBin, args);
+                    const bool started = ff.waitForStarted(3000);
+                    const bool done = started && ff.waitForFinished(120000);
+                    if (!started || !done || ff.exitStatus() != QProcess::NormalExit || ff.exitCode() != 0) {
+                        const QString stderrText = QString::fromUtf8(ff.readAllStandardError()).trimmed();
+                        QFile::remove(st->finalOutPath);
+                        emit playbackExportFailed(QString("내보내기 실패: AVI 변환 실패 (%1)")
+                                                      .arg(stderrText.isEmpty() ? "ffmpeg 실행 오류/미설치" : stderrText));
+                        return;
+                    }
+                    QFile::remove(st->outPath);
+                }
+                emit playbackExportProgress(100, "내보내기 완료");
+                emit playbackExportFinished(st->needsAviRemux ? st->finalOutPath : st->outPath);
+                m_playbackExportOutPath.clear();
+                m_playbackExportFinalPath.clear();
+            } else {
+                QFile::remove(st->outPath);
+                if (!st->finalOutPath.isEmpty() && st->finalOutPath != st->outPath) {
+                    QFile::remove(st->finalOutPath);
+                }
+                m_playbackExportOutPath.clear();
+                m_playbackExportFinalPath.clear();
+                emit playbackExportFailed(message);
+            }
+        };
+
+        auto writeAnnexBNal = [st](const QByteArray &nal) {
+            if (nal.isEmpty()) {
+                return;
+            }
+            static const QByteArray startCode("\x00\x00\x00\x01", 4);
+            st->outFile.write(startCode);
+            st->outFile.write(nal);
+            st->writtenBytes += (startCode.size() + nal.size());
+        };
+
+        auto processRtpH264 = [st, writeAnnexBNal](const QByteArray &rtp) {
+            if (rtp.size() < 12) {
+                return;
+            }
+            const quint8 vpxcc = static_cast<quint8>(rtp[0]);
+            const int csrcCount = vpxcc & 0x0F;
+            int pos = 12 + (csrcCount * 4);
+            if (rtp.size() < pos) {
+                return;
+            }
+            const bool hasExtension = (vpxcc & 0x10) != 0;
+            if (hasExtension) {
+                if (rtp.size() < pos + 4) return;
+                const quint16 extLenWords = (static_cast<quint8>(rtp[pos + 2]) << 8) | static_cast<quint8>(rtp[pos + 3]);
+                pos += 4 + (extLenWords * 4);
+                if (rtp.size() < pos) return;
+            }
+            QByteArray payload = rtp.mid(pos);
+            if (payload.isEmpty()) {
+                return;
+            }
+
+            const quint8 nal0 = static_cast<quint8>(payload[0]);
+            const int nalType = nal0 & 0x1F;
+
+            if (nalType >= 1 && nalType <= 23) {
+                writeAnnexBNal(payload);
+                return;
+            }
+            if (nalType == 24) { // STAP-A
+                int off = 1;
+                while (off + 2 <= payload.size()) {
+                    const int nsz = (static_cast<quint8>(payload[off]) << 8) | static_cast<quint8>(payload[off + 1]);
+                    off += 2;
+                    if (nsz <= 0 || off + nsz > payload.size()) break;
+                    writeAnnexBNal(payload.mid(off, nsz));
+                    off += nsz;
+                }
+                return;
+            }
+            if (nalType == 28 && payload.size() >= 2) { // FU-A
+                const quint8 fuIndicator = static_cast<quint8>(payload[0]);
+                const quint8 fuHeader = static_cast<quint8>(payload[1]);
+                const bool start = (fuHeader & 0x80) != 0;
+                const bool end = (fuHeader & 0x40) != 0;
+                const quint8 ntype = (fuHeader & 0x1F);
+                const quint8 reconstructedNal = (fuIndicator & 0xE0) | ntype;
+                const QByteArray frag = payload.mid(2);
+
+                if (start) {
+                    st->fuBuffer.clear();
+                    st->fuNalType = ntype;
+                    st->fuBuffer.append(static_cast<char>(reconstructedNal));
+                    st->fuBuffer.append(frag);
+                } else if (!st->fuBuffer.isEmpty()) {
+                    st->fuBuffer.append(frag);
+                }
+
+                if (end && !st->fuBuffer.isEmpty()) {
+                    writeAnnexBNal(st->fuBuffer);
+                    st->fuBuffer.clear();
+                    st->fuNalType = 0;
+                }
+            }
+        };
+
+        auto parseRtspResponse = [this, st, buildReq, sendRtsp, finishWith](const QString &text) {
+            const QRegularExpression statusRe("^RTSP/1\\.0\\s+(\\d{3})", QRegularExpression::MultilineOption);
+            const QRegularExpression cseqRe("CSeq:\\s*(\\d+)", QRegularExpression::CaseInsensitiveOption);
+            const QRegularExpression sessRe("Session:\\s*([^;\\r\\n]+)", QRegularExpression::CaseInsensitiveOption);
+            const QRegularExpression trRe("Transport:\\s*([^\\r\\n]+)", QRegularExpression::CaseInsensitiveOption);
+            const QRegularExpression ilRe("interleaved\\s*=\\s*(\\d+)\\s*-\\s*(\\d+)", QRegularExpression::CaseInsensitiveOption);
+
+            const int status = statusRe.match(text).captured(1).toInt();
+            const int cseq = cseqRe.match(text).captured(1).toInt();
+            const QString sess = sessRe.match(text).captured(1).trimmed();
+            const QString transport = trRe.match(text).captured(1).trimmed();
+            if (!sess.isEmpty()) {
+                st->session = sess;
+            }
+
+            // OPTIONS 단계(초기 CSeq 1~2) 401은 정상 challenge/재시도 흐름으로 간주
+            if (status == 401) {
+                if (cseq >= 1 && cseq <= 2 && !st->playSent && st->setupDoneCount == 0) {
+                    return;
+                }
+                finishWith(false, QString("내보내기 실패: RTSP 인증 오류 (401, CSeq %1)").arg(cseq));
+                return;
+            }
+
+            if (status >= 400) {
+                finishWith(false, QString("내보내기 실패: RTSP 응답 오류 (%1, CSeq %2)").arg(status).arg(cseq));
+                return;
+            }
+
+            if (st->setupCseqTrack.contains(cseq)) {
+                st->setupDoneCount++;
+                const QString track = st->setupCseqTrack.value(cseq);
+                const auto m = ilRe.match(transport);
+                if (m.hasMatch()) {
+                    st->trackInterleaved.insert(track, QString("%1-%2").arg(m.captured(1), m.captured(2)).toUtf8());
+                    if (track.compare("H264", Qt::CaseInsensitive) == 0) {
+                        st->h264RtpChannel = m.captured(1).toInt();
+                    }
+                }
+                if (st->setupDoneCount >= st->setupExpected && !st->playSent && !st->session.isEmpty()) {
+                    QByteArray playReq = buildReq("PLAY", st->uri.toUtf8(), true);
+                    playReq += "Require: samsung-replay-timezone\r\n";
+                    playReq += "Rate-Control: no\r\n";
+                    playReq += "\r\n";
+                    sendRtsp(playReq);
+                    st->playSent = true;
+                }
+                return;
+            }
+
+            if (st->playSent && !st->playAck && text.contains("RTP-Info:", Qt::CaseInsensitive)) {
+                st->playAck = true;
+                emit playbackExportProgress(10, "내보내기 데이터 수신 시작");
+                return;
+            }
+        };
+
+        auto processInterleaved = [this, st, processRtpH264, finishWith](const QByteArray &bytes) {
+            st->interleavedBuf.append(bytes);
+            while (st->interleavedBuf.size() >= 4) {
+                if (static_cast<unsigned char>(st->interleavedBuf[0]) != 0x24) {
+                    st->interleavedBuf.remove(0, 1);
+                    continue;
+                }
+                const int payloadLen = (static_cast<unsigned char>(st->interleavedBuf[2]) << 8)
+                        | static_cast<unsigned char>(st->interleavedBuf[3]);
+                if (st->interleavedBuf.size() < (4 + payloadLen)) {
+                    return;
+                }
+                const int channel = static_cast<unsigned char>(st->interleavedBuf[1]);
+                const QByteArray payload = st->interleavedBuf.mid(4, payloadLen);
+                st->interleavedBuf.remove(0, 4 + payloadLen);
+
+                if (channel != st->h264RtpChannel) {
+                    continue;
+                }
+                if (payload.size() < 12) {
+                    continue;
+                }
+
+                st->gotRtp = true;
+                st->lastRtpMs = QDateTime::currentMSecsSinceEpoch();
+                const quint32 ts = (static_cast<quint32>(static_cast<unsigned char>(payload[4])) << 24)
+                        | (static_cast<quint32>(static_cast<unsigned char>(payload[5])) << 16)
+                        | (static_cast<quint32>(static_cast<unsigned char>(payload[6])) << 8)
+                        | static_cast<quint32>(static_cast<unsigned char>(payload[7]));
+                if (st->firstTs == 0) {
+                    st->firstTs = ts;
+                }
+                st->lastTs = ts;
+
+                processRtpH264(payload);
+
+                const quint32 deltaTs = st->lastTs - st->firstTs;
+                const int progress = qMax(10, qMin(98, 10 + static_cast<int>((deltaTs * 88LL) / qMax<qint64>(1, st->targetTsDelta))));
+                st->lastProgress = progress;
+                st->lastProgressMs = st->lastRtpMs;
+                emit playbackExportProgress(progress, QString("내보내기 수집 중 %1%").arg(progress));
+                if (deltaTs >= static_cast<quint32>(st->targetTsDelta) && st->writtenBytes > 0) {
+                    finishWith(true, QString());
+                    return;
+                }
+            }
+        };
+
+        st->ws = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+        st->keepAliveTimer = new QTimer(st->ws);
+        st->keepAliveTimer->setInterval(15000);
+        st->hardTimeoutTimer = new QTimer(st->ws);
+        st->hardTimeoutTimer->setSingleShot(true);
+        st->hardTimeoutTimer->setInterval(qMax(120000, durationSec * 2000));
+
+        connect(st->hardTimeoutTimer, &QTimer::timeout, this, [finishWith, st]() {
+            if (!st->gotRtp || st->writtenBytes <= 0) {
+                finishWith(false, "내보내기 실패: 데이터 수신 시간 초과");
+            } else {
+                finishWith(true, QString());
+            }
+        });
+
+        connect(st->keepAliveTimer, &QTimer::timeout, this, [st, sendRtsp, buildReq, finishWith, durationSec]() {
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            if (st->gotRtp && st->writtenBytes > 0) {
+                const qint64 idleMs = nowMs - st->lastRtpMs;
+                const qint64 runMs = nowMs - st->startMs;
+                const qint64 expectedMs = qMax<qint64>(30000, static_cast<qint64>(durationSec) * 1000 + 10000);
+                if ((st->lastProgress >= 97 && idleMs >= 3000) || (idleMs >= 10000 && runMs >= expectedMs)) {
+                    finishWith(true, QString());
+                    return;
+                }
+            }
+
+            if (!st->ws || st->ws->state() != QAbstractSocket::ConnectedState || st->session.isEmpty()) {
+                return;
+            }
+            QByteArray req = buildReq("GET_PARAMETER", st->uri.toUtf8(), true);
+            req += "Content-Length: 0\r\n\r\n";
+            sendRtsp(req);
+        });
+
+        connect(st->ws, &QWebSocket::connected, this, [st, sendRtsp, buildReq]() {
+            QByteArray options1;
+            options1 += "OPTIONS " + st->uri.toUtf8() + " RTSP/1.0\r\n";
+            options1 += "CSeq: " + QByteArray::number(st->nextCseq++) + "\r\n";
+            options1 += "User-Agent: UWC[undefined]\r\n";
+            options1 += "\r\n";
+            sendRtsp(options1);
+
+            QByteArray options2 = buildReq("OPTIONS", st->uri.toUtf8(), false);
+            options2 += "\r\n";
+            sendRtsp(options2);
+
+            const QStringList tracks = {"JPEG", "H264", "H265", "PCMU", "G726-16", "G726-24", "G726-32", "G726-40", "aac-16"};
+            int interleave = 0;
+            for (const QString &track : tracks) {
+                const int cseq = st->nextCseq;
+                st->setupCseqTrack.insert(cseq, track);
+                QByteArray setup = buildReq("SETUP", (st->uri + "/trackID=" + track).toUtf8(), false);
+                setup += "Transport: RTP/AVP/TCP;unicast;interleaved="
+                        + QByteArray::number(interleave)
+                        + "-"
+                        + QByteArray::number(interleave + 1)
+                        + "\r\n\r\n";
+                sendRtsp(setup);
+                interleave += 2;
+            }
+        });
+
+        connect(st->ws, &QWebSocket::binaryMessageReceived, this, [parseRtspResponse, processInterleaved](const QByteArray &payload) {
+            if (payload.startsWith("RTSP/1.0")) {
+                parseRtspResponse(QString::fromUtf8(payload));
+                return;
+            }
+            processInterleaved(payload);
+        });
+
+        connect(st->ws, &QWebSocket::errorOccurred, this, [this, finishWith, st](QAbstractSocket::SocketError) {
+            if (m_playbackExportCancelRequested) {
+                st->finished = true;
+                m_playbackExportWs = nullptr;
+                if (st->outFile.isOpen()) {
+                    st->outFile.flush();
+                    st->outFile.close();
+                }
+                QFile::remove(st->outPath);
+                if (!st->finalOutPath.isEmpty() && st->finalOutPath != st->outPath) {
+                    QFile::remove(st->finalOutPath);
+                }
+                m_playbackExportOutPath.clear();
+                m_playbackExportFinalPath.clear();
+                return;
+            }
+            if (!st->finished) {
+                finishWith(false, QString("내보내기 실패: websocket 오류 (%1)").arg(st->ws ? st->ws->errorString() : QString("unknown")));
+            }
+        });
+
+        connect(st->ws, &QWebSocket::disconnected, this, [this, finishWith, st]() {
+            if (m_playbackExportCancelRequested) {
+                st->finished = true;
+                m_playbackExportWs = nullptr;
+                if (st->outFile.isOpen()) {
+                    st->outFile.flush();
+                    st->outFile.close();
+                }
+                QFile::remove(st->outPath);
+                if (!st->finalOutPath.isEmpty() && st->finalOutPath != st->outPath) {
+                    QFile::remove(st->finalOutPath);
+                }
+                m_playbackExportOutPath.clear();
+                m_playbackExportFinalPath.clear();
+                return;
+            }
+            if (!st->finished) {
+                if (st->writtenBytes > 0) {
+                    finishWith(true, QString());
+                } else {
+                    finishWith(false, "내보내기 실패: 연결 종료(수신 데이터 없음)");
+                }
+            }
+        });
+
+        st->startMs = QDateTime::currentMSecsSinceEpoch();
+        st->hardTimeoutTimer->start();
+        st->keepAliveTimer->start();
+        emit playbackExportProgress(5, "내보내기 WebSocket 연결 시작");
+        m_playbackExportWs = st->ws;
+        st->ws->open(QUrl(QString("ws://%1/StreamingServer").arg(host)));
+    });
 }

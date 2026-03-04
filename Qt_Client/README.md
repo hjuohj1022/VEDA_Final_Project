@@ -16,6 +16,11 @@
 - 하단 타임라인(녹화 구간 초록색), 시각 이동(seek), 줌(휠) 지원
 - Play / Pause / Resume 제어
 - 화면 전환 시 Playback 세션 정리(disconnect)
+- Playback Controls 내 Export(내보내기) 지원
+  - 선택 시각 기준 시작/종료 구간 지정
+  - SUNAPI `export/create` 우선 시도
+  - 장비가 `Error 608`(미지원)일 경우 RTSP `backup.smp` + ffmpeg fallback
+  - 결과물 저장: 기본 AVI(실패 시 원인 로그 출력)
 
 ### 3. 녹화 관리 API 연동
 - `/recordings` 목록 조회
@@ -38,6 +43,18 @@
 8. `PAUSE/PLAY`로 일시정지/재개 제어
 
 Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1회 호출이 아니라 WS + RTSP 제어 시퀀스가 핵심입니다.
+
+## Playback Export 작동 원리
+
+1. 사용자가 Playback 화면에서 내보내기 구간(시작/끝)을 지정  
+2. SUNAPI CGI export API 시도  
+   - `recording.cgi?msubmenu=export&action=create`  
+3. 장비가 export CGI를 지원하지 않으면(`Error 608`) RTSP backup fallback  
+   - `rtsp://<ip>/<ch>/recording/<start>-<end>/OverlappedID=0/backup.smp`  
+   - Web export와 동일한 다중 track SETUP + PLAY + keepalive 순서 사용  
+4. 수집 완료 후 파일 저장  
+   - AVI 요청 시 ffmpeg remux 수행  
+   - ffmpeg 경로: `FFMPEG_BIN` -> PATH -> 앱 폴더/`tools/ffmpeg.exe` 순서 탐색
 
 ## 기술 스택
 
@@ -66,6 +83,12 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
   - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_PORT`
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
+  - `FFMPEG_BIN` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
+
+ffmpeg 배치/버전 관리:
+- 저장소에는 `tools/ffmpeg.exe`를 커밋하지 않습니다(`.gitignore` 제외).
+- 로컬 개발 환경에서는 프로젝트 루트 `tools/ffmpeg.exe`에 배치하거나 `FFMPEG_BIN`으로 절대 경로를 지정하세요.
+- CMake `POST_BUILD`는 로컬 `tools/ffmpeg.exe`가 있을 때 실행 폴더로 복사합니다.
 - MQTT(선택)
   - `MQTT_ENABLED` 및 TLS 관련 변수
 
@@ -81,6 +104,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 
 참고:
 - Storage 메트릭은 백엔드 `/system/storage`가 아니라, 카메라 SUNAPI(`SUNAPI_STORAGE_*`)를 직접 호출해 계산합니다.
+- 빌드 시 로컬 `tools/ffmpeg.exe`가 있으면 실행 폴더로 자동 복사하도록 CMake POST_BUILD가 설정되어 있습니다.
 
 ## 프로젝트 구조
 
@@ -162,6 +186,13 @@ Playback 동작 검증 시 아래를 확인했습니다.
 - `MediaPlayer error / Invalid data / Invalid argument`
   - Playback 입력 경로/세션 상태/프로토콜 설정 점검 필요
   - WS 연결, RTSP 시퀀스, SDP/입력 URL 순서대로 확인
+
+- Export 시 `Error 608 (Feature Not Implemented OR Not Supported)`
+  - 해당 장비의 SUNAPI CGI export 미지원 의미
+  - RTSP `backup.smp` + ffmpeg fallback 경로 사용
+
+- Export 시 `AVI 변환 실패 (ffmpeg 실행 오류/미설치)`
+  - `FFMPEG_BIN` 설정 또는 `tools/ffmpeg.exe`/PATH 점검
 
 - 타임라인 라벨 겹침
   - 기본/확대 라벨 Repeater 동시 렌더 문제

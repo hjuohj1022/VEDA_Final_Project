@@ -1,4 +1,4 @@
-#ifndef BACKEND_H
+﻿#ifndef BACKEND_H
 #define BACKEND_H
 
 #include <QObject>
@@ -15,12 +15,13 @@
 #include <QWebSocket>
 #include <QStringList>
 class QUdpSocket;
+class QProcess;
 
 class Backend : public QObject
 {
     Q_OBJECT
 
-    // 로그인/세션 및 서버 정보
+    // Login/session/server info
     Q_PROPERTY(bool isLoggedIn READ isLoggedIn NOTIFY isLoggedInChanged)
     Q_PROPERTY(QString userId READ userId NOTIFY userIdChanged)
     Q_PROPERTY(int sessionRemainingSeconds READ sessionRemainingSeconds NOTIFY sessionRemainingSecondsChanged)
@@ -31,12 +32,12 @@ class Backend : public QObject
     Q_PROPERTY(QString rtspIp READ rtspIp NOTIFY rtspIpChanged)
     Q_PROPERTY(QString rtspPort READ rtspPort NOTIFY rtspPortChanged)
 
-    // 라이브 메트릭
+    // 라이브 메트릭 정보
     Q_PROPERTY(int activeCameras READ activeCameras WRITE setActiveCameras NOTIFY activeCamerasChanged)
     Q_PROPERTY(int currentFps READ currentFps WRITE setCurrentFps NOTIFY currentFpsChanged)
     Q_PROPERTY(int latency READ latency WRITE setLatency NOTIFY latencyChanged)
 
-    // 스토리지 정보
+    // Storage info
     Q_PROPERTY(QString storageUsed READ storageUsed NOTIFY storageChanged)
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
@@ -111,6 +112,7 @@ public:
                                            const QString &startTimeText,
                                            const QString &endTimeText,
                                            const QString &savePath = QString());
+    Q_INVOKABLE void cancelPlaybackExport();
 
     Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
     Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
@@ -197,6 +199,11 @@ private:
     QString ensurePlaybackWsSdpSource();
     void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
     void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
+    void requestPlaybackExportViaWs(int channelIndex,
+                                    const QString &dateText,
+                                    const QString &startTimeText,
+                                    const QString &endTimeText,
+                                    const QString &savePath);
 
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;
@@ -235,7 +242,7 @@ private:
     int m_detectedObjects = 0;
     QString m_networkStatus = "Disconnected";
 
-    // 다운로드 상태
+    // Download state
     QNetworkReply *m_downloadReply = nullptr;
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
@@ -267,6 +274,14 @@ private:
     int m_playbackFuNalType = 0;
     QByteArray m_playbackInterleavedBuffer;
     int m_playbackValidRtpCount = 0;
+    QPointer<QWebSocket> m_playbackExportWs;
+    QPointer<QProcess> m_playbackExportFfmpegProc;
+    QPointer<QNetworkReply> m_playbackExportDownloadReply;
+    bool m_playbackExportCancelRequested = false;
+    bool m_playbackExportInProgress = false;
+    QString m_playbackExportOutPath;
+    QString m_playbackExportFinalPath;
 };
 
 #endif // BACKEND_H
+
