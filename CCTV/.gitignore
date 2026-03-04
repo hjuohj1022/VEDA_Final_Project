@@ -1,60 +1,75 @@
-# Ignore build artifacts
-build/
-*.exe
+# ---------------------------
+# Build artifacts / binaries
+# ---------------------------
+/build/
+/build-*/
 *.obj
 *.lib
 *.dll
 *.pdb
 *.ilk
 *.tlog
-*.log
-
-build-vs143/
 *.exe
-*.obj
-*.lib
-*.dll
-*.pdb
-*.ilk
-*.tlog
-*.log
 
-# Ignore VS/Code settings
-.vscode/
+# ---------------------------
+# CMake / Visual Studio
+# ---------------------------
 .vs/
 *.sln
 *.vcxproj
 *.vcxproj.filters
 *.user
 
-# Ignore Local Configs (Secrets)
-config/local_paths.cmake
-config/app_config.h
+# Keep shared VSCode settings only
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
 
-# Large libraries and SDKs
-opencv/
-TensorRT-10.15.1.29/
-Depth-Anything-V2/TensorRT-*/
-Depth-Anything-V2/checkpoints/
+# ---------------------------
+# Local machine config (secrets/paths)
+# ---------------------------
+/config/local_paths.cmake
+/config/app_config.h
 
-# Old and Legacy files
-archive/old/
+# ---------------------------
+# External SDKs / downloaded deps
+# ---------------------------
+/opencv/
+/TensorRT-*/
+/_downloads/
+/_tensorrt_extract/
 
-# Large Model Files
+# ---------------------------
+# ML artifacts (large, regenerated)
+# ---------------------------
+/ml_assets/checkpoints/
+/ml_assets/onnx/
+/ml_assets/engines/
 *.onnx
 *.engine
 *.pth
 *.weights
+*.safetensors
 
-# Python
+# ---------------------------
+# Runtime logs / temp / cache
+# ---------------------------
+*.log
 __pycache__/
+*/__pycache__/
 .ipynb_checkpoints/
 *.pyc
 
-# Backups
+# ---------------------------
+# Backups / archives
+# ---------------------------
 *.bak
+/archive/
 
-#memo
-*.md
-*.pdf
+# ---------------------------
+# Large local assets
+# ---------------------------
+/assets/installers/
+/assets/docs/*.pdf
 *.png
+tech.md
