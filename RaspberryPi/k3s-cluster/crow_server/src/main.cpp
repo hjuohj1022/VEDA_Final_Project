@@ -203,7 +203,7 @@ int main()
     // ==========================================
     // 열화상 스트리밍 WebSocket API
     // ==========================================
-    CROW_WEBSOCKET_ROUTE(app, "/thermal-stream")
+    app.websocket_route("/thermal-stream")
         .onopen([&](crow::websocket::connection& conn) {
             std::lock_guard<std::mutex> lock(clients_mutex);
             thermal_clients.insert(&conn);
