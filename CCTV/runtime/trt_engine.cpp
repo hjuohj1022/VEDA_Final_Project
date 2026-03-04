@@ -1,6 +1,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,16 @@ public:
 Logger& GetLogger() {
     static Logger logger;
     return logger;
+}
+
+int SafeDimToInt(int64_t value, int fallback, const char* axisName) {
+    if (value < static_cast<int64_t>(std::numeric_limits<int>::min()) ||
+        value > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+        LogWarn(std::string("[TRT] ") + axisName + " dim out of int range, using fallback=" +
+                std::to_string(fallback));
+        return fallback;
+    }
+    return static_cast<int>(value);
 }
 
 size_t Volume(const Dims& dims) {
@@ -182,13 +193,13 @@ void ResolveOutputHW(const Dims& outputDims, int& outH, int& outW) {
     outH = INPUT_HEIGHT;
     outW = INPUT_WIDTH;
     if (outputDims.nbDims == 4) {
-        outH = outputDims.d[2];
-        outW = outputDims.d[3];
+        outH = SafeDimToInt(outputDims.d[2], INPUT_HEIGHT, "output_h");
+        outW = SafeDimToInt(outputDims.d[3], INPUT_WIDTH, "output_w");
     } else if (outputDims.nbDims == 3) {
-        outH = outputDims.d[1];
-        outW = outputDims.d[2];
+        outH = SafeDimToInt(outputDims.d[1], INPUT_HEIGHT, "output_h");
+        outW = SafeDimToInt(outputDims.d[2], INPUT_WIDTH, "output_w");
     } else if (outputDims.nbDims == 2) {
-        outH = outputDims.d[0];
-        outW = outputDims.d[1];
+        outH = SafeDimToInt(outputDims.d[0], INPUT_HEIGHT, "output_h");
+        outW = SafeDimToInt(outputDims.d[1], INPUT_WIDTH, "output_w");
     }
 }

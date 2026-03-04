@@ -77,6 +77,7 @@ add_executable(depth_trt
     runtime/request_validator.cpp
     runtime/runtime_config.cpp
     runtime/server_runtime.cpp
+    runtime/tls_server.cpp
     runtime/trt_engine.cpp
 )
 

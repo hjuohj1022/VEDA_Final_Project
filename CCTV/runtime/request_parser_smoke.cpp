@@ -52,6 +52,87 @@ void TestValidation() {
         Expect(v.ok, "stop request should be valid");
     }
 }
+
+void TestValidationChannelBoundaries() {
+    {
+        Request req = ParseRequest("channel=-1");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "channel=-1(default) should be valid");
+    }
+    {
+        Request req = ParseRequest("channel=0");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "channel=0 should be valid");
+    }
+    {
+        Request req = ParseRequest("channel=3");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "channel=3 should be valid");
+    }
+    {
+        Request req = ParseRequest("channel=-2");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(!v.ok, "channel=-2 should be invalid");
+    }
+    {
+        Request req = ParseRequest("channel=4");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(!v.ok, "channel=4 should be invalid");
+    }
+}
+
+void TestValidationStreamCombinations() {
+    {
+        Request req = ParseRequest("depth_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "single depth_stream should be valid");
+    }
+    {
+        Request req = ParseRequest("rgbd_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "single rgbd_stream should be valid");
+    }
+    {
+        Request req = ParseRequest("pc_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "single pc_stream should be valid");
+    }
+    {
+        Request req = ParseRequest("depth_stream pc_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(!v.ok, "depth_stream + pc_stream should be invalid");
+    }
+    {
+        Request req = ParseRequest("rgbd_stream pc_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(!v.ok, "rgbd_stream + pc_stream should be invalid");
+    }
+    {
+        Request req = ParseRequest("depth_stream rgbd_stream pc_stream");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(!v.ok, "three stream requests should be invalid");
+    }
+}
+
+void TestValidationMixedControlCommands() {
+    {
+        Request req = ParseRequest("channel=2 pause");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "channel + pause should be valid");
+    }
+    {
+        Request req = ParseRequest("channel=1 resume");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "channel + resume should be valid");
+    }
+    {
+        Request req = ParseRequest("channel=1 headless gui");
+        RequestValidationResult v = ValidateRequest(req);
+        Expect(v.ok, "headless/gui mixed token should remain valid");
+        Expect(req.gui, "gui token should be set");
+        Expect(req.headlessSet && !req.headless, "gui should force non-headless");
+    }
+}
 }  // namespace
 
 int main() {
@@ -59,6 +140,9 @@ int main() {
     TestFloatParseSafety();
     TestBoolParseSafety();
     TestValidation();
+    TestValidationChannelBoundaries();
+    TestValidationStreamCombinations();
+    TestValidationMixedControlCommands();
 
     if (failures > 0) {
         std::cerr << "request_parser_smoke failed: " << failures << std::endl;
