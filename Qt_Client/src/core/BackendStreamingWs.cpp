@@ -16,7 +16,6 @@ QString normalizeHex(const QString &input) {
 }
 }
 
-// 스트리밍 서버(WebSocket) 연결 시작 처리
 void Backend::streamingWsConnect() {
     const QString host = m_env.value("SUNAPI_IP").trimmed();
     if (host.isEmpty()) {
@@ -26,6 +25,7 @@ void Backend::streamingWsConnect() {
 
     const QUrl wsUrl(QString("ws://%1/StreamingServer").arg(host));
     if (!m_streamingWs) {
+        // 최초 1회 소켓 생성 후 공통 시그널 핸들러 등록
         m_streamingWs = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
 
         connect(m_streamingWs, &QWebSocket::connected, this, [this]() {
@@ -45,6 +45,7 @@ void Backend::streamingWsConnect() {
         });
     } else if (m_streamingWs->state() == QAbstractSocket::ConnectedState
                || m_streamingWs->state() == QAbstractSocket::ConnectingState) {
+        // 기존 연결이 살아있으면 강제로 정리 후 재접속
         m_streamingWs->abort();
     }
 
@@ -52,7 +53,6 @@ void Backend::streamingWsConnect() {
     m_streamingWs->open(wsUrl);
 }
 
-// 스트리밍 서버(WebSocket) 연결 종료 처리
 void Backend::streamingWsDisconnect() {
     if (!m_streamingWs) {
         return;
@@ -63,7 +63,6 @@ void Backend::streamingWsDisconnect() {
     }
 }
 
-// 16진 문자열 바이너리 프레임 변환 전송
 bool Backend::streamingWsSendHex(QString hexPayload) {
     if (!m_streamingWs || m_streamingWs->state() != QAbstractSocket::ConnectedState) {
         emit streamingWsError("websocket is not connected");
@@ -71,6 +70,7 @@ bool Backend::streamingWsSendHex(QString hexPayload) {
     }
 
     const QString normalized = normalizeHex(hexPayload);
+    // RTSP 바이너리 프레임은 짝수 길이의 16진 문자열만 허용
     if (normalized.isEmpty() || (normalized.length() % 2) != 0) {
         emit streamingWsError("invalid hex payload length");
         return false;
@@ -94,8 +94,7 @@ bool Backend::playbackWsPause() {
     }
 
     QByteArray req;
-    // 일부 Hanwha 모델 PAUSE 시 재생 리소스 잠금 유지 이슈
-    // 타 클라이언트(웹) 즉시 재생 허용용 TEARDOWN 기반 RTSP 세션 즉시 해제
+    // 장비 특성상 PAUSE 대신 TEARDOWN으로 세션 종료 처리
     req += "TEARDOWN " + m_playbackWsUri.toUtf8() + " RTSP/1.0\r\n";
     req += "CSeq: " + QByteArray::number(m_playbackWsNextCseq++) + "\r\n";
     if (!m_playbackWsAuthHeader.isEmpty()) {
@@ -112,8 +111,8 @@ bool Backend::playbackWsPause() {
     }
     m_playbackWsPaused = true;
     m_playbackWsPlaySent = false;
-    // 서버 측 세션 해제 보장용 TEARDOWN 직후 웹소켓 종료
     QTimer::singleShot(60, this, [this]() {
+        // TEARDOWN 전송 직후 소켓 종료
         streamingWsDisconnect();
     });
     return ok;

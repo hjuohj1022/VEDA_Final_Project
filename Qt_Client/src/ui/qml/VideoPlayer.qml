@@ -90,12 +90,25 @@ Item {
         var newScale = Math.max(dptzMinScale, Math.min(dptzMaxScale, dptzScale + step))
         if (Math.abs(newScale - oldScale) < 0.0001) return
 
+        // 포인터 위치를 고정점으로 유지하도록 pan 보정
+        var cx = videoViewport.width / 2
+        var cy = videoViewport.height / 2
+        var fx = isFinite(focusX) ? focusX : cx
+        var fy = isFinite(focusY) ? focusY : cy
+
+        // 현재 화면 좌표(fx,fy)가 가리키는 원본 좌표를 역변환으로 계산
+        var contentX = ((fx - cx - dptzPanX) / oldScale) + cx
+        var contentY = ((fy - cy - dptzPanY) / oldScale) + cy
+
         dptzScale = newScale
+        dptzPanX = fx - ((contentX - cx) * newScale + cx)
+        dptzPanY = fy - ((contentY - cy) * newScale + cy)
+
         if (dptzDebugLog) {
             console.log("[DPTZ][QML]",
                         "step=", step,
                         "scale=", newScale,
-                        "focus=", focusX, focusY)
+                        "focus=", fx, fy)
         }
         root.dptzClampPan()
     }

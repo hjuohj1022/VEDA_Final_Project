@@ -2,6 +2,7 @@
 #define BACKEND_H
 
 #include <QObject>
+#include <QHash>
 #include <QMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -14,8 +15,11 @@
 #include <QVariant>
 #include <QWebSocket>
 #include <QStringList>
+#include <functional>
 class QUdpSocket;
 class QProcess;
+class QJsonObject;
+class QFile;
 
 class Backend : public QObject
 {
@@ -121,7 +125,6 @@ public:
     Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
     Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
     Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
-    Q_INVOKABLE void sunapiLoadSupportedPtzActions(int cameraIndex);
 
 signals:
     void isLoggedInChanged();
@@ -156,7 +159,6 @@ signals:
 
     void cameraControlMessage(QString message, bool isError);
     void rtspProbeFinished(bool success, QString error);
-    void sunapiSupportedPtzActionsLoaded(int cameraIndex, QVariantMap actions);
     void playbackPrepared(QString url);
     void playbackPrepareFailed(QString error);
     void playbackTimelineLoaded(int channelIndex, QString dateText, QVariantList segments);
@@ -204,6 +206,85 @@ private:
                                     const QString &startTimeText,
                                     const QString &endTimeText,
                                     const QString &savePath);
+    bool startPlaybackExportViaFfmpegBackup(int channelIndex,
+                                            const QString &dateText,
+                                            const QString &startTimeText,
+                                            const QString &endTimeText,
+                                            const QString &outPath,
+                                            const std::function<void()> &onFailedFallback);
+    QString resolvePlaybackExportFfmpegBinary() const;
+    bool buildPlaybackExportWsRtspUri(int channelIndex,
+                                      const QString &dateText,
+                                      const QString &startTimeText,
+                                      const QString &endTimeText,
+                                      QString *rtspUri,
+                                      int *durationSec,
+                                      QString *error) const;
+    bool buildPlaybackExportWsOutputPath(const QString &savePath,
+                                         bool *wantsAvi,
+                                         QString *outPath,
+                                         QString *finalOutPath,
+                                         QString *error);
+    bool fetchPlaybackExportRtspChallenge(const QString &host,
+                                          int rtspPort,
+                                          const QString &rtspUri,
+                                          QString *realm,
+                                          QString *nonce,
+                                          QString *error) const;
+    QByteArray buildPlaybackExportRtspRequest(int &nextCseq,
+                                              const QString &authHeader,
+                                              const QString &session,
+                                              const QByteArray &method,
+                                              const QByteArray &uri,
+                                              bool withSession) const;
+    void playbackExportWriteAnnexBNal(QFile &outFile, qint64 &writtenBytes, const QByteArray &nal);
+    void playbackExportProcessRtpH264(const QByteArray &rtp,
+                                      QFile &outFile,
+                                      qint64 &writtenBytes,
+                                      QByteArray &fuBuffer,
+                                      int &fuNalType);
+    bool playbackExportConsumeInterleaved(const QByteArray &bytes,
+                                          int h264RtpChannel,
+                                          QByteArray &interleavedBuf,
+                                          QFile &outFile,
+                                          qint64 &writtenBytes,
+                                          QByteArray &fuBuffer,
+                                          int &fuNalType,
+                                          bool &gotRtp,
+                                          qint64 &lastRtpMs,
+                                          quint32 &firstTs,
+                                          quint32 &lastTs,
+                                          qint64 targetTsDelta,
+                                          int &lastProgress,
+                                          qint64 &lastProgressMs);
+    void playbackExportHandleRtspResponse(const QString &text,
+                                          const QHash<int, QString> &setupCseqTrack,
+                                          int &setupDoneCount,
+                                          QHash<QString, QByteArray> &trackInterleaved,
+                                          int &h264RtpChannel,
+                                          int setupExpected,
+                                          bool &playSent,
+                                          bool &playAck,
+                                          QString &session,
+                                          int &nextCseq,
+                                          const QString &authHeader,
+                                          const QString &uri,
+                                          const std::function<void(const QByteArray &)> &sendRtsp,
+                                          const std::function<void(const QString &)> &failWith);
+    QString sunapiExportExtractKvValue(const QString &text, const QStringList &keys) const;
+    QString sunapiExportExtractJsonString(const QJsonObject &obj, const QStringList &keys) const;
+    int sunapiExportParseHmsToSec(const QString &hms) const;
+    bool sunapiExportParseCreateReply(const QByteArray &body,
+                                      QString *jobId,
+                                      QString *downloadUrl,
+                                      QString *reason) const;
+    void sunapiExportParsePollReply(const QByteArray &body,
+                                    int *progress,
+                                    bool *done,
+                                    bool *failed,
+                                    QString *downloadUrl,
+                                    QString *reason) const;
+    void playbackExportStartDownload(const QUrl &downloadUrl, const QString &outPath);
 
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;

@@ -54,7 +54,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
    - Web export와 동일한 다중 track SETUP + PLAY + keepalive 순서 사용  
 4. 수집 완료 후 파일 저장  
    - AVI 요청 시 ffmpeg remux 수행  
-   - ffmpeg 경로: `FFMPEG_BIN` -> PATH -> 앱 폴더/`tools/ffmpeg.exe` 순서 탐색
+  - ffmpeg 경로: `PLAYBACK_EXPORT_FFMPEG_PATH` -> 앱 폴더/`tools/ffmpeg.exe` -> PATH 순서 탐색
 
 ## 기술 스택
 
@@ -83,11 +83,11 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
   - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_PORT`
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
-  - `FFMPEG_BIN` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
+  - `PLAYBACK_EXPORT_FFMPEG_PATH` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
 
 ffmpeg 배치/버전 관리:
 - 저장소에는 `tools/ffmpeg.exe`를 커밋하지 않습니다(`.gitignore` 제외).
-- 로컬 개발 환경에서는 프로젝트 루트 `tools/ffmpeg.exe`에 배치하거나 `FFMPEG_BIN`으로 절대 경로를 지정하세요.
+- 로컬 개발 환경에서는 프로젝트 루트 `tools/ffmpeg.exe`에 배치하거나 `PLAYBACK_EXPORT_FFMPEG_PATH`로 절대 경로를 지정하세요.
 - CMake `POST_BUILD`는 로컬 `tools/ffmpeg.exe`가 있을 때 실행 폴더로 복사합니다.
 - MQTT(선택)
   - `MQTT_ENABLED` 및 TLS 관련 변수
@@ -119,13 +119,32 @@ Team3VideoReceiver/
 │  ├─ app/
 │  │  └─ main.cpp
 │  ├─ core/
-│  │  ├─ Backend.cpp
 │  │  ├─ BackendAuth.cpp
-│  │  ├─ BackendCore.cpp
-│  │  ├─ BackendMedia.cpp
-│  │  ├─ BackendRtsp.cpp
+│  │  ├─ BackendCoreApi.cpp
+│  │  ├─ BackendCoreEnv.cpp
+│  │  ├─ BackendCoreMqtt.cpp
+│  │  ├─ BackendCoreSsl.cpp
+│  │  ├─ BackendCoreState.cpp
+│  │  ├─ BackendInit.cpp
+│  │  ├─ BackendMediaRecordings.cpp
+│  │  ├─ BackendMediaStorage.cpp
+│  │  ├─ BackendPlaybackWsRuntime.cpp
+│  │  ├─ BackendRtspConfig.cpp
+│  │  ├─ BackendRtspPlayback.cpp
+│  │  ├─ BackendRtspProbe.cpp
 │  │  ├─ BackendStreamingWs.cpp
-│  │  └─ BackendSunapi.cpp
+│  │  ├─ BackendSunapi.cpp
+│  │  ├─ BackendSunapiExportDownload.cpp
+│  │  ├─ BackendSunapiExportFfmpeg.cpp
+│  │  ├─ BackendSunapiExportHttp.cpp
+│  │  ├─ BackendSunapiExportParse.cpp
+│  │  ├─ BackendSunapiExportWsMux.cpp
+│  │  ├─ BackendSunapiExportWsPrep.cpp
+│  │  ├─ BackendSunapiExportWsRtsp.cpp
+│  │  ├─ BackendSunapiExportWsSession.cpp
+│  │  ├─ BackendSunapiPtz.cpp
+│  │  ├─ BackendSunapiTimeline.cpp
+│  │  └─ BackendSunapiTimelineMonth.cpp
 │  └─ ui/
 │     └─ qml/
 │        ├─ Header.qml
@@ -142,6 +161,47 @@ Team3VideoReceiver/
 ├─ example.env
 └─ README.md
 ```
+
+## 소스 코드 2차 리팩토링 요약
+
+대형 단일 파일을 기능 도메인 기준으로 분리해 책임 경계를 명확히 정리했습니다.
+
+- `Backend.cpp` -> `BackendInit.cpp`, `BackendPlaybackWsRuntime.cpp`
+- `BackendCore.cpp` -> `BackendCoreEnv.cpp`, `BackendCoreSsl.cpp`, `BackendCoreMqtt.cpp`, `BackendCoreApi.cpp`, `BackendCoreState.cpp`
+- `BackendMedia.cpp` -> `BackendMediaRecordings.cpp`, `BackendMediaStorage.cpp`
+- `BackendRtsp.cpp` -> `BackendRtspConfig.cpp`, `BackendRtspPlayback.cpp`, `BackendRtspProbe.cpp`
+- `BackendSunapiExport.cpp` ->
+  `BackendSunapiExportHttp.cpp`,
+  `BackendSunapiExportParse.cpp`,
+  `BackendSunapiExportFfmpeg.cpp`,
+  `BackendSunapiExportDownload.cpp`,
+  `BackendSunapiExportWsPrep.cpp`,
+  `BackendSunapiExportWsSession.cpp`,
+  `BackendSunapiExportWsRtsp.cpp`,
+  `BackendSunapiExportWsMux.cpp`
+- SUNAPI 일반/PTZ/타임라인 분리
+  - `BackendSunapi.cpp`
+  - `BackendSunapiPtz.cpp`
+  - `BackendSunapiTimeline.cpp`
+  - `BackendSunapiTimelineMonth.cpp`
+
+### 리팩토링 중 발생한 잔버그와 수정 내역
+
+- 증상: Export 진행 중 컴파일 에러(람다 캡처 누락/미정의 심볼/헤더 누락)
+  - 원인: 함수 분리 과정에서 의존 유틸 및 `this` 캡처, include 목록 누락
+  - 조치: 분리된 파일별 include/시그니처/람다 캡처 재정렬
+
+- 증상: Export 취소 시 파일 잠김 또는 삭제 실패
+  - 원인: WebSocket/`QNetworkReply`/`QProcess` 종료 순서와 파일 핸들 해제 타이밍 충돌
+  - 조치: 취소 시그널에서 네트워크/프로세스 선종료 후 파일 삭제 재시도(`removeFileWithRetry`) 적용
+
+- 증상: 리팩토링 후 fallback 경로(FFmpeg -> WS)가 비정상 종료되거나 재시작 루프 발생
+  - 원인: 실패/취소 상태 플래그와 fallback 트리거 경합
+  - 조치: 취소 플래그 우선 처리, 완료/실패/취소 공통 종료 경로 단일화
+
+- 증상: 주석 자동 치환 이후 의미 없는 주석/깨진 한글 발생
+  - 원인: 기계적 주석 치환 및 인코딩 처리 실수
+  - 조치: 핵심 분기(에러/fallback/리소스 정리) 중심 자연어 주석으로 재작성, 깨진 주석 전수 복구
 
 ## 빌드
 
@@ -192,7 +252,7 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - RTSP `backup.smp` + ffmpeg fallback 경로 사용
 
 - Export 시 `AVI 변환 실패 (ffmpeg 실행 오류/미설치)`
-  - `FFMPEG_BIN` 설정 또는 `tools/ffmpeg.exe`/PATH 점검
+  - `PLAYBACK_EXPORT_FFMPEG_PATH` 설정 또는 `tools/ffmpeg.exe`/PATH 점검
 
 - 타임라인 라벨 겹침
   - 기본/확대 라벨 Repeater 동시 렌더 문제
