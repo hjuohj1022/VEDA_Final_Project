@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.19)
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
@@ -30,6 +30,7 @@ qt_add_executable(Team3VideoReceiver
     src/core/BackendRtsp.cpp
     src/core/BackendSunapi.cpp
     src/core/BackendStreamingWs.cpp
+    src/core/BackendThermal.cpp
     include/core/Backend.h
     .env
 )

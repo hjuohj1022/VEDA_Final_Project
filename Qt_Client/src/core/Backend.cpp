@@ -1,4 +1,4 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 
 #include <QAuthenticator>
 #include <QByteArray>
@@ -38,6 +38,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
                 }
             });
     setupMqtt();
+    setupThermalWs();
 
     const QString envIp = m_env.value("RTSP_IP", "127.0.0.1").trimmed();
     const QString envPort = m_env.value("RTSP_PORT", "8555").trimmed();

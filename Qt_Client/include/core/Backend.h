@@ -36,6 +36,11 @@ class Backend : public QObject
     Q_PROPERTY(int currentFps READ currentFps WRITE setCurrentFps NOTIFY currentFpsChanged)
     Q_PROPERTY(int latency READ latency WRITE setLatency NOTIFY latencyChanged)
 
+    // 열화상 데이터
+    Q_PROPERTY(QVariant thermalImage READ thermalImage NOTIFY thermalImageChanged)
+    Q_PROPERTY(double minTemperature READ minTemperature NOTIFY thermalDataChanged)
+    Q_PROPERTY(double maxTemperature READ maxTemperature NOTIFY thermalDataChanged)
+
     // 스토리지 정보
     Q_PROPERTY(QString storageUsed READ storageUsed NOTIFY storageChanged)
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
@@ -67,6 +72,10 @@ public:
 
     int latency() const { return m_latency; }
     void setLatency(int ms);
+
+    QVariant thermalImage() const { return m_thermalImage; }
+    double minTemperature() const { return m_minTemp; }
+    double maxTemperature() const { return m_maxTemp; }
 
     QString storageUsed() const { return m_storageUsed; }
     QString storageTotal() const { return m_storageTotal; }
@@ -134,6 +143,8 @@ signals:
     void storageChanged();
     void detectedObjectsChanged();
     void networkStatusChanged();
+    void thermalImageChanged();
+    void thermalDataChanged();
 
     void loginSuccess();
     void loginFailed(QString error);
@@ -171,6 +182,7 @@ signals:
 
 private slots:
     void checkStorage();
+    void onStorageReply(QNetworkReply *reply);
     void onSessionTick();
 
 private:
@@ -189,6 +201,7 @@ private:
 
     void loadEnv();
     void setupMqtt();
+    void setupThermalWs();
     bool sendSunapiCommand(const QString &cgiName,
                            const QMap<QString, QString> &params,
                            int cameraIndex,
@@ -205,6 +218,7 @@ private:
 
     bool m_isLoggedIn = false;
     QString m_userId;
+    QString m_accessToken;
     int m_sessionRemainingSeconds = 0;
     const int m_sessionTimeoutSeconds = 300;
     bool m_loginLocked = false;
@@ -225,6 +239,11 @@ private:
     int m_activeCameras = 0;
     int m_currentFps = 0;
     int m_latency = 0;
+
+    // 열화상 데이터
+    QVariant m_thermalImage;
+    double m_minTemp = 0.0;
+    double m_maxTemp = 0.0;
 
     // 스토리지 데이터
     QString m_storageUsed = "0 GB";
