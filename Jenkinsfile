@@ -9,7 +9,7 @@ pipeline {
         GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project' 
         DOCKER_CRED = 'docker-hub-login'
         KUBE_CONFIG = 'k3s-kubeconfig'
-        GIT_CREDENTIAL_ID = 'github-access-token'
+        GIT_CREDENTIAL_ID = 'github-login'
     }
 
     stages {
