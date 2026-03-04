@@ -73,3 +73,4 @@ __pycache__/
 /assets/docs/*.pdf
 *.png
 tech.md
+/ml_assets/sources/Depth-Anything-3
