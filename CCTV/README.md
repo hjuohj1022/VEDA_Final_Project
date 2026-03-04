@@ -162,6 +162,14 @@ CCTV/
 - `RTSP_CHANNEL`: 기본 채널
 - `INPUT_HEIGHT`, `INPUT_WIDTH`: 엔진 입력 shape와 반드시 일치
 
+### RTSPS(mTLS)
+- 기본 URL 예시는 `rtsps://...` 스킴을 사용합니다.
+- 런타임 기본 FFmpeg 캡처 옵션에 mTLS 설정이 포함됩니다.
+  - `tls_verify;1`
+  - `ca_file;certs/rootCA.crt`
+  - `cert_file;certs/cctv.crt`
+  - `key_file;certs/cctv.key`
+
 ### `config/local_paths.cmake`
 자동 생성 파일이며, 수동 편집 시 아래 경로를 정확히 지정해야 합니다.
 
@@ -183,6 +191,7 @@ build/Release/depth_trt.exe
 빌드 후 자동 복사:
 - `build/Release/ml_assets/engines/`로 `ml_assets/engines`가 자동 복사됩니다.
 - 따라서 `ENGINE_PATH=ml_assets/engines/...` 설정이면 `build/Release` 단독 실행 시에도 엔진 경로가 유지됩니다.
+- `build/Release/certs/`로 `certs`가 자동 복사됩니다(mTLS 인증서/키 배포용).
 
 ## Test
 ```powershell

@@ -8,7 +8,8 @@ struct RuntimeConfig {
     int capture_buffer_size = 1;
     int open_timeout_ms = 3000;
     int read_timeout_ms = 3000;
-    std::string ffmpeg_capture_options = "rtsp_transport;tcp|stimeout;5000000|rw_timeout;5000000";
+    std::string ffmpeg_capture_options =
+        "rtsp_transport;tcp|tls_verify;1|ca_file;certs/rootCA.crt|cert_file;certs/cctv.crt|key_file;certs/cctv.key|stimeout;5000000|rw_timeout;5000000";
 
     int pause_loop_sleep_ms = 15;
     int grab_retry_sleep_ms = 5;
