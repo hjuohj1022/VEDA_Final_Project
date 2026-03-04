@@ -56,3 +56,7 @@ certs/*.srl
 libvlc.dll
 libvlccore.dll
 plugins/
+
+# Local ffmpeg binary (do not track large executable)
+tools/ffmpeg.exe
+**/tools/ffmpeg.exe

@@ -10,11 +10,15 @@ Rectangle {
     property bool isLoggedIn: false
     property int currentSection: 0
     property int sessionRemainingSeconds: 0
+    property bool exportProgressVisible: false
+    property int exportProgressPercent: 0
+    property string exportProgressText: ""
     signal toggleTheme()
     signal requestLogin()
     signal requestLogout()
     signal requestHome()
     signal requestRtspSettings()
+    signal requestExportCancel()
 
     function formatSession(seconds) {
         var s = Math.max(0, seconds)
@@ -145,6 +149,104 @@ Rectangle {
                     color: theme ? theme.textSecondary : "#71717a"
                     font.pixelSize: 12
                     Layout.fillWidth: true
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.preferredWidth: exportProgressVisible ? 290 : 0
+            Layout.preferredHeight: 34
+            Layout.alignment: Qt.AlignVCenter
+            Layout.leftMargin: exportProgressVisible ? 6 : 0
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: exportProgressVisible ? 1 : 0
+            radius: 8
+            visible: exportProgressVisible
+
+            Column {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 58
+                anchors.topMargin: 5
+                anchors.bottomMargin: 5
+                spacing: 4
+
+                Row {
+                    width: parent.width
+                    spacing: 6
+
+                    Text {
+                        text: "Export"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: Math.max(0, Math.min(100, exportProgressPercent)) + "%"
+                        color: theme ? theme.textPrimary : "#ffffff"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Text {
+                        width: parent.width - 74
+                        text: exportProgressText
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 9
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 5
+                    radius: 3
+                    color: theme && root.isDarkMode ? "#27272a" : "#e5e7eb"
+
+                    Rectangle {
+                        width: Math.max(0, Math.min(100, exportProgressPercent)) / 100 * parent.width
+                        height: parent.height
+                        radius: parent.radius
+                        color: theme ? theme.accent : "#f97316"
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 44
+                height: 22
+                radius: 6
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                color: cancelExportMouse.pressed
+                       ? "#dc2626"
+                       : (cancelExportMouse.containsMouse
+                          ? "#b91c1c"
+                          : (theme && root.isDarkMode ? "#3f3f46" : "#e4e4e7"))
+                border.color: theme ? theme.border : "#27272a"
+                border.width: 1
+                scale: cancelExportMouse.pressed ? 0.96 : 1.0
+                Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "취소"
+                    color: (cancelExportMouse.containsMouse || cancelExportMouse.pressed)
+                           ? "white"
+                           : (theme ? theme.textPrimary : "#ffffff")
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: cancelExportMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.requestExportCancel()
                 }
             }
         }

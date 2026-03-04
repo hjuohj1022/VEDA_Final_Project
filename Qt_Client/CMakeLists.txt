@@ -91,6 +91,11 @@ add_custom_command(TARGET Team3VideoReceiver POST_BUILD
         ${CMAKE_SOURCE_DIR}/.env
         $<TARGET_FILE_DIR:Team3VideoReceiver>
     COMMAND ${CMAKE_COMMAND} -E make_directory
+        $<TARGET_FILE_DIR:Team3VideoReceiver>/tools
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/tools/ffmpeg.exe
+        $<TARGET_FILE_DIR:Team3VideoReceiver>/tools/ffmpeg.exe
+    COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:Team3VideoReceiver>/certs
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/certs/rootCA.crt
@@ -101,7 +106,7 @@ add_custom_command(TARGET Team3VideoReceiver POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/certs/client-qt.key
         $<TARGET_FILE_DIR:Team3VideoReceiver>/certs/client-qt.key
-    COMMENT "Copying runtime configuration and certificates..."
+    COMMENT "Copying runtime configuration, ffmpeg, and certificates..."
 )
 
 qt_generate_deploy_app_script(
