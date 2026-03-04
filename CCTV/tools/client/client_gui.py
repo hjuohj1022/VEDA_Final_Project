@@ -1,4 +1,6 @@
 import socket
+import ssl
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
@@ -8,10 +10,39 @@ import time
 import math
 
 
-def send_command(host: str, port: int, command: str) -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(3.0)
-        s.connect((host, port))
+def _resolve_file_path(p: str) -> str:
+    raw = Path(p)
+    if raw.is_absolute() and raw.exists():
+        return str(raw)
+
+    cwd_candidate = (Path.cwd() / raw).resolve()
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+
+    project_root = Path(__file__).resolve().parents[2]
+    repo_candidate = (project_root / raw).resolve()
+    if repo_candidate.exists():
+        return str(repo_candidate)
+
+    return str(raw)
+
+
+def connect_socket(host: str, port: int, timeout_sec: float,
+                   use_mtls: bool, ca_file: str, client_cert: str, client_key: str):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout_sec)
+    if use_mtls:
+        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=_resolve_file_path(ca_file))
+        ctx.check_hostname = False
+        ctx.load_cert_chain(certfile=_resolve_file_path(client_cert), keyfile=_resolve_file_path(client_key))
+        s = ctx.wrap_socket(s, server_hostname=host)
+    s.connect((host, port))
+    return s
+
+
+def send_command(host: str, port: int, command: str,
+                 use_mtls: bool, ca_file: str, client_cert: str, client_key: str) -> str:
+    with connect_socket(host, port, 3.0, use_mtls, ca_file, client_cert, client_key) as s:
         s.sendall(command.encode("utf-8"))
         data = s.recv(4096)
     return data.decode("utf-8", errors="replace").strip()
@@ -21,11 +52,15 @@ class ClientGui(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Depth TRT Client")
-        self.geometry("620x340")
+        self.geometry("760x520")
         self.resizable(False, False)
 
         self.host_var = tk.StringVar(value="127.0.0.1")
         self.port_var = tk.StringVar(value="9090")
+        self.use_mtls_var = tk.BooleanVar(value=True)
+        self.ca_file_var = tk.StringVar(value="certs/rootCA.crt")
+        self.client_cert_var = tk.StringVar(value="certs/cctv.crt")
+        self.client_key_var = tk.StringVar(value="certs/cctv.key")
         self.channel_var = tk.StringVar(value="0")
         self.mode_var = tk.StringVar(value="headless")
         self.rx_var = tk.StringVar(value="-20")
@@ -44,18 +79,26 @@ class ClientGui(tk.Tk):
 
         ttk.Label(frm, text="Server Port").grid(row=1, column=0, sticky="w")
         ttk.Entry(frm, textvariable=self.port_var, width=10).grid(row=1, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="mTLS", variable=self.use_mtls_var).grid(row=1, column=2, sticky="w")
 
-        ttk.Label(frm, text="Channel").grid(row=2, column=0, sticky="w")
+        ttk.Label(frm, text="CA").grid(row=2, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.ca_file_var, width=30).grid(row=2, column=1, columnspan=2, sticky="w")
+        ttk.Label(frm, text="Client Cert").grid(row=3, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.client_cert_var, width=30).grid(row=3, column=1, columnspan=2, sticky="w")
+        ttk.Label(frm, text="Client Key").grid(row=4, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.client_key_var, width=30).grid(row=4, column=1, columnspan=2, sticky="w")
+
+        ttk.Label(frm, text="Channel").grid(row=5, column=0, sticky="w")
         channel_box = ttk.Combobox(frm, textvariable=self.channel_var, width=8, state="readonly")
         channel_box["values"] = ("0", "1", "2", "3")
-        channel_box.grid(row=2, column=1, sticky="w")
+        channel_box.grid(row=5, column=1, sticky="w")
 
-        ttk.Label(frm, text="Run Mode").grid(row=3, column=0, sticky="w")
-        ttk.Radiobutton(frm, text="Headless", variable=self.mode_var, value="headless").grid(row=3, column=1, sticky="w")
-        ttk.Radiobutton(frm, text="GUI", variable=self.mode_var, value="gui").grid(row=4, column=1, sticky="w")
+        ttk.Label(frm, text="Run Mode").grid(row=6, column=0, sticky="w")
+        ttk.Radiobutton(frm, text="Headless", variable=self.mode_var, value="headless").grid(row=6, column=1, sticky="w")
+        ttk.Radiobutton(frm, text="GUI", variable=self.mode_var, value="gui").grid(row=7, column=1, sticky="w")
 
         btn_frame = ttk.Frame(frm)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=12, sticky="w")
+        btn_frame.grid(row=8, column=0, columnspan=3, pady=12, sticky="w")
 
         ttk.Button(btn_frame, text="Start", command=self.on_start).grid(row=0, column=0, padx=(0, 8))
         ttk.Button(btn_frame, text="Stop", command=self.on_stop).grid(row=0, column=1)
@@ -65,18 +108,18 @@ class ClientGui(tk.Tk):
         ttk.Button(btn_frame, text="View PC (Client)", command=self.on_view_pc_client).grid(row=0, column=5, padx=(8, 0))
 
         self.status = tk.StringVar(value="Waiting for server response...")
-        ttk.Label(frm, textvariable=self.status, foreground="#1f5e9a").grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Label(frm, textvariable=self.status, foreground="#1f5e9a").grid(row=9, column=0, columnspan=3, sticky="w")
 
-        ttk.Label(frm, text="View RotX").grid(row=7, column=0, sticky="w")
-        ttk.Entry(frm, textvariable=self.rx_var, width=8).grid(row=7, column=1, sticky="w")
-        ttk.Label(frm, text="View RotY").grid(row=8, column=0, sticky="w")
-        ttk.Entry(frm, textvariable=self.ry_var, width=8).grid(row=8, column=1, sticky="w")
-        ttk.Checkbutton(frm, text="Flip X", variable=self.flipx_var).grid(row=9, column=0, sticky="w")
-        ttk.Checkbutton(frm, text="Flip Y", variable=self.flipy_var).grid(row=9, column=1, sticky="w")
-        ttk.Checkbutton(frm, text="Flip Z", variable=self.flipz_var).grid(row=10, column=0, sticky="w")
-        ttk.Checkbutton(frm, text="Wireframe", variable=self.wire_var).grid(row=10, column=1, sticky="w")
-        ttk.Checkbutton(frm, text="Mesh Fill", variable=self.mesh_var).grid(row=11, column=0, sticky="w")
-        ttk.Button(frm, text="Apply View", command=self.on_apply_view).grid(row=11, column=1, pady=8, sticky="e")
+        ttk.Label(frm, text="View RotX").grid(row=10, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.rx_var, width=8).grid(row=10, column=1, sticky="w")
+        ttk.Label(frm, text="View RotY").grid(row=11, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.ry_var, width=8).grid(row=11, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="Flip X", variable=self.flipx_var).grid(row=12, column=0, sticky="w")
+        ttk.Checkbutton(frm, text="Flip Y", variable=self.flipy_var).grid(row=12, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="Flip Z", variable=self.flipz_var).grid(row=13, column=0, sticky="w")
+        ttk.Checkbutton(frm, text="Wireframe", variable=self.wire_var).grid(row=13, column=1, sticky="w")
+        ttk.Checkbutton(frm, text="Mesh Fill", variable=self.mesh_var).grid(row=14, column=0, sticky="w")
+        ttk.Button(frm, text="Apply View", command=self.on_apply_view).grid(row=14, column=1, pady=8, sticky="e")
 
         self._stream_stop = threading.Event()
         self._stream_thread = None
@@ -93,7 +136,11 @@ class ClientGui(tk.Tk):
 
         command = f"channel={channel} {mode}"
         try:
-            resp = send_command(host, port, command)
+            resp = send_command(host, port, command,
+                                self.use_mtls_var.get(),
+                                self.ca_file_var.get().strip(),
+                                self.client_cert_var.get().strip(),
+                                self.client_key_var.get().strip())
             self.status.set(resp or "OK")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
@@ -102,7 +149,11 @@ class ClientGui(tk.Tk):
         host = self.host_var.get().strip()
         port = int(self.port_var.get().strip())
         try:
-            resp = send_command(host, port, "stop")
+            resp = send_command(host, port, "stop",
+                                self.use_mtls_var.get(),
+                                self.ca_file_var.get().strip(),
+                                self.client_cert_var.get().strip(),
+                                self.client_key_var.get().strip())
             self.status.set(resp or "OK")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
@@ -111,7 +162,11 @@ class ClientGui(tk.Tk):
         host = self.host_var.get().strip()
         port = int(self.port_var.get().strip())
         try:
-            resp = send_command(host, port, "pause")
+            resp = send_command(host, port, "pause",
+                                self.use_mtls_var.get(),
+                                self.ca_file_var.get().strip(),
+                                self.client_cert_var.get().strip(),
+                                self.client_key_var.get().strip())
             self.status.set(resp or "OK")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
@@ -120,7 +175,11 @@ class ClientGui(tk.Tk):
         host = self.host_var.get().strip()
         port = int(self.port_var.get().strip())
         try:
-            resp = send_command(host, port, "resume")
+            resp = send_command(host, port, "resume",
+                                self.use_mtls_var.get(),
+                                self.ca_file_var.get().strip(),
+                                self.client_cert_var.get().strip(),
+                                self.client_key_var.get().strip())
             self.status.set(resp or "OK")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
@@ -143,7 +202,11 @@ class ClientGui(tk.Tk):
 
     def _send_pc_view(self, host: str, port: int, cmd: str, update_status: bool = False) -> None:
         try:
-            resp = send_command(host, port, cmd)
+            resp = send_command(host, port, cmd,
+                                self.use_mtls_var.get(),
+                                self.ca_file_var.get().strip(),
+                                self.client_cert_var.get().strip(),
+                                self.client_key_var.get().strip())
             if update_status:
                 self.status.set(resp or "OK")
         except Exception as e:
@@ -241,9 +304,11 @@ class ClientGui(tk.Tk):
 
         def stream_loop():
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(5.0)
-                    s.connect((host, port))
+                with connect_socket(host, port, 5.0,
+                                    self.use_mtls_var.get(),
+                                    self.ca_file_var.get().strip(),
+                                    self.client_cert_var.get().strip(),
+                                    self.client_key_var.get().strip()) as s:
                     s.sendall(b"pc_stream\n")
                     line = b""
                     while not line.endswith(b"\n"):
@@ -532,9 +597,11 @@ class ClientGui(tk.Tk):
 
         def stream_loop():
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(5.0)
-                    s.connect((host, port))
+                with connect_socket(host, port, 5.0,
+                                    self.use_mtls_var.get(),
+                                    self.ca_file_var.get().strip(),
+                                    self.client_cert_var.get().strip(),
+                                    self.client_key_var.get().strip()) as s:
                     s.sendall(b"rgbd_stream\n")
                     line = b""
                     while not line.endswith(b"\n"):

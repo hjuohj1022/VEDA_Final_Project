@@ -218,6 +218,24 @@ VSCode:
 python .\client_gui.py
 ```
 
+보안 연결(mTLS):
+- `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
+- 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
+  - `certs/rootCA.crt`
+  - `certs/client.crt`
+  - `certs/client.key`
+
+서버 제어채널 mTLS:
+- `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
+- 런타임 설정(`runtime/runtime_config.h`) 기본값:
+  - `control_mtls_enabled=true`
+  - `control_mtls_require_client_cert=true`
+  - `control_tls_ca_file=certs/rootCA.crt`
+  - `control_tls_cert_file=certs/cctv.crt`
+  - `control_tls_key_file=certs/cctv.key`
+  - `control_tls_ssl_dll=libssl-1_1-x64.dll`
+  - `control_tls_crypto_dll=libcrypto-1_1-x64.dll`
+
 ## TCP Command Reference
 기본 명령 예시:
 ```text

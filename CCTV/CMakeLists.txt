@@ -104,6 +104,13 @@ add_custom_command(TARGET depth_trt POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/ml_assets/engines" "$<TARGET_FILE_DIR:depth_trt>/ml_assets/engines"
 )
 
+if(EXISTS "C:/Program Files/Git/mingw64/bin/libssl-1_1-x64.dll" AND EXISTS "C:/Program Files/Git/mingw64/bin/libcrypto-1_1-x64.dll")
+    add_custom_command(TARGET depth_trt POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/Program Files/Git/mingw64/bin/libssl-1_1-x64.dll" $<TARGET_FILE_DIR:depth_trt>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "C:/Program Files/Git/mingw64/bin/libcrypto-1_1-x64.dll" $<TARGET_FILE_DIR:depth_trt>
+    )
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/certs")
     add_custom_command(TARGET depth_trt POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:depth_trt>/certs"

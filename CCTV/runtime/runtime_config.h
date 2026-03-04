@@ -39,6 +39,13 @@ struct RuntimeConfig {
     int png_compression = 3;
 
     int server_listen_backlog = 5;
+    bool control_mtls_enabled = true;
+    bool control_mtls_require_client_cert = true;
+    std::string control_tls_ca_file = "certs/rootCA.crt";
+    std::string control_tls_cert_file = "certs/cctv.crt";
+    std::string control_tls_key_file = "certs/cctv.key";
+    std::string control_tls_ssl_dll = "libssl-1_1-x64.dll";
+    std::string control_tls_crypto_dll = "libcrypto-1_1-x64.dll";
 };
 
 const RuntimeConfig& GetRuntimeConfig();
