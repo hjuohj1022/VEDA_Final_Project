@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libmosquitto-dev \
     libmosquittopp-dev \
     libmysqlclient-dev \
+    libasio-dev \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -36,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     libmosquittopp1 \
     libmariadb3 \
     libmysqlclient-dev \
+    libasio-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

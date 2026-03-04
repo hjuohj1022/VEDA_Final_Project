@@ -25,6 +25,9 @@ find_package(OpenSSL REQUIRED)
 # 실행 파일 이름과 소스 파일 지정
 add_executable(crow_server src/main.cpp src/MqttManager.cpp)
 
+# WebSocket 기능 활성화
+target_compile_definitions(crow_server PRIVATE CROW_ENABLE_WEBSOCKETS)
+
 # 헤더 파일 경로 포함
 target_include_directories(crow_server PRIVATE include ${MYSQL_INCLUDE_DIRS} ${OPENSSL_INCLUDE_DIR})
 
