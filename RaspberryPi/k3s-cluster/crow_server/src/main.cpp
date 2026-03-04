@@ -1,3 +1,4 @@
+#define CROW_ENABLE_WEBSOCKETS
 #include "../include/crow_all.h"
 #include "../include/MqttManager.h"
 #include <jwt-cpp/jwt.h> 
