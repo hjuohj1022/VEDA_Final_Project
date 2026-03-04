@@ -14,7 +14,7 @@ int main(int argc, char *argv[])
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 #endif
-    // Qt FFmpeg 백엔드 로컬 SDP 재생 소스 오픈 시 RTP/UDP 프로토콜 허용 설정
+    // FFmpeg 백엔드에서 RTP/RTSP 계열 프로토콜 허용
     qputenv("QT_FFMPEG_PROTOCOL_WHITELIST",
             QByteArray("file,crypto,data,udp,rtp,tcp,rtsp,rtsps,tls,http,https"));
 
@@ -23,16 +23,16 @@ int main(int argc, char *argv[])
     app.setOrganizationDomain("team3.com");
     app.setApplicationName("Team3VideoReceiver");
 
-    // 기본 Qt 퀵 컨트롤 스타일 지정
+    // 기본 Qt Quick Controls 스타일 지정
     QQuickStyle::setStyle("Basic");
 
     Backend backend;
     QQmlApplicationEngine engine;
 
-    // 백엔드 인스턴스 QML 컨텍스트 주입
+    // Backend 인스턴스를 QML 전역 컨텍스트로 주입
     engine.rootContext()->setContextProperty("backend", &backend);
 
-    // QML 메인 모듈 로드
+    // QML 메인 엔트리 로드
     engine.loadFromModule("Team3VideoReceiver", "Main");
 
     return app.exec();

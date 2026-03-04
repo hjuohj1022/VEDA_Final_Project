@@ -9,6 +9,8 @@ qt_standard_project_setup()
 
 # QTP0001: QML 모듈의 기본 리소스 접두사를 :/qt/qml/로 설정
 qt_policy(SET QTP0001 NEW)
+# QTP0004: 하위 QML 디렉터리(qmldir) 정책 경고 억제
+qt_policy(SET QTP0004 OLD)
 
 set_source_files_properties(
     src/ui/assets/icons/tooltip_dark.svg
@@ -23,12 +25,31 @@ set_source_files_properties(
 qt_add_executable(Team3VideoReceiver
     WIN32 MACOSX_BUNDLE
     src/app/main.cpp
-    src/core/Backend.cpp
-    src/core/BackendCore.cpp
+    src/core/BackendInit.cpp
+    src/core/BackendPlaybackWsRuntime.cpp
+    src/core/BackendCoreEnv.cpp
+    src/core/BackendCoreSsl.cpp
+    src/core/BackendCoreMqtt.cpp
+    src/core/BackendCoreApi.cpp
+    src/core/BackendCoreState.cpp
     src/core/BackendAuth.cpp
-    src/core/BackendMedia.cpp
-    src/core/BackendRtsp.cpp
+    src/core/BackendMediaRecordings.cpp
+    src/core/BackendMediaStorage.cpp
+    src/core/BackendRtspConfig.cpp
+    src/core/BackendRtspPlayback.cpp
+    src/core/BackendRtspProbe.cpp
     src/core/BackendSunapi.cpp
+    src/core/BackendSunapiPtz.cpp
+    src/core/BackendSunapiTimeline.cpp
+    src/core/BackendSunapiTimelineMonth.cpp
+    src/core/BackendSunapiExportHttp.cpp
+    src/core/BackendSunapiExportDownload.cpp
+    src/core/BackendSunapiExportParse.cpp
+    src/core/BackendSunapiExportFfmpeg.cpp
+    src/core/BackendSunapiExportWsPrep.cpp
+    src/core/BackendSunapiExportWsRtsp.cpp
+    src/core/BackendSunapiExportWsSession.cpp
+    src/core/BackendSunapiExportWsMux.cpp
     src/core/BackendStreamingWs.cpp
     include/core/Backend.h
     .env
@@ -115,4 +136,7 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
+
+
+
 

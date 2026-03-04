@@ -6,8 +6,9 @@
 #include <QSettings>
 #include <QUrl>
 
-// 로그인 요청 전송 및 결과 처리
+// 로그인 요청 전송 및 응답 상태에 따른 인증/락 처리
 void Backend::login(QString id, QString pw) {
+    // 잠금 상태 또는 중복 요청 차단
     if (m_loginLocked) {
         emit loginFailed("로그인이 잠겼습니다. 관리자 해제가 필요합니다.");
         return;
@@ -59,6 +60,7 @@ void Backend::login(QString id, QString pw) {
                    << "timeoutMs=" << timeoutMs
                    << "errorString=" << reply->errorString();
 
+        // 정상 로그인 시 세션 타이머 초기화 및 잠금 상태 해제
         if (reply->error() == QNetworkReply::NoError) {
             m_isLoggedIn = true;
             m_userId = id;
@@ -77,6 +79,7 @@ void Backend::login(QString id, QString pw) {
             if (timedOut) {
                 emit loginFailed("서버 응답 시간이 초과되었습니다. 서버 상태를 확인해 주세요.");
             } else {
+                // 네트워크/인증/SSL 오류를 분리하여 메시지 반환
                 const bool isAuthFailure = (statusCode == 401 || statusCode == 403
                                          || netError == QNetworkReply::AuthenticationRequiredError
                                          || netError == QNetworkReply::ContentAccessDenied);
@@ -102,6 +105,7 @@ void Backend::login(QString id, QString pw) {
                 } else if (isServerUnavailable) {
                     emit loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
                 } else if (isAuthFailure) {
+                    // 인증 실패 횟수 누적 후 임계치 도달 시 로그인 잠금
                     if (!m_loginLocked) {
                         m_loginFailedAttempts++;
                         if (m_loginFailedAttempts >= m_loginMaxAttempts) {
@@ -129,7 +133,7 @@ void Backend::login(QString id, QString pw) {
     });
 }
 
-// 로그인 없이 임시 사용 상태 전환
+// 서버 인증 없이 UI 테스트용 임시 로그인 상태 전환
 void Backend::skipLoginTemporarily() {
     if (m_isLoggedIn) {
         return;
@@ -152,7 +156,7 @@ void Backend::skipLoginTemporarily() {
     emit loginSuccess();
 }
 
-// 사용자 세션 종료
+// 세션 종료 및 로그인 상태 초기화
 void Backend::logout() {
     if (!m_isLoggedIn) return;
 
@@ -166,7 +170,7 @@ void Backend::logout() {
     emit sessionRemainingSecondsChanged();
 }
 
-// 사용자 활동 시 세션 타이머 초기화
+// 사용자 활동 시 세션 만료 카운트 재설정
 void Backend::resetSessionTimer() {
     if (!m_isLoggedIn) return;
 
@@ -180,7 +184,7 @@ void Backend::resetSessionTimer() {
     }
 }
 
-// 관리자 코드 기반 잠금 상태 해제
+// 관리자 코드 검증 후 로그인 잠금 해제
 bool Backend::adminUnlock(QString adminCode) {
     QString expected = m_env.value("ADMIN_UNLOCK_KEY").trimmed();
     if (expected.isEmpty()) {
@@ -199,7 +203,7 @@ bool Backend::adminUnlock(QString adminCode) {
     return true;
 }
 
-// 1초 주기 세션 만료 체크
+// 세션 만료 타이머 1초 주기 갱신 처리
 void Backend::onSessionTick() {
     if (!m_isLoggedIn) {
         m_sessionTimer->stop();
