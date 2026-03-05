@@ -201,18 +201,6 @@ paths:
       responses:
         '200':
           description: OK
-  /cctv/control/pause:
-    post:
-      summary: Pause CCTV Processing
-      responses:
-        '200':
-          description: OK
-  /cctv/control/resume:
-    post:
-      summary: Resume CCTV Processing
-      responses:
-        '200':
-          description: OK
   /cctv/control/view:
     post:
       summary: Update View Parameters
@@ -257,19 +245,12 @@ paths:
                   stream_mode:
                     type: integer
                     description: 0 (NONE), 1 (IMAGE), 2 (RAW)
-  /cctv/stream/{type}:
+  /cctv/stream:
     get:
       summary: Point Cloud Stream (WebSocket)
       description: |
-        - type=image: 서버 렌더링 이미지 (16B Header + Image)
-        - type=raw: 클라이언트용 RGBD 데이터 (20B Header + Depth + BGR)
-      parameters:
-        - name: type
-          in: path
-          required: true
-          schema:
-            type: string
-            enum: [image, raw]
+        - 서버 렌더링 이미지 (16B Header + Image)
+        - 또는 클라이언트용 RGBD 데이터 (20B Header + Depth + BGR)
       responses:
         '101':
           description: Switching Protocols
