@@ -3,17 +3,22 @@
 # -------------------------------------------------------
 FROM hjuohj/crow-base:latest AS builder
 
-# 필요한 추가 빌드 의존성 설치
+# 필요한 빌드 의존성 확실하게 설치 (베이스 이미지 상태가 불확실하므로 명시적 설치)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     nlohmann-json3-dev \
+    libmysqlclient-dev \
+    libcurl4-openssl-dev \
+    libmosquitto-dev \
+    libmosquittopp-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 의존성은 이미 베이스 이미지에 있으므로 소스 복사 후 바로 빌드
+# 소스 복사 후 바로 빌드
 WORKDIR /app
 COPY . .
 
-# 빌드 수행 (-j$(nproc)를 사용하여 병렬 빌드 속도 향상)
+# 빌드 수행
 RUN mkdir -p build && cd build && \
     cmake .. && \
     make -j$(nproc)
@@ -23,7 +28,7 @@ RUN mkdir -p build && cd build && \
 # -------------------------------------------------------
 FROM ubuntu:22.04
 
-# 실행할 때 필요한 런타임 라이브러리만 설치
+# 실행할 때 필요한 런타임 라이브러리 설치
 RUN apt-get update && apt-get install -y \
     libboost-system-dev \
     libboost-thread-dev \
@@ -32,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     libmariadb3 \
     libmysqlclient-dev \
     libcurl4 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
