@@ -18,11 +18,11 @@
 #define PROTO_EXTRA     1
 #define TOTAL_PKT       (HEADER_LEN + PROTO_EXTRA + FRAME_BYTES)
 
-#define UART_RX_BUF     4096
+#define UART_RX_BUF     8192
 #define CHUNK_SIZE      1024
 
-// 더블 버퍼
-#define NUM_BUFFERS     2
+// 싱글 버퍼로 변경 (메모리 절약)
+#define NUM_BUFFERS     1
 extern uint8_t          *g_frame_bufs[NUM_BUFFERS];
 extern volatile int      g_write_idx;
 extern volatile int      g_read_idx;

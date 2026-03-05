@@ -21,11 +21,12 @@ void app_main(void){
     systemInit();
 
     uartInit();
-    xTaskCreate(uartTask,      "uart_task",  8192, NULL, 6, NULL);  // 우선순위 높게
-    xTaskCreate(mqttFrameTask, "mqtt_frame", 8192, NULL, 4, NULL);  // publish 전담
+    // UART와 MQTT 우선순위를 5로 동일하게 설정하여 CPU 시간을 공평하게 분배
+    xTaskCreate(uartTask,      "uart_task",  8192, NULL, 5, NULL);
+    xTaskCreate(mqttFrameTask, "mqtt_frame", 8192, NULL, 5, NULL);
 
     spiMasterInit();
-    xTaskCreate(spiTask, "spi_task", 4096, NULL, 5, NULL);
+    xTaskCreate(spiTask, "spi_task", 4096, NULL, 4, NULL);
 
     wifi_config_t wifi_config = {
         .sta = {
