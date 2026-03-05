@@ -27,7 +27,8 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         auto x = crow::json::load(req.body);
         if (!x || !x.has("channel") || !x.has("mode")) return crow::response(400, "Invalid JSON");
 
-        std::string cmd = "channel=" + std::to_string(x["channel"].i()) + " " + x["mode"].s();
+        std::string mode = x["mode"].s();
+        std::string cmd = "channel=" + std::to_string(x["channel"].i()) + " " + mode;
         std::string res = cctv_mgr.sendCommand(cmd);
         
         crow::json::wvalue result;
@@ -61,19 +62,15 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
     });
 
     // 2.1 포인트클라우드 스트림 (WebSocket)
-    // 경로에 따라 이미지 중계(image) 또는 RAW 데이터 중계(raw) 선택
-    CROW_WEBSOCKET_ROUTE(app, "/cctv/stream/<string>")
-        .onopen([&](crow::websocket::connection& conn, std::string type) {
+    // 경로에 파라미터를 넣으면 onopen 시그니처와 충돌하므로 고정 경로 사용
+    CROW_WEBSOCKET_ROUTE(app, "/cctv/stream")
+        .onopen([&](crow::websocket::connection& conn) {
             std::lock_guard<std::mutex> lock(clients_mutex);
             cctv_clients.insert(&conn);
             
-            if (type == "raw") {
-                cctv_mgr.sendCommand("rgbd_stream");
-                std::cout << "[CCTV_WS] Raw RGBD stream started." << std::endl;
-            } else {
-                cctv_mgr.sendCommand("pc_stream");
-                std::cout << "[CCTV_WS] Image stream started." << std::endl;
-            }
+            // 기본값으로 pc_stream 시작 (필요 시 클라이언트에서 제어 명령 전송)
+            cctv_mgr.sendCommand("pc_stream");
+            std::cout << "[CCTV_WS] Image stream started (default)." << std::endl;
         })
         .onclose([&](crow::websocket::connection& conn, const std::string& reason) {
             std::lock_guard<std::mutex> lock(clients_mutex);
