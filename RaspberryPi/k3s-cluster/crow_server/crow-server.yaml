@@ -102,9 +102,9 @@ spec:
           items:
           - key: rootCA.crt
             path: rootCA.crt
-          - key: server.crt
+          - key: cctv.crt
             path: cctv.crt
-          - key: server.key
+          - key: cctv.key
             path: cctv.key
 
 ---
