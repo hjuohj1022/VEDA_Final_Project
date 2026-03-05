@@ -25,10 +25,6 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
 | `runtime/trt_engine.*` | TensorRT 엔진/버퍼 초기화 |
 | `runtime/runtime_config.*` | 런타임 튜닝 파라미터 |
 
-참고:
-- 현재 분리 수준은 과한 편이 아니라 유지보수 관점에서 적정한 편입니다.
-- 각 파일이 의미 있는 책임 단위로 나뉘어 있어, 기능 변경 시 영향 범위를 예측하기 쉽습니다.
-
 ## Architecture Diagram
 ```text
                            +----------------------------------+
@@ -110,6 +106,8 @@ CCTV/
   tools/
     bootstrap/setup_dependencies.ps1
     client/client_gui.py
+    client/mtls_external_test.sh
+    client/view_ply.py
     export/export_da3metric_onnx.py
   ml_assets/
     checkpoints/
@@ -119,13 +117,14 @@ CCTV/
   CMakeLists.txt
   setup_dependencies.ps1      # wrapper
   client_gui.py               # wrapper
+  view_ply.py                 # wrapper
 ```
 
 ## Requirements
 - Windows 10/11 x64
 - NVIDIA GPU (CUDA 지원)
 - NVIDIA Driver (최신 권장)
-- CUDA Toolkit 12.1 (기본 경로 기준)
+- CUDA Toolkit 12.x
 - Visual Studio 2022 (MSVC v143, x64)
 - CMake 3.10+
 - Python 3.10+
@@ -147,7 +146,7 @@ CCTV/
 자주 쓰는 옵션:
 ```powershell
 .\setup_dependencies.ps1 `
-  -CudaPath "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.1" `
+  -CudaPath "<CUDA_PATH>" `
   -TensorRtUrl "<direct-zip-url>" `
   -SkipOpenCV -SkipTensorRT -SkipDa3Metric `
   -Force
@@ -203,10 +202,6 @@ cmake --build build --config Release --target request_parser_smoke
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-VSCode:
-- 기본 빌드(`Ctrl+Shift+B`)는 `CMake Build+Test Release`로 설정되어 있어,
-  configure -> build -> ctest를 순차 실행합니다.
-
 ## Run
 서버:
 ```powershell
@@ -222,8 +217,8 @@ python .\client_gui.py
 - `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
 - 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
   - `certs/rootCA.crt`
-  - `certs/client.crt`
-  - `certs/client.key`
+  - `certs/cctv.crt`
+  - `certs/cctv.key`
 
 서버 제어채널 mTLS:
 - `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
@@ -235,6 +230,29 @@ python .\client_gui.py
   - `control_tls.key_file=certs/cctv.key`
   - `control_tls.ssl_dll=libssl-1_1-x64.dll`
   - `control_tls.crypto_dll=libcrypto-1_1-x64.dll`
+
+외부(Linux) mTLS 점검:
+- 스크립트: `tools/client/mtls_external_test.sh`
+- 목적:
+  - 클라이언트 인증서 없음 -> 거부 확인
+  - 클라이언트 인증서 포함 -> `OK ...` 응답 확인
+- 예시:
+```bash
+chmod +x ./tools/client/mtls_external_test.sh
+./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --port 9090 --timeout 8
+```
+
+운영 토폴로지별 테스트 경로:
+
+| Topology | 동작 방식 | 권장 테스트 대상 |
+|---|---|---|
+| Tailnet 노드 -> 서버(직접) | 클라이언트 노드가 Tailscale 설치 + kernel TUN | `100.x.x.x:9090` |
+| Tailnet 마스터(advertise) -> 워커 서브넷(인입) | Tailnet 클라이언트가 advertise된 서브넷으로 접근 | 워커 LAN IP:`9090` |
+| 워커(비-Tailscale) -> Tailnet 서버(역방향 필요) | 기본 advertise만으로는 미지원, 라우트/NAT 또는 터널 필요 | `ssh -L` 사용 시 `127.0.0.1:19090` |
+
+참고:
+- `advertise-routes`는 기본적으로 `Tailnet -> 서브넷` 경로입니다.
+- 워커가 직접 `100.x`로 나가려면 추가 라우팅/NAT 또는 터널 구성이 필요합니다.
 
 ## TCP Command Reference
 기본 명령 예시:
@@ -278,7 +296,7 @@ python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 
 3. 엔진 생성:
 ```powershell
-.\TensorRT-10.15.1.29\bin\trtexec.exe `
+.\<TENSORRT_ROOT>\bin\trtexec.exe `
   --onnx=ml_assets/onnx/da3metric_560x1008.onnx `
   --saveEngine=ml_assets/engines/da3metric_560x1008_fp16.engine `
   --fp16 --verbose
@@ -292,6 +310,15 @@ python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 - RTSP 접속 실패: URL/계정/포트/네트워크/카메라 채널 점검
 - TensorRT 다운로드 실패: `-TensorRtUrl`로 직접 ZIP URL 지정
 - DLL 관련 실행 오류: 빌드 산출물 폴더에 TensorRT/OpenCV DLL 복사 여부 확인
+- 외부 mTLS 테스트에서 `tailscale ping`은 성공하지만 `openssl/curl/nc` TCP가 타임아웃이면:
+  - 소스 노드 `tailscaled` 실행 인자를 확인합니다.
+  - `--tun=userspace-networking`이면 일반 TCP 테스트가 실패할 수 있으므로 kernel TUN 모드(`--tun=tailscale0`)로 전환 후 재시도합니다.
+  - 확인 명령:
+    - `cat /proc/$(pidof tailscaled)/cmdline | tr '\0' ' '; echo`
+- 워커 노드에 `ip/route` 유틸이 없어 `100.x` 라우트 설정이 불가하면:
+  - `ssh -L` 포트포워딩으로 우회 테스트합니다.
+  - 예: `ssh -f -N -L 19090:<SERVER_TAILNET_IP>:9090 <master_user>@<MASTER_LAN_IP>`
+  - 이후 워커에서 `127.0.0.1:19090` 대상으로 `mtls_external_test.sh` 실행
 
 ## Operational Checklist
 - `config/local_paths.cmake` 경로가 실제 설치 경로와 일치하는가?
