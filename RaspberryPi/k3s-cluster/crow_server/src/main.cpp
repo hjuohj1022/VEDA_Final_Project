@@ -1,6 +1,10 @@
 #define CROW_ENABLE_WEBSOCKETS
 #include "crow.h"
 #include "../include/MqttManager.h"
+#include "../include/SunapiProxy.h"
+#include "../include/SunapiWsProxy.h"
+#include "../include/CctvManager.h"
+#include "../include/CctvProxy.h"
 #include <jwt-cpp/jwt.h> 
 #include <filesystem>
 #include <iostream>
@@ -182,6 +186,29 @@ bool registerUserToDB(std::string inputId, std::string inputPw) {
 int main()
 {
     crow::SimpleApp app;
+
+    // SUNAPI 프록시 라우트 등록 (/sunapi/stw-cgi/*)
+    registerSunapiProxyRoutes(app);
+    // SUNAPI StreamingServer WebSocket 프록시 등록 (/sunapi/StreamingServer)
+    registerSunapiWsProxyRoutes(app);
+
+    // ==========================================
+    // CCTV 매니저 초기화 및 라우트 등록
+    // ==========================================
+    const char* cctv_host = std::getenv("CCTV_BACKEND_HOST") ? std::getenv("CCTV_BACKEND_HOST") : "127.0.0.1";
+    int cctv_port = std::getenv("CCTV_BACKEND_PORT") ? std::atoi(std::getenv("CCTV_BACKEND_PORT")) : 9090;
+    
+    // 인증서 경로 (기본값 설정)
+    std::string cert_dir = "/app/certs";
+    CctvManager cctv_mgr(
+        cctv_host, cctv_port,
+        cert_dir + "/rootCA.crt",
+        cert_dir + "/cctv.crt", 
+        cert_dir + "/cctv.key"
+    );
+    
+    // CCTV 라우트 등록
+    registerCctvProxyRoutes(app, cctv_mgr);
 
     // ==========================================
     // MQTT 매니저 초기화 및 브로드캐스트 설정

@@ -108,12 +108,161 @@ paths:
                     type: integer
         '401':
           description: Unauthorized
+  /sunapi/stw-cgi/{tail}:
+    get:
+      summary: Proxy SUNAPI GET request
+      description: Forward request to camera SUNAPI with Digest auth
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+          description: stw-cgi path tail (example: system.cgi)
+      responses:
+        '200':
+          description: Forwarded response
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
+    post:
+      summary: Proxy SUNAPI POST request
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Forwarded response
+    put:
+      summary: Proxy SUNAPI PUT request
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Forwarded response
+    delete:
+      summary: Proxy SUNAPI DELETE request
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Forwarded response
   /health:
     get:
       summary: Server health check
       responses:
         '200':
           description: OK
+  /cctv/control/start:
+    post:
+      summary: Start CCTV Processing
+      description: Start point cloud processing on the backend server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: integer
+                  description: Channel number (0-3)
+                mode:
+                  type: string
+                  description: Execution mode ("headless" or "gui")
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Invalid request
+  /cctv/control/stop:
+    post:
+      summary: Stop CCTV Processing
+      responses:
+        '200':
+          description: OK
+  /cctv/control/pause:
+    post:
+      summary: Pause CCTV Processing
+      responses:
+        '200':
+          description: OK
+  /cctv/control/resume:
+    post:
+      summary: Resume CCTV Processing
+      responses:
+        '200':
+          description: OK
+  /cctv/control/view:
+    post:
+      summary: Update View Parameters
+      description: Update point cloud view settings (rotation, flip, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rx:
+                  type: number
+                ry:
+                  type: number
+                flipx:
+                  type: boolean
+                flipy:
+                  type: boolean
+                flipz:
+                  type: boolean
+                wire:
+                  type: boolean
+                mesh:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+  /cctv/status:
+    get:
+      summary: Get CCTV Status
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backend_connected:
+                    type: boolean
+                  streaming:
+                    type: boolean
+  /cctv/stream:
+    get:
+      summary: Point Cloud Stream (WebSocket)
+      description: Receive real-time point cloud frames. Requires mTLS.
+      responses:
+        '101':
+          description: Switching Protocols
   /thermal-stream:
     get:
       summary: Real-time Thermal Image Streaming (WebSocket)
