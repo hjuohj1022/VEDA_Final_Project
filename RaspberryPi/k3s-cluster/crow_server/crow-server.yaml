@@ -70,10 +70,25 @@ spec:
               name: crow-sunapi-secret
               key: SUNAPI_PASSWORD
 
+        # CCTV 백엔드 (3D 데이터 연산 엔진) 접속 정보
+        - name: CCTV_BACKEND_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: crow-cctv-ip-config
+              key: CCTV_BACKEND_HOST
+        - name: CCTV_BACKEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: crow-cctv-ip-config
+              key: CCTV_BACKEND_PORT
+
         # 마운트
         volumeMounts:
         - name: recordings
           mountPath: /app/recordings
+        - name: certs
+          mountPath: /app/certs
+          readOnly: true
 
       volumes:
       - name: recordings
@@ -81,6 +96,16 @@ spec:
         hostPath:
           path: /home/pi/cctv-recordings
           type: DirectoryOrCreate
+      - name: certs
+        secret:
+          secretName: crow-certs
+          items:
+          - key: rootCA.crt
+            path: rootCA.crt
+          - key: server.crt
+            path: cctv.crt
+          - key: server.key
+            path: cctv.key
 
 ---
 # -----------------------------------------------------------
