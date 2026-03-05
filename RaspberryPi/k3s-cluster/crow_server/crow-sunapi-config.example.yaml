@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crow-sunapi-config
+  namespace: default
+data:
+  # 카메라 실주소는 운영환경에 맞게 교체
+  SUNAPI_BASE_URL: "https://REPLACE_CAMERA_HOST"
+  # StreamingServer WebSocket 업스트림 (ws만 지원, 예: ws://camera-host/StreamingServer)
+  SUNAPI_WS_URL: "ws://REPLACE_CAMERA_HOST/StreamingServer"
+  # 자가서명 인증서 사용 중이면 true 권장
+  SUNAPI_INSECURE: "true"
+  # SUNAPI 요청 타임아웃(ms)
+  SUNAPI_TIMEOUT_MS: "12000"
