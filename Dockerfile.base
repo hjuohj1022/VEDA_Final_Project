@@ -1,7 +1,7 @@
 # Dockerfile.base
 FROM ubuntu:22.04
 
-# 시간 걸리는 설치 작업 몰아넣기
+# 시간 걸리는 설치 작업 몰아넣기 (Asio 충돌 방지 포함)
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -10,4 +10,8 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libmosquitto-dev \    
     libmosquittopp-dev \
+    libmysqlclient-dev \
+    libcurl4-openssl-dev \
+    pkg-config \
+    && apt-get purge -y libasio-dev || true \
     && rm -rf /var/lib/apt/lists/*
