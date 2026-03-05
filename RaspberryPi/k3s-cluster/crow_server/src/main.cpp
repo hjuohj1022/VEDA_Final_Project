@@ -1,3 +1,4 @@
+#define CROW_USE_BOOST
 #define CROW_ENABLE_WEBSOCKETS
 #include "crow.h"
 #include "../include/MqttManager.h"

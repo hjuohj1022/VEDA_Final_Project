@@ -3,6 +3,9 @@ project(CrowMqttServer)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Crow가 Boost Asio를 사용하도록 전역 설정
+add_definitions(-DCROW_USE_BOOST)
+
 include(FetchContent)
 FetchContent_Declare(
   jwt-cpp
@@ -20,6 +23,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(MYSQL REQUIRED mysqlclient)
 pkg_check_modules(CURL REQUIRED libcurl)
 find_package(OpenSSL REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
 
 add_executable(
   crow_server
@@ -39,6 +43,7 @@ target_include_directories(
   ${MYSQL_INCLUDE_DIRS}
   ${CURL_INCLUDE_DIRS}
   ${OPENSSL_INCLUDE_DIR}
+  ${Boost_INCLUDE_DIRS}
 )
 
 target_link_libraries(
@@ -52,4 +57,5 @@ target_link_libraries(
   OpenSSL::SSL
   OpenSSL::Crypto
   jwt-cpp::jwt-cpp
+  Boost::system
 )
