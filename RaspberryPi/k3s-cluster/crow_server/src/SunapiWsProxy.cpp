@@ -2,7 +2,9 @@
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/beast/core.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 
 #include <atomic>
@@ -15,6 +17,8 @@
 #include <thread>
 #include <unordered_map>
 
+#include <openssl/ssl.h>
+
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -24,7 +28,9 @@ namespace {
 
 struct WsBridge {
     std::unique_ptr<asio::io_context> ioc;
-    std::unique_ptr<websocket::stream<tcp::socket>> upstream;
+    std::unique_ptr<asio::ssl::context> sslCtx;
+    std::unique_ptr<websocket::stream<tcp::socket>> upstreamWs;
+    std::unique_ptr<websocket::stream<beast::ssl_stream<tcp::socket>>> upstreamWss;
     std::thread readerThread;
     std::mutex writeMutex;
     std::atomic<bool> stopped{false};
@@ -36,6 +42,14 @@ std::unordered_map<crow::websocket::connection*, std::shared_ptr<WsBridge>> g_br
 std::string envOrDefault(const char* key, const std::string& def) {
     const char* v = std::getenv(key);
     return v ? std::string(v) : def;
+}
+
+bool envToBool(const char* key, bool defaultValue) {
+    const char* value = std::getenv(key);
+    if (!value) return defaultValue;
+    std::string s(value);
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return (s == "1" || s == "true" || s == "yes" || s == "on");
 }
 
 std::string trimTrailingSlash(std::string s) {
@@ -83,10 +97,15 @@ void stopBridge(crow::websocket::connection* conn) {
 
     if (!bridge) return;
     bridge->stopped = true;
-    if (bridge->upstream) {
-        beast::error_code ec;
-        bridge->upstream->close(websocket::close_code::normal, ec);
+
+    beast::error_code ec;
+    if (bridge->upstreamWs) {
+        bridge->upstreamWs->close(websocket::close_code::normal, ec);
     }
+    if (bridge->upstreamWss) {
+        bridge->upstreamWss->close(websocket::close_code::normal, ec);
+    }
+
     if (bridge->readerThread.joinable()) {
         bridge->readerThread.join();
     }
@@ -117,23 +136,44 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
                 return;
             }
 
-            if (scheme == "wss" || scheme == "WSS") {
-                // 현재 버전은 ws만 지원. 필요 시 TLS(ws over ssl) 확장 가능.
-                conn.send_text("wss upstream is not supported in current build");
-                conn.close("unsupported upstream scheme");
-                return;
-            }
+            std::string schemeLower = scheme;
+            std::transform(schemeLower.begin(), schemeLower.end(), schemeLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const bool useTls = (schemeLower == "wss");
 
             auto bridge = std::make_shared<WsBridge>();
             bridge->ioc = std::make_unique<asio::io_context>();
-            bridge->upstream = std::make_unique<websocket::stream<tcp::socket>>(*bridge->ioc);
 
             try {
                 tcp::resolver resolver(*bridge->ioc);
                 auto const results = resolver.resolve(host, port);
-                asio::connect(bridge->upstream->next_layer(), results.begin(), results.end());
-                bridge->upstream->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
-                bridge->upstream->handshake(host + ":" + port, target);
+
+                if (useTls) {
+                    const bool insecure = envToBool("SUNAPI_INSECURE", true);
+                    bridge->sslCtx = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
+                    bridge->sslCtx->set_verify_mode(insecure ? asio::ssl::verify_none : asio::ssl::verify_peer);
+
+                    if (!insecure) {
+                        beast::error_code ecVerify;
+                        bridge->sslCtx->set_default_verify_paths(ecVerify);
+                    }
+
+                    bridge->upstreamWss = std::make_unique<websocket::stream<beast::ssl_stream<tcp::socket>>>(*bridge->ioc, *bridge->sslCtx);
+                    asio::connect(beast::get_lowest_layer(*bridge->upstreamWss), results.begin(), results.end());
+
+                    if (!SSL_set_tlsext_host_name(bridge->upstreamWss->next_layer().native_handle(), host.c_str())) {
+                        throw std::runtime_error("failed to set TLS SNI");
+                    }
+
+                    bridge->upstreamWss->next_layer().handshake(asio::ssl::stream_base::client);
+                    bridge->upstreamWss->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+                    bridge->upstreamWss->handshake(host + ":" + port, target);
+                } else {
+                    bridge->upstreamWs = std::make_unique<websocket::stream<tcp::socket>>(*bridge->ioc);
+                    asio::connect(bridge->upstreamWs->next_layer(), results.begin(), results.end());
+                    bridge->upstreamWs->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+                    bridge->upstreamWs->handshake(host + ":" + port, target);
+                }
             } catch (const std::exception& e) {
                 std::cerr << "[SUNAPI_WS_PROXY] upstream connect failed: " << e.what() << std::endl;
                 conn.send_text(std::string("upstream connect failed: ") + e.what());
@@ -150,7 +190,13 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
                 try {
                     while (!bridge->stopped) {
                         beast::flat_buffer buffer;
-                        bridge->upstream->read(buffer);
+                        if (bridge->upstreamWss) {
+                            bridge->upstreamWss->read(buffer);
+                        } else if (bridge->upstreamWs) {
+                            bridge->upstreamWs->read(buffer);
+                        } else {
+                            break;
+                        }
                         const auto payload = beast::buffers_to_string(buffer.cdata());
                         conn.send_binary(payload);
                     }
@@ -164,12 +210,18 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
         })
         .onmessage([](crow::websocket::connection& conn, const std::string& data, bool is_binary) {
             auto bridge = getBridge(&conn);
-            if (!bridge || !bridge->upstream || bridge->stopped) return;
+            if (!bridge || bridge->stopped) return;
+            if (!bridge->upstreamWs && !bridge->upstreamWss) return;
 
             try {
                 std::lock_guard<std::mutex> lock(bridge->writeMutex);
-                bridge->upstream->binary(is_binary);
-                bridge->upstream->write(asio::buffer(data.data(), data.size()));
+                if (bridge->upstreamWss) {
+                    bridge->upstreamWss->binary(is_binary);
+                    bridge->upstreamWss->write(asio::buffer(data.data(), data.size()));
+                } else {
+                    bridge->upstreamWs->binary(is_binary);
+                    bridge->upstreamWs->write(asio::buffer(data.data(), data.size()));
+                }
             } catch (const std::exception& e) {
                 std::cerr << "[SUNAPI_WS_PROXY] write failed: " << e.what() << std::endl;
                 conn.close("upstream write failed");
@@ -181,4 +233,3 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
             eraseBridge(&conn);
         });
 }
-
