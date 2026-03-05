@@ -123,9 +123,10 @@ Rectangle {
         }
 
         Rectangle {
-            Layout.preferredWidth: 250
+            Layout.preferredWidth: root.isLoggedIn ? 250 : 0
             Layout.preferredHeight: 34
             Layout.leftMargin: 8
+            visible: root.isLoggedIn
             radius: 9
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
@@ -265,6 +266,7 @@ Rectangle {
                 iconBackdropColor: "transparent"
                 iconBackdropBorderColor: "transparent"
                 tooltipText: root.screenGuideText()
+                visible: root.isLoggedIn
             }
 
             IconButton {

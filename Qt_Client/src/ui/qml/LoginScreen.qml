@@ -10,6 +10,7 @@ Item {
     property var theme
     property string pendingDeleteFileName: ""
     property string adminUnlockCode: ""
+    property bool signupMode: false
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     
     property bool isLoggedIn: backend.isLoggedIn
@@ -46,7 +47,7 @@ Item {
                 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Welcome Back"
+                    text: root.signupMode ? "Create Account" : "Welcome Back"
                     color: theme ? theme.textPrimary : "white"
                     font.bold: true
                     font.pixelSize: 24
@@ -54,7 +55,9 @@ Item {
                 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Sign in to access surveillance system"
+                    text: root.signupMode
+                          ? "Sign up to create a new account"
+                          : "Sign in to access surveillance system"
                     color: theme ? theme.textSecondary : "#71717a"
                     font.pixelSize: 14
                 }
@@ -67,6 +70,7 @@ Item {
                 TextField {
                     id: idField
                     placeholderText: "ID"
+                    placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                     Layout.fillWidth: true
                     height: 40
                     color: theme ? theme.textPrimary : "white"
@@ -80,6 +84,7 @@ Item {
                 TextField {
                     id: pwField
                     placeholderText: "Password"
+                    placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                     echoMode: TextInput.Password
                     Layout.fillWidth: true
                     height: 40
@@ -90,11 +95,28 @@ Item {
                         radius: 6
                     }
                 }
+
+                TextField {
+                    id: pwConfirmField
+                    placeholderText: "Confirm Password"
+                    placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                    echoMode: TextInput.Password
+                    visible: root.signupMode
+                    Layout.fillWidth: true
+                    height: root.signupMode ? 40 : 0
+                    color: theme ? theme.textPrimary : "white"
+                    background: Rectangle {
+                        color: theme ? theme.bgComponent : "#18181b"
+                        border.color: pwConfirmField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                        radius: 6
+                    }
+                }
                 
                 Button {
                     text: "Sign In"
                     Layout.fillWidth: true
                     height: 40
+                    visible: !root.signupMode
                     enabled: !backend.loginLocked
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
@@ -120,9 +142,81 @@ Item {
                 }
 
                 Button {
+                    text: root.signupMode ? "Create Account" : "Sign Up"
+                    Layout.fillWidth: true
+                    height: 40
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : (theme ? theme.bgComponent : "#18181b")
+                        border.color: theme ? theme.border : "#27272a"
+                        radius: 6
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textPrimary : "white"
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    onClicked: {
+                        if (!root.signupMode) {
+                            root.signupMode = true
+                            idField.text = ""
+                            pwField.text = ""
+                            pwConfirmField.text = ""
+                            return
+                        }
+                        if (idField.text.trim().length === 0 || pwField.text.length === 0 || pwConfirmField.text.length === 0) {
+                            errorDialog.title = "Sign Up Failed"
+                            errorDialog.text = "ID/비밀번호/비밀번호 확인을 모두 입력해 주세요."
+                            errorDialog.open()
+                            return
+                        }
+                        if (pwField.text !== pwConfirmField.text) {
+                            errorDialog.title = "Sign Up Failed"
+                            errorDialog.text = "비밀번호와 비밀번호 확인이 일치하지 않습니다."
+                            errorDialog.open()
+                            return
+                        }
+                        backend.registerUser(idField.text, pwField.text)
+                    }
+                }
+
+                Button {
+                    text: "Back to Sign In"
+                    Layout.fillWidth: true
+                    height: 36
+                    visible: root.signupMode
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                        border.color: theme ? theme.border : "#52525b"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    onClicked: {
+                        root.signupMode = false
+                        idField.text = ""
+                        pwField.text = ""
+                        pwConfirmField.text = ""
+                    }
+                }
+
+                Button {
                     text: "Skip (Temporary)"
                     Layout.fillWidth: true
                     height: 36
+                    visible: !root.signupMode
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     background: Rectangle {
@@ -141,6 +235,7 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
+                    visible: !root.signupMode
                     color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -152,11 +247,12 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    visible: backend.loginLocked
+                    visible: backend.loginLocked && !root.signupMode
 
                     TextField {
                         id: adminUnlockField
                         placeholderText: "Admin unlock key"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         echoMode: TextInput.Password
                         Layout.fillWidth: true
                         height: 40
@@ -225,6 +321,7 @@ Item {
                     onClicked: {
                         idField.text = ""
                         pwField.text = ""
+                        pwConfirmField.text = ""
                     }
                 }
             }
@@ -572,6 +669,22 @@ Item {
         
         function onLoginSuccess() {
             backend.refreshRecordings()
+        }
+
+        function onRegisterSuccess(message) {
+            errorDialog.title = "Sign Up"
+            errorDialog.text = message
+            errorDialog.open()
+            root.signupMode = false
+            idField.text = ""
+            pwField.text = ""
+            pwConfirmField.text = ""
+        }
+
+        function onRegisterFailed(error) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = error
+            errorDialog.open()
         }
         
         property var downloadStartTime: 0

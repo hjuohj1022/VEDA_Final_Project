@@ -80,12 +80,15 @@ public:
     QString networkStatus() const { return m_networkStatus; }
 
     // QML 호출 가능 인터페이스
+    // 인증/세션
     Q_INVOKABLE void login(QString id, QString pw);
+    Q_INVOKABLE void registerUser(QString id, QString pw);
     Q_INVOKABLE void skipLoginTemporarily();
     Q_INVOKABLE void logout();
     Q_INVOKABLE void resetSessionTimer();
     Q_INVOKABLE bool adminUnlock(QString adminCode);
 
+    // RTSP 설정/점검
     Q_INVOKABLE bool updateRtspIp(QString ip);
     Q_INVOKABLE bool updateRtspConfig(QString ip, QString port);
     Q_INVOKABLE bool resetRtspConfigToEnv();
@@ -93,6 +96,7 @@ public:
     Q_INVOKABLE void useEnvRtspCredentials();
     Q_INVOKABLE void probeRtspEndpoint(QString ip, QString port, int timeoutMs = 1200);
 
+    // 녹화 목록/파일 관리
     Q_INVOKABLE void refreshRecordings();
     Q_INVOKABLE void deleteRecording(QString name);
     Q_INVOKABLE void renameRecording(QString oldName, QString newName);
@@ -101,6 +105,7 @@ public:
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
 
+    // Playback 제어
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
     Q_INVOKABLE QString buildPlaybackRtspUrl(int channelIndex, const QString &dateText, const QString &timeText) const;
     Q_INVOKABLE void preparePlaybackRtsp(int channelIndex, const QString &dateText, const QString &timeText);
@@ -118,6 +123,7 @@ public:
                                            const QString &savePath = QString());
     Q_INVOKABLE void cancelPlaybackExport();
 
+    // SUNAPI PTZ/Focus
     Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
     Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
     Q_INVOKABLE bool sunapiZoomStop(int cameraIndex);
@@ -127,6 +133,7 @@ public:
     Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
 
 signals:
+    // 상태 변경(Property NOTIFY)
     void isLoggedInChanged();
     void userIdChanged();
     void sessionRemainingSecondsChanged();
@@ -140,10 +147,14 @@ signals:
     void detectedObjectsChanged();
     void networkStatusChanged();
 
+    // 인증/세션 이벤트
     void loginSuccess();
     void loginFailed(QString error);
+    void registerSuccess(QString message);
+    void registerFailed(QString error);
     void sessionExpired();
 
+    // 녹화 목록/파일 이벤트
     void recordingsLoaded(QVariantList files);
     void recordingsLoadFailed(QString error);
 
@@ -152,22 +163,29 @@ signals:
     void renameSuccess();
     void renameFailed(QString error);
 
-    // 다운로드 시그널
+    // 다운로드 이벤트(일반 녹화 파일)
     void downloadProgress(qint64 received, qint64 total);
     void downloadFinished(QString path);
     void downloadError(QString error);
 
+    // RTSP/카메라 제어 이벤트
     void cameraControlMessage(QString message, bool isError);
     void rtspProbeFinished(bool success, QString error);
+
+    // Playback 준비/타임라인 이벤트
     void playbackPrepared(QString url);
     void playbackPrepareFailed(QString error);
     void playbackTimelineLoaded(int channelIndex, QString dateText, QVariantList segments);
     void playbackTimelineFailed(QString error);
     void playbackMonthRecordedDaysLoaded(int channelIndex, QString yearMonth, QVariantList days);
     void playbackMonthRecordedDaysFailed(QString error);
+
+    // Streaming WS 이벤트
     void streamingWsStateChanged(QString state);
     void streamingWsFrame(QString direction, QString hexPayload);
     void streamingWsError(QString error);
+
+    // Playback Export 수명주기 이벤트
     void playbackExportStarted(QString message);
     void playbackExportProgress(int percent, QString message);
     void playbackExportFinished(QString path);
@@ -178,21 +196,27 @@ private slots:
     void onSessionTick();
 
 private:
+    // Core/SSL 유틸
     void setupSslConfiguration();
     void applySslIfNeeded(QNetworkRequest &request) const;
     void attachIgnoreSslErrors(QNetworkReply *reply, const QString &tag) const;
 
+    // Core API URL/Request 유틸
     QUrl buildApiUrl(const QString &path, const QMap<QString, QString> &query = {}) const;
     QNetworkRequest makeApiJsonRequest(const QString &path, const QMap<QString, QString> &query = {}) const;
 
+    // SUNAPI 공통 URL/에러 유틸
     QUrl buildSunapiUrl(const QString &cgiName,
                         const QMap<QString, QString> &params,
                         int cameraIndex,
                         bool includeChannelParam) const;
     bool isSunapiBodyError(const QString &body, QString *reason = nullptr) const;
 
+    // Core 초기화
     void loadEnv();
     void setupMqtt();
+
+    // SUNAPI 명령/Playback WS 런타임
     bool sendSunapiCommand(const QString &cgiName,
                            const QMap<QString, QString> &params,
                            int cameraIndex,
@@ -201,6 +225,8 @@ private:
     QString ensurePlaybackWsSdpSource();
     void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
     void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
+
+    // Playback Export 진입점
     void requestPlaybackExportViaWs(int channelIndex,
                                     const QString &dateText,
                                     const QString &startTimeText,
@@ -212,6 +238,8 @@ private:
                                             const QString &endTimeText,
                                             const QString &outPath,
                                             const std::function<void()> &onFailedFallback);
+
+    // Playback Export 준비/경로/인증 유틸
     QString resolvePlaybackExportFfmpegBinary() const;
     bool buildPlaybackExportWsRtspUri(int channelIndex,
                                       const QString &dateText,
@@ -231,6 +259,8 @@ private:
                                           QString *realm,
                                           QString *nonce,
                                           QString *error) const;
+
+    // Playback Export RTSP/RTP 처리
     QByteArray buildPlaybackExportRtspRequest(int &nextCseq,
                                               const QString &authHeader,
                                               const QString &session,
@@ -271,6 +301,8 @@ private:
                                           const QString &uri,
                                           const std::function<void(const QByteArray &)> &sendRtsp,
                                           const std::function<void(const QString &)> &failWith);
+
+    // Playback Export 응답 파싱/다운로드
     QString sunapiExportExtractKvValue(const QString &text, const QStringList &keys) const;
     QString sunapiExportExtractJsonString(const QJsonObject &obj, const QStringList &keys) const;
     int sunapiExportParseHmsToSec(const QString &hms) const;
@@ -286,11 +318,13 @@ private:
                                     QString *reason) const;
     void playbackExportStartDownload(const QUrl &downloadUrl, const QString &outPath);
 
+    // 공통 런타임 상태
     QNetworkAccessManager *m_manager;
     QMap<QString, QString> m_env;
     QTimer *m_storageTimer;
     QTimer *m_sessionTimer;
 
+    // 인증/세션 상태
     bool m_isLoggedIn = false;
     QString m_userId;
     int m_sessionRemainingSeconds = 0;
@@ -299,6 +333,7 @@ private:
     int m_loginFailedAttempts = 0;
     const int m_loginMaxAttempts = 5;
 
+    // RTSP 설정 상태
     bool m_useCustomRtspConfig = false;
     QString m_rtspIp;
     QString m_rtspPort;
@@ -323,11 +358,15 @@ private:
     int m_detectedObjects = 0;
     QString m_networkStatus = "Disconnected";
 
-    // Download state
+    // 다운로드/인증 요청 상태
     QNetworkReply *m_downloadReply = nullptr;
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
+    QPointer<QNetworkReply> m_registerReply;
+    bool m_registerInProgress = false;
     QString m_tempFilePath;
+
+    // SSL/WS 상태
     QSslConfiguration m_sslConfig;
     bool m_sslConfigReady = false;
     bool m_sslIgnoreErrors = false;
@@ -355,6 +394,8 @@ private:
     int m_playbackFuNalType = 0;
     QByteArray m_playbackInterleavedBuffer;
     int m_playbackValidRtpCount = 0;
+
+    // Playback Export 상태
     QPointer<QWebSocket> m_playbackExportWs;
     QPointer<QProcess> m_playbackExportFfmpegProc;
     QPointer<QNetworkReply> m_playbackExportDownloadReply;

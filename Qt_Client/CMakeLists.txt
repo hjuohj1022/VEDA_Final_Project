@@ -32,7 +32,9 @@ qt_add_executable(Team3VideoReceiver
     src/core/BackendCoreMqtt.cpp
     src/core/BackendCoreApi.cpp
     src/core/BackendCoreState.cpp
-    src/core/BackendAuth.cpp
+    src/core/BackendAuthLogin.cpp
+    src/core/BackendAuthRegister.cpp
+    src/core/BackendAuthSession.cpp
     src/core/BackendMediaRecordings.cpp
     src/core/BackendMediaStorage.cpp
     src/core/BackendRtspConfig.cpp
