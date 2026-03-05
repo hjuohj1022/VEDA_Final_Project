@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 // main.cpp에 정의된 JWT 검증 함수
@@ -45,6 +46,47 @@ std::string extractQuery(const std::string& rawUrl) {
     const std::size_t pos = rawUrl.find('?');
     if (pos == std::string::npos) return {};
     return rawUrl.substr(pos);
+}
+
+std::string urlEncode(const std::string& input) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(input.size() * 3);
+    for (unsigned char c : input) {
+        if ((c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(hex[(c >> 4) & 0x0F]);
+            out.push_back(hex[c & 0x0F]);
+        }
+    }
+    return out;
+}
+
+std::string makeQuery(const std::initializer_list<std::pair<std::string, std::string>>& items) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto& kv : items) {
+        if (!first) oss << "&";
+        first = false;
+        oss << urlEncode(kv.first) << "=" << urlEncode(kv.second);
+    }
+    return oss.str();
+}
+
+bool isLeapYear(int y) {
+    return ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+}
+
+int daysInMonth(int y, int m) {
+    static const int d[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if (m < 1 || m > 12) return 30;
+    if (m == 2 && isLeapYear(y)) return 29;
+    return d[m - 1];
 }
 
 size_t writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
@@ -201,5 +243,88 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         const std::string query = extractQuery(req.raw_url);
         const std::string forwardPath = "/stw-cgi" + query;
         return forwardToSunapi(req, forwardPath);
+    });
+
+    // Crow 고정 스펙: 저장소 조회
+    CROW_ROUTE(app, "/api/sunapi/storage")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        const std::string q = makeQuery({
+            {"msubmenu", "storageinfo"},
+            {"action", "view"}
+        });
+        return forwardToSunapi(req, "/stw-cgi/system.cgi?" + q);
+    });
+
+    // Crow 고정 스펙: 일자 타임라인 조회
+    CROW_ROUTE(app, "/api/sunapi/timeline")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        const char* ch = req.url_params.get("channel");
+        const char* date = req.url_params.get("date"); // YYYY-MM-DD
+        if (!ch || !date) {
+            return crow::response(400, "missing query: channel, date");
+        }
+        const std::string ds(date);
+        if (ds.size() != 10) {
+            return crow::response(400, "invalid date format");
+        }
+        const std::string q = makeQuery({
+            {"msubmenu", "timeline"},
+            {"action", "view"},
+            {"FromDate", ds + " 00:00:00"},
+            {"ToDate", ds + " 23:59:59"},
+            {"ChannelIDList", ch},
+            {"Type", "All"},
+            {"OverlappedID", "0"}
+        });
+        return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
+    });
+
+    // Crow 고정 스펙: 월별 녹화일 조회
+    CROW_ROUTE(app, "/api/sunapi/month-days")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        const char* ch = req.url_params.get("channel");
+        const char* ys = req.url_params.get("year");
+        const char* ms = req.url_params.get("month");
+        if (!ch || !ys || !ms) {
+            return crow::response(400, "missing query: channel, year, month");
+        }
+
+        int year = 0;
+        int month = 0;
+        try {
+            year = std::stoi(ys);
+            month = std::stoi(ms);
+        } catch (...) {
+            return crow::response(400, "invalid year/month");
+        }
+        if (year < 2000 || year > 2100 || month < 1 || month > 12) {
+            return crow::response(400, "invalid year/month range");
+        }
+
+        const int last = daysInMonth(year, month);
+        std::ostringstream m2;
+        if (month < 10) m2 << "0";
+        m2 << month;
+        const std::string mm = m2.str();
+        std::ostringstream l2;
+        if (last < 10) l2 << "0";
+        l2 << last;
+
+        const std::string fromDate = std::to_string(year) + "-" + mm + "-01 00:00:00";
+        const std::string toDate = std::to_string(year) + "-" + mm + "-" + l2.str() + " 23:59:59";
+
+        const std::string q = makeQuery({
+            {"msubmenu", "timeline"},
+            {"action", "view"},
+            {"FromDate", fromDate},
+            {"ToDate", toDate},
+            {"ChannelIDList", ch},
+            {"Type", "All"},
+            {"OverlappedID", "0"}
+        });
+        return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
     });
 }
