@@ -13,5 +13,6 @@ RUN apt-get update && apt-get install -y \
     libmysqlclient-dev \
     libcurl4-openssl-dev \
     pkg-config \
+    nlohmann-json3-dev \
     && apt-get purge -y libasio-dev || true \
     && rm -rf /var/lib/apt/lists/*

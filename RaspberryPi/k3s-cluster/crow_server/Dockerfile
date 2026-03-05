@@ -3,6 +3,12 @@
 # -------------------------------------------------------
 FROM hjuohj/crow-base:latest AS builder
 
+# 필요한 추가 빌드 의존성 설치
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    nlohmann-json3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # 의존성은 이미 베이스 이미지에 있으므로 소스 복사 후 바로 빌드
 WORKDIR /app
 COPY . .
