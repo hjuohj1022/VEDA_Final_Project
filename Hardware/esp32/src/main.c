@@ -13,19 +13,20 @@ esp_err_t systemInit(){
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     return ESP_OK;
 }
 
 void app_main(void){
     systemInit();
 
-    // UART 초기화 및 태스크 시작  ← 추가
-//    uartInit();
-//    xTaskCreate(uartTask, "uart_task", 2048, NULL, 5, NULL);
+    uartInit();
+    xTaskCreate(uartTask,      "uart_task",  8192, NULL, 6, NULL);  // 우선순위 높게
+    xTaskCreate(mqttFrameTask, "mqtt_frame", 8192, NULL, 4, NULL);  // publish 전담
 
     spiMasterInit();
     xTaskCreate(spiTask, "spi_task", 4096, NULL, 5, NULL);
-    
+
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = WIFI_SSID,
@@ -35,5 +36,4 @@ void app_main(void){
     };
 
     wifiConnect(&wifi_config);
-
 }

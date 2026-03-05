@@ -66,6 +66,7 @@ void resetLepton() {
 
 void setup() {
   Serial.begin(2000000);
+  Serial1.begin(921600);   // ← 이 줄 추가 (TX1=pin1 → ESP32)
   Wire.begin();
   Wire.setClock(400000);
   pinMode(CS_PIN, OUTPUT);
@@ -144,8 +145,13 @@ void loop() {
   // ── 전송: 헤더에 seg1 시작 packet 번호(20)도 함께 보냄 ──
   // Python이 어디서 시작했는지 알 수 있도록
   // 프로토콜: "FSTART" + 1바이트(seg1 첫 저장 packetId=20) + 프레임 데이터
-  Serial.write("FSTART", 6);
-  Serial.write((uint8_t)20);           // seg1 데이터가 packet 20부터 시작됨을 알림
-  Serial.write((uint8_t*)frameBuffer, FRAME_SIZE * 2);
-  Serial.flush();
+Serial.println("Frame complete - sending");
+Serial1.write("FSTART", 6);                  // 데이터는 UART로
+Serial1.write((uint8_t)20);
+Serial1.write((uint8_t*)frameBuffer, FRAME_SIZE * 2);
+Serial1.flush();
+Serial.println("Sent OK");
+
+// ESP32 MQTT 전송 속도(약 760ms+)에 맞춰 1초 대기하여 버퍼 오버플로우 및 MQTT 끊김 방지
+delay(1000);
 }

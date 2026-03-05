@@ -1,0 +1,9 @@
+../Core/Src/motor.c:34:26:pca_write	32	static
+../Core/Src/motor.c:45:13:pca_set_pwm	32	static
+../Core/Src/motor.c:70:17:angle_to_tick	24	static
+../Core/Src/motor.c:89:20:skip_space	16	static
+../Core/Src/motor.c:97:5:Motor_Init	24	static
+../Core/Src/motor.c:122:6:Motor_SetAngle	24	static
+../Core/Src/motor.c:150:6:Motor_MoveRelative	16	static
+../Core/Src/motor.c:156:9:Motor_GetAngle	16	static
+../Core/Src/motor.c:162:5:Motor_ParseAndRun	48	static
