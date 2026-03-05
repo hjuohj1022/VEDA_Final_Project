@@ -38,7 +38,10 @@ add_executable(
   src/CctvProxy.cpp
 )
 
-target_compile_definitions(crow_server PRIVATE CROW_ENABLE_WEBSOCKETS)
+target_compile_definitions(crow_server PRIVATE 
+    CROW_ENABLE_WEBSOCKETS=1 
+    CROW_USE_BOOST=1
+)
 
 target_include_directories(
   crow_server PRIVATE
