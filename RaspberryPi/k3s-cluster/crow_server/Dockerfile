@@ -3,35 +3,21 @@
 # -------------------------------------------------------
 FROM hjuohj/crow-base:latest AS builder
 
-# 기존 설치된 asio 제거 시도 및 필수 라이브러리만 설치
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
-    libboost-all-dev \
-    libssl-dev \
-    libmosquitto-dev \
-    libmosquittopp-dev \
-    libmysqlclient-dev \
-    libcurl4-openssl-dev \
-    pkg-config \
-    && apt-get purge -y libasio-dev || true \
-    && rm -rf /var/lib/apt/lists/*
-
+# 의존성은 이미 베이스 이미지에 있으므로 소스 복사 후 바로 빌드
 WORKDIR /app
 COPY . .
 
-# 빌드 수행
+# 빌드 수행 (-j$(nproc)를 사용하여 병렬 빌드 속도 향상)
 RUN mkdir -p build && cd build && \
     cmake .. && \
-    make
+    make -j$(nproc)
 
 # -------------------------------------------------------
 # 2단계: 실행 (Runtime Stage)
 # -------------------------------------------------------
 FROM ubuntu:22.04
 
-# 실행할 때 필요한 라이브러리 설치 (asio 관련 패키지 제외)
+# 실행할 때 필요한 런타임 라이브러리만 설치
 RUN apt-get update && apt-get install -y \
     libboost-system-dev \
     libboost-thread-dev \
