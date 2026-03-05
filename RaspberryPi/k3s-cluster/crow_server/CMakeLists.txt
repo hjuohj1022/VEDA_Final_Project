@@ -3,8 +3,12 @@ project(CrowMqttServer)
 
 set(CMAKE_CXX_STANDARD 17)
 
-# Crow가 Boost Asio를 사용하도록 전역 설정
+# Crow가 Boost Asio를 사용하도록 변수 설정 (FetchContent 이전에 설정해야 함)
+set(CROW_USE_BOOST ON CACHE BOOL "Use Boost Asio instead of standalone Asio")
 add_definitions(-DCROW_USE_BOOST)
+
+# Boost 라이브러리를 Crow보다 먼저 로드
+find_package(Boost REQUIRED COMPONENTS system thread)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -23,7 +27,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(MYSQL REQUIRED mysqlclient)
 pkg_check_modules(CURL REQUIRED libcurl)
 find_package(OpenSSL REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
 
 add_executable(
   crow_server
@@ -58,4 +61,5 @@ target_link_libraries(
   OpenSSL::Crypto
   jwt-cpp::jwt-cpp
   Boost::system
+  Boost::thread
 )
