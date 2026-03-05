@@ -10,17 +10,10 @@ namespace {
 
 void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
     
-    // 스트림 콜백 설정: 백엔드에서 데이터가 오면 모든 WS 클라이언트에게 전송
-    cctv_mgr.setStreamCallback([](const FrameHeader& header, const std::vector<uint8_t>& payload) {
+    // 스트림 콜백 설정: 백엔드에서 온 데이터(헤더 포함)를 그대로 모든 WS 클라이언트에게 전송
+    cctv_mgr.setStreamCallback([](const std::vector<uint8_t>& full_frame) {
         std::lock_guard<std::mutex> lock(clients_mutex);
         if (cctv_clients.empty()) return;
-
-        // 헤더 + 페이로드 합치기
-        std::vector<uint8_t> full_frame;
-        full_frame.reserve(sizeof(header) + payload.size());
-        uint8_t* h_ptr = (uint8_t*)&header;
-        full_frame.insert(full_frame.end(), h_ptr, h_ptr + sizeof(header));
-        full_frame.insert(full_frame.end(), payload.begin(), payload.end());
 
         std::string binary_data(full_frame.begin(), full_frame.end());
         for (auto client : cctv_clients) {
@@ -46,22 +39,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
     // 1.2 CCTV 중지
     CROW_ROUTE(app, "/cctv/control/stop").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        std::string res = cctv_mgr.sendCommand("stop");
-        return crow::response(200, res);
-    });
-
-    // 1.3 CCTV 일시중지
-    CROW_ROUTE(app, "/cctv/control/pause").methods(crow::HTTPMethod::POST)
-    ([&cctv_mgr]() {
-        std::string res = cctv_mgr.sendCommand("pause");
-        return crow::response(200, res);
-    });
-
-    // 1.4 CCTV 재개
-    CROW_ROUTE(app, "/cctv/control/resume").methods(crow::HTTPMethod::POST)
-    ([&cctv_mgr]() {
-        std::string res = cctv_mgr.sendCommand("resume");
-        return crow::response(200, res);
+        return crow::response(200, cctv_mgr.sendCommand("stop"));
     });
 
     // 1.5 뷰 설정 변경
@@ -70,7 +48,6 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         auto x = crow::json::load(req.body);
         if (!x) return crow::response(400, "Invalid JSON");
 
-        // 명세서 형식: pc_view rx=-20.0 ry=35.0 flipx=0 flipy=0 flipz=0 wire=0 mesh=1
         std::string cmd = "pc_view";
         if (x.has("rx")) cmd += " rx=" + std::to_string(x["rx"].d());
         if (x.has("ry")) cmd += " ry=" + std::to_string(x["ry"].d());
@@ -80,26 +57,27 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         if (x.has("wire")) cmd += " wire=" + std::to_string(x["wire"].b() ? 1 : 0);
         if (x.has("mesh")) cmd += " mesh=" + std::to_string(x["mesh"].b() ? 1 : 0);
 
-        std::string res = cctv_mgr.sendCommand(cmd);
-        return crow::response(200, res);
+        return crow::response(200, cctv_mgr.sendCommand(cmd));
     });
 
     // 2.1 포인트클라우드 스트림 (WebSocket)
-    CROW_WEBSOCKET_ROUTE(app, "/cctv/stream")
-        .onopen([&](crow::websocket::connection& conn) {
+    // 경로에 따라 이미지 중계(image) 또는 RAW 데이터 중계(raw) 선택
+    CROW_WEBSOCKET_ROUTE(app, "/cctv/stream/<string>")
+        .onopen([&](crow::websocket::connection& conn, std::string type) {
             std::lock_guard<std::mutex> lock(clients_mutex);
             cctv_clients.insert(&conn);
-            std::cout << "[CCTV_WS] Client connected. Total: " << cctv_clients.size() << std::endl;
             
-            // 스트림이 아직 시작되지 않았다면 백엔드에 요청
-            if (!cctv_mgr.isStreaming()) {
+            if (type == "raw") {
+                cctv_mgr.sendCommand("rgbd_stream");
+                std::cout << "[CCTV_WS] Raw RGBD stream started." << std::endl;
+            } else {
                 cctv_mgr.sendCommand("pc_stream");
+                std::cout << "[CCTV_WS] Image stream started." << std::endl;
             }
         })
         .onclose([&](crow::websocket::connection& conn, const std::string& reason) {
             std::lock_guard<std::mutex> lock(clients_mutex);
             cctv_clients.erase(&conn);
-            std::cout << "[CCTV_WS] Client disconnected. Reason: " << reason << std::endl;
         });
 
     // 3.1 CCTV 상태 조회
@@ -107,7 +85,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
     ([&cctv_mgr]() {
         crow::json::wvalue result;
         result["backend_connected"] = cctv_mgr.isConnected();
-        result["streaming"] = cctv_mgr.isStreaming();
+        result["stream_mode"] = static_cast<int>(cctv_mgr.getStreamMode());
         return crow::response(result);
     });
 }

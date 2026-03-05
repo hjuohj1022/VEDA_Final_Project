@@ -254,12 +254,22 @@ paths:
                 properties:
                   backend_connected:
                     type: boolean
-                  streaming:
-                    type: boolean
-  /cctv/stream:
+                  stream_mode:
+                    type: integer
+                    description: 0 (NONE), 1 (IMAGE), 2 (RAW)
+  /cctv/stream/{type}:
     get:
       summary: Point Cloud Stream (WebSocket)
-      description: Receive real-time point cloud frames. Requires mTLS.
+      description: |
+        - type=image: 서버 렌더링 이미지 (16B Header + Image)
+        - type=raw: 클라이언트용 RGBD 데이터 (20B Header + Depth + BGR)
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [image, raw]
       responses:
         '101':
           description: Switching Protocols

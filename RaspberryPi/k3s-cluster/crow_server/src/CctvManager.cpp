@@ -41,10 +41,6 @@ void CctvManager::initSsl() {
         std::cerr << "[CCTV] Failed to load client key: " << key_path_ << std::endl;
     }
 
-    if (!SSL_CTX_check_private_key(ssl_ctx_)) {
-        std::cerr << "[CCTV] Private key does not match the certificate" << std::endl;
-    }
-
     SSL_CTX_set_verify(ssl_ctx_, SSL_VERIFY_PEER, nullptr);
 }
 
@@ -55,28 +51,31 @@ void CctvManager::cleanupSsl() {
     }
 }
 
+bool CctvManager::readExact(void* buf, size_t len) {
+    size_t total_read = 0;
+    char* p = static_cast<char*>(buf);
+    while (total_read < len && !stop_thread_) {
+        int r = SSL_read(ssl_, p + total_read, len - total_read);
+        if (r <= 0) return false;
+        total_read += r;
+    }
+    return total_read == len;
+}
+
 bool CctvManager::connect() {
     std::lock_guard<std::mutex> lock(socket_mutex_);
     if (connected_) return true;
 
     socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_fd_ < 0) {
-        std::cerr << "[CCTV] Failed to create socket" << std::endl;
-        return false;
-    }
+    if (socket_fd_ < 0) return false;
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_);
-    if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) <= 0) {
-        std::cerr << "[CCTV] Invalid address: " << host_ << std::endl;
-        close(socket_fd_);
-        return false;
-    }
+    inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr);
 
     if (::connect(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        std::cerr << "[CCTV] Failed to connect to " << host_ << ":" << port_ << std::endl;
         close(socket_fd_);
         return false;
     }
@@ -85,8 +84,6 @@ bool CctvManager::connect() {
     SSL_set_fd(ssl_, socket_fd_);
 
     if (SSL_connect(ssl_) <= 0) {
-        std::cerr << "[CCTV] SSL handshake failed" << std::endl;
-        ERR_print_errors_fp(stderr);
         SSL_free(ssl_);
         close(socket_fd_);
         return false;
@@ -95,29 +92,18 @@ bool CctvManager::connect() {
     connected_ = true;
     stop_thread_ = false;
     reader_thread_ = std::thread(&CctvManager::streamLoop, this);
-    
-    std::cout << "[CCTV] Connected to " << host_ << ":" << port_ << " with mTLS" << std::endl;
     return true;
 }
 
 void CctvManager::disconnect() {
     stop_thread_ = true;
-    if (reader_thread_.joinable()) {
-        reader_thread_.join();
-    }
+    if (reader_thread_.joinable()) reader_thread_.join();
 
     std::lock_guard<std::mutex> lock(socket_mutex_);
-    if (ssl_) {
-        SSL_shutdown(ssl_);
-        SSL_free(ssl_);
-        ssl_ = nullptr;
-    }
-    if (socket_fd_ >= 0) {
-        close(socket_fd_);
-        socket_fd_ = -1;
-    }
+    if (ssl_) { SSL_shutdown(ssl_); SSL_free(ssl_); ssl_ = nullptr; }
+    if (socket_fd_ >= 0) { close(socket_fd_); socket_fd_ = -1; }
     connected_ = false;
-    streaming_ = false;
+    stream_mode_ = CctvStreamMode::NONE;
 }
 
 std::string CctvManager::sendCommand(const std::string& command) {
@@ -125,68 +111,57 @@ std::string CctvManager::sendCommand(const std::string& command) {
 
     std::lock_guard<std::mutex> lock(socket_mutex_);
     std::string full_cmd = command + "\n";
-    int ret = SSL_write(ssl_, full_cmd.c_str(), full_cmd.length());
-    if (ret <= 0) {
-        connected_ = false;
-        return "Error: SSL_write failed";
-    }
+    SSL_write(ssl_, full_cmd.c_str(), full_cmd.length());
 
     if (command == "pc_stream") {
-        streaming_ = true;
+        stream_mode_ = CctvStreamMode::PC_IMAGE;
         return "OK pc_stream";
+    } else if (command == "rgbd_stream") {
+        stream_mode_ = CctvStreamMode::RGBD_RAW;
+        return "OK rgbd_stream";
     }
 
-    // 간단한 명령 응답 읽기 (필요 시)
     char buf[1024];
     int n = SSL_read(ssl_, buf, sizeof(buf) - 1);
-    if (n > 0) {
-        buf[n] = '\0';
-        return std::string(buf);
-    }
-
+    if (n > 0) { buf[n] = '\0'; return std::string(buf); }
     return "OK";
 }
 
 void CctvManager::streamLoop() {
     while (!stop_thread_) {
-        if (!streaming_) {
+        if (stream_mode_ == CctvStreamMode::NONE) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
-        FrameHeader header;
-        int n = 0;
-        {
-            std::lock_guard<std::mutex> lock(socket_mutex_);
-            n = SSL_read(ssl_, &header, sizeof(header));
+        std::vector<uint8_t> full_data;
+        size_t header_size = (stream_mode_ == CctvStreamMode::PC_IMAGE) ? sizeof(FrameHeader) : sizeof(RgbdHeader);
+        full_data.resize(header_size);
+
+        // 1. 헤더 읽기
+        if (!readExact(full_data.data(), header_size)) {
+            connected_ = false; break;
         }
 
-        if (n <= 0) {
-            std::cerr << "[CCTV] Read error or connection closed" << std::endl;
-            connected_ = false;
-            streaming_ = false;
-            break;
+        // 2. 페이로드 크기 계산
+        size_t payload_total = 0;
+        if (stream_mode_ == CctvStreamMode::PC_IMAGE) {
+            payload_total = reinterpret_cast<FrameHeader*>(full_data.data())->payload_size;
+        } else {
+            auto h = reinterpret_cast<RgbdHeader*>(full_data.data());
+            payload_total = h->depth_size + h->bgr_size;
         }
 
-        if (n < (int)sizeof(header)) {
-            // 헤더가 한 번에 다 안 읽힌 경우 처리 (단순화를 위해 여기서는 로그만)
-            continue;
-        }
-
-        std::vector<uint8_t> payload(header.payload_size);
-        int total_read = 0;
-        while (total_read < (int)header.payload_size && !stop_thread_) {
-            int r = 0;
-            {
-                std::lock_guard<std::mutex> lock(socket_mutex_);
-                r = SSL_read(ssl_, payload.data() + total_read, header.payload_size - total_read);
+        // 3. 페이로드 읽기
+        if (payload_total > 0) {
+            size_t current_size = full_data.size();
+            full_data.resize(current_size + payload_total);
+            if (!readExact(full_data.data() + current_size, payload_total)) {
+                connected_ = false; break;
             }
-            if (r <= 0) break;
-            total_read += r;
         }
 
-        if (total_read == (int)header.payload_size && stream_cb_) {
-            stream_cb_(header, payload);
-        }
+        // 4. 콜백 호출
+        if (stream_cb_) stream_cb_(full_data);
     }
 }
