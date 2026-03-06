@@ -299,6 +299,140 @@ paths:
           description: Unauthorized
         '502':
           description: Upstream error
+  /api/sunapi/playback/session:
+    get:
+      summary: Create playback RTSP-over-WS session payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "2026-03-06"
+        - name: time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "13:36:18"
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: Session payload generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Uri:
+                    type: string
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+                  Response:
+                    type: string
+                  Username:
+                    type: string
+                  Cnonce:
+                    type: string
+                  Nc:
+                    type: string
+                  Method:
+                    type: string
+                  WsPath:
+                    type: string
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '500':
+          description: Server config error
+        '502':
+          description: Upstream error
+  /api/sunapi/export/session:
+    get:
+      summary: Create export RTSP-over-WS session payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "2026-03-06"
+        - name: start_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "13:36:18"
+        - name: end_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "13:41:18"
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: Session payload generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Uri:
+                    type: string
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+                  Response:
+                    type: string
+                  Username:
+                    type: string
+                  Cnonce:
+                    type: string
+                  Nc:
+                    type: string
+                  Method:
+                    type: string
+                  WsPath:
+                    type: string
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '500':
+          description: Server config error
+        '502':
+          description: Upstream error
   /api/sunapi/playback/digestauth:
     get:
       summary: Build digest response for playback RTSP over WS

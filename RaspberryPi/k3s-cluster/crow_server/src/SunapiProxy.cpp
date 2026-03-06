@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <regex>
+#include <random>
 #include <sstream>
 #include <string>
 
@@ -81,6 +82,64 @@ std::string makeQuery(const std::initializer_list<std::pair<std::string, std::st
         oss << urlEncode(kv.first) << "=" << urlEncode(kv.second);
     }
     return oss.str();
+}
+
+std::string normalizeWsPath(std::string path) {
+    if (path.empty()) {
+        path = "/StreamingServer";
+    }
+    if (!path.empty() && path.front() != '/') {
+        path.insert(path.begin(), '/');
+    }
+    return path;
+}
+
+std::string resolveRtspHost() {
+    std::string rtspHost = envOrDefault("SUNAPI_RTSP_HOST", "");
+    if (!rtspHost.empty()) {
+        return rtspHost;
+    }
+
+    const std::string base = trimTrailingSlash(envOrDefault("SUNAPI_BASE_URL", ""));
+    static const std::regex baseRe("^(https?)://([^/:]+)(?::([0-9]+))?$", std::regex_constants::icase);
+    std::smatch m;
+    if (std::regex_match(base, m, baseRe) && m.size() > 2) {
+        return m[2].str();
+    }
+    return {};
+}
+
+bool toCompactDateTime(const std::string& dateTimeText, std::string* compact) {
+    static const std::regex dtRe("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$");
+    if (!std::regex_match(dateTimeText, dtRe)) {
+        return false;
+    }
+    std::string out;
+    out.reserve(14);
+    for (char c : dateTimeText) {
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            out.push_back(c);
+        }
+    }
+    if (out.size() != 14) {
+        return false;
+    }
+    if (compact) {
+        *compact = out;
+    }
+    return true;
+}
+
+std::string randomHexString(std::size_t length) {
+    static thread_local std::mt19937 rng(std::random_device{}());
+    static const char* hex = "0123456789ABCDEF";
+    std::uniform_int_distribution<int> dist(0, 15);
+    std::string out;
+    out.reserve(length);
+    for (std::size_t i = 0; i < length; ++i) {
+        out.push_back(hex[dist(rng)]);
+    }
+    return out;
 }
 
 bool isLeapYear(int y) {
@@ -277,6 +336,65 @@ crow::response forwardToSunapi(const crow::request& req, const std::string& forw
         res.set_header("Content-Type", responseContentType);
     }
     return res;
+}
+
+bool requestDigestResponse(const crow::request& req,
+                           const std::string& method,
+                           const std::string& realm,
+                           const std::string& nonce,
+                           const std::string& uri,
+                           const std::string& nc,
+                           const std::string& cnonce,
+                           std::string* digestResponse,
+                           std::string* usernameOut,
+                           std::string* error,
+                           int* errorCode) {
+    const std::string username = envOrDefault("SUNAPI_USER", "");
+    if (username.empty()) {
+        if (error) *error = "SUNAPI_USER is not configured";
+        if (errorCode) *errorCode = 500;
+        return false;
+    }
+
+    const std::string q = makeQuery({
+        {"msubmenu", "digestauth"},
+        {"action", "view"},
+        {"Method", method},
+        {"Realm", realm},
+        {"Nonce", nonce},
+        {"Uri", uri},
+        {"username", username},
+        {"password", ""},
+        {"Nc", nc},
+        {"Cnonce", cnonce}
+    });
+
+    crow::response forwarded = forwardToSunapi(req, "/stw-cgi/security.cgi?" + q);
+    if (forwarded.code < 200 || forwarded.code >= 300) {
+        if (errorCode) *errorCode = forwarded.code;
+        if (error) {
+            *error = forwarded.body.empty() ? "digestauth forward failed" : forwarded.body;
+        }
+        return false;
+    }
+
+    auto parsed = crow::json::load(forwarded.body);
+    if (!parsed || !parsed.has("Response")) {
+        if (errorCode) *errorCode = 502;
+        if (error) *error = "digest response parse failed";
+        return false;
+    }
+
+    const std::string response = parsed["Response"].s();
+    if (response.empty()) {
+        if (errorCode) *errorCode = 502;
+        if (error) *error = "digest response is empty";
+        return false;
+    }
+
+    if (digestResponse) *digestResponse = response;
+    if (usernameOut) *usernameOut = username;
+    return true;
 }
 
 std::string buildExportForwardPath(const crow::request& req,
@@ -607,15 +725,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
             return crow::response(400, "invalid rtsp_port range");
         }
 
-        std::string rtspHost = envOrDefault("SUNAPI_RTSP_HOST", "");
-        if (rtspHost.empty()) {
-            const std::string base = trimTrailingSlash(envOrDefault("SUNAPI_BASE_URL", ""));
-            static const std::regex baseRe("^(https?)://([^/:]+)(?::([0-9]+))?$", std::regex_constants::icase);
-            std::smatch m;
-            if (std::regex_match(base, m, baseRe) && m.size() > 2) {
-                rtspHost = m[2].str();
-            }
-        }
+        std::string rtspHost = resolveRtspHost();
         if (rtspHost.empty()) {
             return crow::response(500, "SUNAPI_RTSP_HOST or SUNAPI_BASE_URL host is not configured");
         }
@@ -675,5 +785,173 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
             res.set_header("X-SUNAPI-USER", username);
         }
         return res;
+    });
+
+    CROW_ROUTE(app, "/api/sunapi/playback/session")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        if (!isAuthorized(req)) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        const char* ch = req.url_params.get("channel");
+        const char* date = req.url_params.get("date");
+        const char* time = req.url_params.get("time");
+        if (!ch || !date || !time) {
+            return crow::response(400, "missing query: channel, date, time");
+        }
+
+        int channel = -1;
+        try {
+            channel = std::stoi(ch);
+        } catch (...) {
+            return crow::response(400, "invalid channel");
+        }
+        if (channel < 0) {
+            return crow::response(400, "invalid channel range");
+        }
+
+        std::string compactTs;
+        if (!toCompactDateTime(std::string(date) + " " + std::string(time), &compactTs)) {
+            return crow::response(400, "invalid date/time format");
+        }
+
+        int rtspPort = 554;
+        const char* portStr = req.url_params.get("rtsp_port");
+        if (portStr) {
+            try {
+                rtspPort = std::stoi(portStr);
+            } catch (...) {
+                return crow::response(400, "invalid rtsp_port");
+            }
+        }
+        if (rtspPort <= 0 || rtspPort > 65535) {
+            return crow::response(400, "invalid rtsp_port range");
+        }
+
+        const std::string rtspHost = resolveRtspHost();
+        if (rtspHost.empty()) {
+            return crow::response(500, "SUNAPI_RTSP_HOST or SUNAPI_BASE_URL host is not configured");
+        }
+
+        const std::string uri = "rtsp://" + rtspHost + ":" + std::to_string(rtspPort)
+                              + "/" + std::to_string(channel) + "/recording/" + compactTs + "/play.smp";
+
+        std::string realm;
+        std::string nonce;
+        std::string challengeErr;
+        if (!fetchRtspDigestChallenge(rtspHost, rtspPort, uri, &realm, &nonce, &challengeErr)) {
+            return crow::response(502, std::string("RTSP challenge failed: ") + challengeErr);
+        }
+
+        const std::string method = "OPTIONS";
+        const std::string nc = "00000001";
+        const std::string cnonce = randomHexString(8);
+        std::string digestResponse;
+        std::string username;
+        std::string digestErr;
+        int digestErrCode = 502;
+        if (!requestDigestResponse(req, method, realm, nonce, uri, nc, cnonce,
+                                   &digestResponse, &username, &digestErr, &digestErrCode)) {
+            return crow::response(digestErrCode, digestErr);
+        }
+
+        crow::json::wvalue out;
+        out["Uri"] = uri;
+        out["Realm"] = realm;
+        out["Nonce"] = nonce;
+        out["Method"] = method;
+        out["Nc"] = nc;
+        out["Cnonce"] = cnonce;
+        out["Response"] = digestResponse;
+        out["Username"] = username;
+        out["WsPath"] = normalizeWsPath(envOrDefault("SUNAPI_STREAMING_WS_PATH", "/StreamingServer"));
+        return crow::response(200, out);
+    });
+
+    CROW_ROUTE(app, "/api/sunapi/export/session")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        if (!isAuthorized(req)) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        const char* ch = req.url_params.get("channel");
+        const char* date = req.url_params.get("date");
+        const char* startTime = req.url_params.get("start_time");
+        const char* endTime = req.url_params.get("end_time");
+        if (!ch || !date || !startTime || !endTime) {
+            return crow::response(400, "missing query: channel, date, start_time, end_time");
+        }
+
+        int channel = -1;
+        try {
+            channel = std::stoi(ch);
+        } catch (...) {
+            return crow::response(400, "invalid channel");
+        }
+        if (channel < 0) {
+            return crow::response(400, "invalid channel range");
+        }
+
+        std::string tsStart;
+        std::string tsEnd;
+        if (!toCompactDateTime(std::string(date) + " " + std::string(startTime), &tsStart)
+            || !toCompactDateTime(std::string(date) + " " + std::string(endTime), &tsEnd)) {
+            return crow::response(400, "invalid date/time format");
+        }
+
+        int rtspPort = 554;
+        const char* portStr = req.url_params.get("rtsp_port");
+        if (portStr) {
+            try {
+                rtspPort = std::stoi(portStr);
+            } catch (...) {
+                return crow::response(400, "invalid rtsp_port");
+            }
+        }
+        if (rtspPort <= 0 || rtspPort > 65535) {
+            return crow::response(400, "invalid rtsp_port range");
+        }
+
+        const std::string rtspHost = resolveRtspHost();
+        if (rtspHost.empty()) {
+            return crow::response(500, "SUNAPI_RTSP_HOST or SUNAPI_BASE_URL host is not configured");
+        }
+
+        const std::string uri = "rtsp://" + rtspHost + "/"
+                              + std::to_string(channel) + "/recording/"
+                              + tsStart + "-" + tsEnd + "/OverlappedID=0/backup.smp";
+
+        std::string realm;
+        std::string nonce;
+        std::string challengeErr;
+        if (!fetchRtspDigestChallenge(rtspHost, rtspPort, uri, &realm, &nonce, &challengeErr)) {
+            return crow::response(502, std::string("RTSP challenge failed: ") + challengeErr);
+        }
+
+        const std::string method = "OPTIONS";
+        const std::string nc = "00000001";
+        const std::string cnonce = randomHexString(8);
+        std::string digestResponse;
+        std::string username;
+        std::string digestErr;
+        int digestErrCode = 502;
+        if (!requestDigestResponse(req, method, realm, nonce, uri, nc, cnonce,
+                                   &digestResponse, &username, &digestErr, &digestErrCode)) {
+            return crow::response(digestErrCode, digestErr);
+        }
+
+        crow::json::wvalue out;
+        out["Uri"] = uri;
+        out["Realm"] = realm;
+        out["Nonce"] = nonce;
+        out["Method"] = method;
+        out["Nc"] = nc;
+        out["Cnonce"] = cnonce;
+        out["Response"] = digestResponse;
+        out["Username"] = username;
+        out["WsPath"] = normalizeWsPath(envOrDefault("SUNAPI_STREAMING_WS_PATH", "/StreamingServer"));
+        return crow::response(200, out);
     });
 }
