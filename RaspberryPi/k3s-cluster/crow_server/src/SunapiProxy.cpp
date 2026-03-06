@@ -1,11 +1,13 @@
 #include "../include/SunapiProxy.h"
 
 #include <curl/curl.h>
+#include <boost/asio.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <string>
 
@@ -13,6 +15,9 @@
 extern bool verifyJWT(const std::string& token);
 
 namespace {
+
+namespace asio = boost::asio;
+using tcp = asio::ip::tcp;
 
 std::string envOrDefault(const char* key, const std::string& defaultValue) {
     const char* value = std::getenv(key);
@@ -116,6 +121,65 @@ bool isAuthorized(const crow::request& req) {
     const std::string auth = req.get_header_value("Authorization");
     if (!(auth.size() > 7 && auth.rfind("Bearer ", 0) == 0)) return false;
     return verifyJWT(auth.substr(7));
+}
+
+bool fetchRtspDigestChallenge(const std::string& host,
+                              int port,
+                              const std::string& uri,
+                              std::string* realm,
+                              std::string* nonce,
+                              std::string* error) {
+    try {
+        asio::io_context io;
+        tcp::resolver resolver(io);
+        tcp::socket socket(io);
+        auto endpoints = resolver.resolve(host, std::to_string(port));
+        asio::connect(socket, endpoints);
+
+        std::string req;
+        req += "OPTIONS " + uri + " RTSP/1.0\r\n";
+        req += "CSeq: 1\r\n";
+        req += "User-Agent: Crow-SUNAPI\r\n";
+        req += "\r\n";
+        asio::write(socket, asio::buffer(req));
+
+        std::string resp;
+        boost::system::error_code ec;
+        char buf[4096];
+        for (;;) {
+            std::size_t n = socket.read_some(asio::buffer(buf), ec);
+            if (n > 0) {
+                resp.append(buf, n);
+            }
+            if (ec == asio::error::eof) break;
+            if (ec) break;
+            if (resp.find("\r\n\r\n") != std::string::npos) break;
+            if (resp.size() > 32768) break;
+        }
+
+        static const std::regex realmRe(R"(realm\s*=\s*"([^"]+)")", std::regex::icase);
+        static const std::regex nonceRe(R"(nonce\s*=\s*"([^"]+)")", std::regex::icase);
+        std::smatch m;
+        std::string localRealm;
+        std::string localNonce;
+        if (std::regex_search(resp, m, realmRe) && m.size() > 1) {
+            localRealm = m[1].str();
+        }
+        if (std::regex_search(resp, m, nonceRe) && m.size() > 1) {
+            localNonce = m[1].str();
+        }
+
+        if (localRealm.empty() || localNonce.empty()) {
+            if (error) *error = "realm/nonce parse failed";
+            return false;
+        }
+        if (realm) *realm = localRealm;
+        if (nonce) *nonce = localNonce;
+        return true;
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        return false;
+    }
 }
 
 crow::response forwardToSunapi(const crow::request& req, const std::string& forwardPathWithQuery) {
@@ -326,6 +390,62 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
             {"OverlappedID", "0"}
         });
         return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
+    });
+
+    // Crow 고정 스펙: Playback RTSP challenge 조회
+    CROW_ROUTE(app, "/api/sunapi/playback/challenge")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        if (!isAuthorized(req)) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        const char* uri = req.url_params.get("uri");
+        if (!uri || std::string(uri).empty()) {
+            return crow::response(400, "missing query: uri");
+        }
+
+        int rtspPort = 554;
+        const char* portStr = req.url_params.get("rtsp_port");
+        if (portStr) {
+            try {
+                rtspPort = std::stoi(portStr);
+            } catch (...) {
+                return crow::response(400, "invalid rtsp_port");
+            }
+        }
+        if (rtspPort <= 0 || rtspPort > 65535) {
+            return crow::response(400, "invalid rtsp_port range");
+        }
+
+        std::string rtspHost = envOrDefault("SUNAPI_RTSP_HOST", "");
+        if (rtspHost.empty()) {
+            const std::string base = trimTrailingSlash(envOrDefault("SUNAPI_BASE_URL", ""));
+            static const std::regex baseRe(R"(^(https?)://([^/:]+)(?::([0-9]+))?$)", std::regex::icase);
+            std::smatch m;
+            if (std::regex_match(base, m, baseRe) && m.size() > 2) {
+                rtspHost = m[2].str();
+            }
+        }
+        if (rtspHost.empty()) {
+            return crow::response(500, "SUNAPI_RTSP_HOST or SUNAPI_BASE_URL host is not configured");
+        }
+
+        std::string realm;
+        std::string nonce;
+        std::string err;
+        if (!fetchRtspDigestChallenge(rtspHost, rtspPort, uri, &realm, &nonce, &err)) {
+            return crow::response(502, std::string("RTSP challenge failed: ") + err);
+        }
+
+        crow::json::wvalue out;
+        out["Realm"] = realm;
+        out["Nonce"] = nonce;
+        crow::response res;
+        res.code = 200;
+        res.set_header("Content-Type", "application/json");
+        res.write(out.dump());
+        return res;
     });
 
     // Crow 고정 스펙: Playback digestauth response 생성
