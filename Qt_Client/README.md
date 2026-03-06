@@ -95,7 +95,6 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_HOST`, `SUNAPI_RTSP_PORT`
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
   - `SUNAPI_STORAGE_CGI`, `SUNAPI_STORAGE_SUBMENU`, `SUNAPI_STORAGE_ACTION`, `SUNAPI_STORAGE_QUERY`
-  - `SUNAPI_EXPORT_CREATE_*`, `SUNAPI_EXPORT_POLL_*`, `SUNAPI_EXPORT_DOWNLOAD_*`
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
   - `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP` (608 장비에서 ffmpeg 백업 사용 여부)
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
@@ -123,6 +122,9 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
 | `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |
 | `POST` | `/api/sunapi/ptz/focus` | PTZ/Focus 제어 (`zoom_*`, `focus_*`, `autofocus`) |
+| `GET` | `/api/sunapi/export/create` | Playback Export 작업 생성 |
+| `GET` | `/api/sunapi/export/status` | Playback Export 상태 조회 |
+| `GET` | `/api/sunapi/export/download` | Playback Export 파일 다운로드 |
 | `GET` | `/api/sunapi/playback/challenge` | Playback RTSP challenge 조회 |
 | `GET` | `/api/sunapi/playback/digestauth` | Playback digest response 조회 |
 
@@ -137,11 +139,12 @@ ffmpeg 배치/버전 관리:
   - Playback digestauth: Qt direct CGI 조합 -> Crow `/api/sunapi/playback/digestauth`
   - Export WS 준비 challenge 경로: Qt direct TCP -> Crow API
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
+  - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
 
 - 현재 상태
-  - Qt는 Playback/Export 준비 + PTZ/Focus에서 Crow API를 사용합니다.
-  - 다만 전체 direct 제거는 진행 중이며, Export/RTSP 일부 경로는 아직 `SUNAPI_USER/SUNAPI_PASSWORD`를 참조합니다.
+  - Qt는 Playback/Export 준비 + PTZ/Focus + Export HTTP에서 Crow API를 사용합니다.
+  - 다만 전체 direct 제거는 진행 중이며, RTSP 관련 일부 경로는 아직 `SUNAPI_USER/SUNAPI_PASSWORD`를 참조합니다.
 
 - 최종 목표
   - Qt는 Crow API + Bearer 토큰만 사용
