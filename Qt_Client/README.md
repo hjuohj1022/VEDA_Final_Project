@@ -130,7 +130,6 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 - SUNAPI/Playback
   - `SUNAPI_RTSP_PORT`
   - `SUNAPI_STREAMING_WS_PATH` (세션 API 응답 WsPath가 없을 때 fallback)
-  - `SUNAPI_RTSP_HOST`, `SUNAPI_IP` (선택: `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=1`일 때 ffmpeg 백업 경로에서만 사용)
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
   - Storage 조회는 Crow 고정 API `GET /api/sunapi/storage` 사용
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`

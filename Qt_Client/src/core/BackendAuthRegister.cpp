@@ -54,11 +54,18 @@ void Backend::registerUser(QString id, QString pw) {
             registerTimeout->stop();
         }
 
-        qWarning() << "[REGISTER] status=" << statusCode
-                   << "netError=" << static_cast<int>(netError)
-                   << "timedOut=" << timedOut
-                   << "timeoutMs=" << timeoutMs
-                   << "errorString=" << reply->errorString();
+        if (netError == QNetworkReply::NoError) {
+            qWarning() << "[REGISTER] status=" << statusCode
+                       << "netError=" << static_cast<int>(netError)
+                       << "timedOut=" << timedOut
+                       << "timeoutMs=" << timeoutMs;
+        } else {
+            qWarning() << "[REGISTER] status=" << statusCode
+                       << "netError=" << static_cast<int>(netError)
+                       << "timedOut=" << timedOut
+                       << "timeoutMs=" << timeoutMs
+                       << "errorString=" << reply->errorString();
+        }
 
         if (reply->error() == QNetworkReply::NoError) {
             emit registerSuccess(QString("회원가입 완료: %1").arg(trimmedId));
