@@ -14,7 +14,8 @@ Item {
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     
     property bool isLoggedIn: backend.isLoggedIn
-
+    signal requestReturnLiveView()
+    
     function triggerSignIn() {
         if (root.signupMode || backend.loginLocked) {
             return
@@ -337,12 +338,12 @@ Item {
         }
     }
     
-    // 로그인 후 화면 (좌: 녹화 목록, 우: 플레이어)
+    // 로그인 이후 화면 (열화상 패널)
     RowLayout {
         anchors.fill: parent
         visible: root.isLoggedIn
         spacing: 16
-        
+
         Rectangle {
             Layout.preferredWidth: 300
             Layout.fillHeight: true
@@ -350,26 +351,26 @@ Item {
             radius: 8
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
-            
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 12
                 spacing: 12
-                
+
                 RowLayout {
                     Layout.fillWidth: true
-                    
+
                     Text {
-                        text: "Recordings"
+                        text: "Thermal Panel"
                         color: theme ? theme.textPrimary : "white"
                         font.bold: true
                         font.pixelSize: 18
                     }
-                    
+
                     Item { Layout.fillWidth: true }
-                    
+
                     Button {
-                        text: "Refresh"
+                        text: backend.thermalStreaming ? "Stop" : "Start"
                         scale: down ? 0.97 : 1.0
                         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                         background: Rectangle {
@@ -378,24 +379,29 @@ Item {
                             border.color: theme ? theme.border : "#27272a"
                         }
                         contentItem: Text { text: parent.text; color: theme ? theme.textSecondary : "#a1a1aa"; anchors.centerIn: parent }
-                        onClicked: backend.refreshRecordings()
+                        onClicked: {
+                            if (backend.thermalStreaming)
+                                backend.stopThermalStream()
+                            else
+                                backend.startThermalStream()
+                        }
                         ToolTip.visible: hovered
-                        ToolTip.text: "Refresh recordings"
+                        ToolTip.text: "열화상 스트림 시작/중지"
                     }
                 }
-                
+
                 Button {
                     Layout.fillWidth: true
                     height: 36
                     text: "Return to Live View"
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                    
+
                     background: Rectangle {
                         color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
                         radius: 6
                     }
-                    
+
                     contentItem: Text {
                         text: parent.text
                         color: "white"
@@ -403,255 +409,168 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-                    
-                    onClicked: stackLayout.currentIndex = 0
+
+                    onClicked: root.requestReturnLiveView()
                 }
 
-                // 녹화 파일 목록
-                ListView {
-                    id: recordList
+                Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    clip: true
-                    flickableDirection: Flickable.VerticalFlick
-                    boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar {
-                        id: recordingsScrollBar
-                        policy: ScrollBar.AsNeeded
-                        width: 14
-                        minimumSize: 0.12
-                        contentItem: Rectangle {
-                            implicitWidth: 14
-                            radius: 7
-                            color: parent.pressed
-                                   ? (theme ? theme.accent : "#f97316")
-                                   : (theme ? theme.border : "#52525b")
+                    color: theme ? theme.bgSecondary : "#0f172a"
+                    radius: 8
+                    border.color: theme ? theme.border : "#27272a"
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 10
+
+                        Text {
+                            text: "Thermal Controls"
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            font.pixelSize: 14
                         }
-                        background: Rectangle {
-                            implicitWidth: 14
-                            radius: 7
-                            color: theme ? theme.bgSecondary : "#0f172a"
-                            opacity: 0.9
-                        }
-                    }
-                    
-                    model: ListModel { id: filesModel }
-                    
-                    delegate: Rectangle {
-                        width: recordList.width
-                        height: 40
-                        color: itemMouseArea.pressed
-                               ? (recordList.currentIndex === index
-                                  ? "#ea580c"
-                                  : (darkTheme ? "#3f3f46" : "#e2e8f0"))
-                               : (recordList.currentIndex === index
-                                  ? (theme ? theme.accent : "#f97316")
-                                  : (itemMouseArea.containsMouse
-                                     ? (darkTheme ? "#27272a" : "#f1f5f9")
-                                     : (index % 2 == 0 ? "transparent" : (theme ? theme.bgComponent : "#18181b"))))
-                        radius: 4
-                        scale: itemMouseArea.pressed ? 0.985 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                        
-                            MouseArea {
-                                id: itemMouseArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                preventStealing: false
-                                propagateComposedEvents: true
-                                property real pressX: 0
-                                property real pressY: 0
-                                property bool dragDetected: false
-                                
-                                
-                                onPressed: (mouse) => {
-                                    pressX = mouse.x
-                                    pressY = mouse.y
-                                    dragDetected = false
-                                    if (mouse.button === Qt.LeftButton) {
-                                        recordList.currentIndex = index
-                                    }
-                                }
-                                onPositionChanged: (mouse) => {
-                                    if (!pressed || dragDetected)
-                                        return
-                                    if (Math.abs(mouse.x - pressX) > 8 || Math.abs(mouse.y - pressY) > 8) {
-                                        dragDetected = true
-                                        // 리스트뷰 드래그-플릭 스크롤 처리 위임
-                                        mouse.accepted = false
-                                    }
-                                }
-                                onClicked: (mouse) => {
-                                    if (dragDetected)
-                                        return
-                                    if (mouse.button === Qt.RightButton) {
-                                        recordList.currentIndex = index
-                                        contextMenu.popup()
-                                    }
-                                }
-                                onDoubleClicked: {
-                                    if (dragDetected)
-                                        return
-                                    console.log("Double click detected for:", model.fileName)
-                                    root.playVideo(model.fileName)
-                                }
-                                
-                                // 항목 우클릭 메뉴
-                                Menu {
-                                    id: contextMenu
-                                    MenuItem {
-                                        text: "Rename"
-                                        onTriggered: {
-                                            renameDialog.currentFileName = model.fileName
-                                            renameDialog.open()
-                                        }
-                                    }
-                                    MenuItem {
-                                        text: "Export"
-                                        onTriggered: {
-                                            fileDialog.currentFile = "file:///" + model.fileName
-                                            fileDialog.selectedFileName = model.fileName
-                                            fileDialog.open()
-                                        }
-                                    }
-                                    MenuItem {
-                                        text: "Delete"
-                                        onTriggered: {
-                                            root.pendingDeleteFileName = model.fileName
-                                            deleteDialog.open()
-                                        }
-                                    }
-                                }
-                            }
-                        
+
                         RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: (recordingsScrollBar.visible ? (recordingsScrollBar.width + 10) : 8)
+                            Layout.fillWidth: true
+                            spacing: 8
                             Text {
-                                text: model.fileName
-                                color: recordList.currentIndex === index ? "white" : (theme ? theme.textPrimary : "white")
-                                font.bold: recordList.currentIndex === index
+                                text: "Palette"
+                                color: theme ? theme.textSecondary : "#a1a1aa"
+                                Layout.preferredWidth: 72
+                            }
+                            ComboBox {
+                                id: paletteCombo
                                 Layout.fillWidth: true
-                                elide: Text.ElideRight
+                                model: ["Gray", "Iron", "Jet"]
+                                Component.onCompleted: {
+                                    var idx = model.indexOf(backend.thermalPalette)
+                                    currentIndex = idx >= 0 ? idx : 2
+                                }
+                                onActivated: backend.setThermalPalette(currentText)
                             }
-                            
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
                             Text {
-                                text: model.fileSize > 0 ? formatBytes(model.fileSize) : ""
-                                color: recordList.currentIndex === index ? "#fff7ed" : (theme ? theme.textSecondary : "#a1a1aa")
-                                font.pixelSize: 12
-                                visible: model.fileSize > 0
+                                text: "Auto Range"
+                                color: theme ? theme.textSecondary : "#a1a1aa"
+                                Layout.fillWidth: true
                             }
-
-
-                        }
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "No recordings found"
-                        visible: recordList.count === 0 && backend.isLoggedIn
-                        color: theme ? theme.textSecondary : "#71717a"
-                    }
-
-                    Connections {
-                        target: backend
-                        function onRecordingsLoaded(files) {
-                            filesModel.clear()
-                            for(var i=0; i<files.length; i++) {
-                                var file = files[i]
-                                var name = file.name || file
-                                var size = file.size || 0
-                                filesModel.append({
-                                    fileName: name,
-                                    fileSize: size
-                                })
+                            Switch {
+                                checked: backend.thermalAutoRange
+                                onToggled: backend.setThermalAutoRange(checked)
                             }
                         }
+
+                        Text {
+                            text: "Auto Window: " + backend.thermalAutoRangeWindowPercent + "%"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            visible: backend.thermalAutoRange
+                        }
+                        Slider {
+                            id: autoWindowSlider
+                            Layout.fillWidth: true
+                            from: 50
+                            to: 100
+                            stepSize: 1
+                            enabled: backend.thermalAutoRange
+                            visible: backend.thermalAutoRange
+                            value: backend.thermalAutoRangeWindowPercent
+                            onMoved: backend.setThermalAutoRangeWindowPercent(Math.round(value))
+                        }
+
+                        Text {
+                            text: "Min: " + backend.thermalManualMin
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                        }
+                        Slider {
+                            id: minSlider
+                            Layout.fillWidth: true
+                            from: 0
+                            to: 30000
+                            stepSize: 10
+                            enabled: !backend.thermalAutoRange
+                            value: backend.thermalManualMin
+                            onMoved: backend.setThermalManualRange(value, maxSlider.value)
+                        }
+
+                        Text {
+                            text: "Max: " + backend.thermalManualMax
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                        }
+                        Slider {
+                            id: maxSlider
+                            Layout.fillWidth: true
+                            from: 100
+                            to: 35000
+                            stepSize: 10
+                            enabled: !backend.thermalAutoRange
+                            value: backend.thermalManualMax
+                            onMoved: backend.setThermalManualRange(minSlider.value, value)
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 6
+                            color: "transparent"
+                            border.color: theme ? theme.border : "#27272a"
+                            border.width: 1
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 4
+                                Text {
+                                    text: "Emissivity (추후 확장)"
+                                    color: theme ? theme.textSecondary : "#a1a1aa"
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    text: "Ambient (추후 확장)"
+                                    color: theme ? theme.textSecondary : "#a1a1aa"
+                                    font.pixelSize: 12
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillHeight: true }
                     }
                 }
             }
         }
-        
+
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: "black"
-            
-            VideoOutput {
-                id: recordVideoOut
+
+            Image {
                 anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectFit
+                anchors.margins: 8
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                cache: false
+                source: backend.thermalFrameDataUrl
             }
-            
-            MediaPlayer {
-                id: player
-                videoOutput: recordVideoOut
-            }
-            
+
             Rectangle {
-                width: parent.width
-                height: 80
+                anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.bottom: parent.bottom
+                height: 40
                 color: "#18181b"
                 border.color: "#27272a"
                 border.width: 1
-                
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 16
-                    
-                    Rectangle {
-                        width: 40; height: 40
-                        radius: 20
-                        color: "#27272a"
-                        border.color: "#3f3f46"
-                        border.width: 1
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: player.playbackState === MediaPlayer.PlayingState ? "II" : ">"
-                            color: "white"
-                            font.pixelSize: 18
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: player.playbackState === MediaPlayer.PlayingState ? player.pause() : player.play()
-                        }
-                    }
-                    
-                    Text {
-                        text: formatTime(player.position)
-                        color: "#a1a1aa"
-                        font.family: "monospace"
-                    }
-                    
-                    Slider {
-                        id: seekSlider
-                        Layout.fillWidth: true
-                        from: 0
-                        to: player.duration
-                        value: player.position
-                        onMoved: player.position = value
-                        
-                        handle: Rectangle {
-                            x: seekSlider.leftPadding + seekSlider.visualPosition * (seekSlider.availableWidth - width)
-                            y: seekSlider.topPadding + seekSlider.availableHeight / 2 - height / 2
-                            width: 16; height: 16
-                            radius: 8
-                            color: "#f97316"
-                        }
-                    }
-                    
-                    Text {
-                        text: formatTime(player.duration)
-                        color: "#a1a1aa"
-                        font.family: "monospace"
-                    }
-
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 12
+                    text: backend.thermalInfoText
+                    color: "#d4d4d8"
+                    font.pixelSize: 12
                 }
             }
         }
@@ -667,6 +586,7 @@ Item {
                 pwField.text = ""
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
+                backend.stopThermalStream()
             }
         }
         
@@ -677,7 +597,7 @@ Item {
         }
         
         function onLoginSuccess() {
-            backend.refreshRecordings()
+            backend.startThermalStream()
         }
 
         function onRegisterSuccess(message) {
@@ -724,15 +644,9 @@ Item {
         
         function onDownloadFinished(path) {
             downloadPopup.close()
-            if (path.toString().startsWith("file:///")) {
-                console.log("Playing local file:", path)
-                player.source = path
-                player.play()
-            } else {
-                errorDialog.title = "Export Success"
-                errorDialog.text = "File saved successfully to:\n" + path
-                errorDialog.open()
-            }
+            errorDialog.title = "Export Success"
+            errorDialog.text = "File saved successfully to:\n" + path
+            errorDialog.open()
         }
 
         function onDownloadError(error) {
@@ -800,7 +714,7 @@ Item {
                 Item { Layout.fillWidth: true }
 
                 Button {
-                    text: "확인"
+                    text: "?확인"
                     Layout.preferredWidth: 96
                     Layout.preferredHeight: 34
                     scale: down ? 0.97 : 1.0

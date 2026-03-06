@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -45,6 +45,7 @@ ApplicationWindow {
     property bool exportProgressVisible: false
     property int exportProgressPercent: 0
     property string exportProgressText: ""
+    property bool thermalViewerVisible: false
 
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
@@ -485,7 +486,7 @@ ApplicationWindow {
 
                                     Rectangle {
                                         id: exportBtn
-                                        width: 60; height: 28
+                                        width: 72; height: 28
                                         color: exportMouseArea.pressed
                                                ? "#ea580c"
                                                : (!backend.isLoggedIn
@@ -499,7 +500,7 @@ ApplicationWindow {
 
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "Export"
+                                            text: "Thermal"
                                             color: stackLayout.currentIndex === 1 ? "white" : theme.textSecondary
                                             font.bold: true
                                             font.pixelSize: 12
@@ -515,11 +516,12 @@ ApplicationWindow {
                                                 window.inlineMainViewVisible = false
                                                 window.inlineMainCameraIndex = -1
                                                 stackLayout.currentIndex = 1
+                                                backend.startThermalStream()
                                             }
                                         }
 
                                         ToolTip.visible: exportMouseArea.containsMouse
-                                        ToolTip.text: "녹화 목록/내보내기 화면"
+                                        ToolTip.text: "열화상 모니터링/제어 패널"
                                         ToolTip.delay: 250
                                         ToolTip.timeout: 1800
                                     }
@@ -536,6 +538,9 @@ ApplicationWindow {
                                 onCurrentIndexChanged: {
                                     if (window.lastStackIndex === 2 && currentIndex !== 2) {
                                         window.teardownPlaybackSession()
+                                    }
+                                    if (currentIndex !== 1) {
+                                        backend.stopThermalStream()
                                     }
                                     window.lastStackIndex = currentIndex
                                 }
@@ -557,6 +562,10 @@ ApplicationWindow {
                                 LoginScreen {
                                     id: loginScreen
                                     theme: window.appTheme
+                                    onRequestReturnLiveView: {
+                                        stackLayout.currentIndex = 0
+                                        backend.stopThermalStream()
+                                    }
                                 }
 
                                 PlaybackScreen {
@@ -676,8 +685,9 @@ ApplicationWindow {
                     pendingExportDate = dateText
                     pendingExportStart = startTimeText
                     pendingExportEnd = endTimeText
-                    playbackExportSaveDialog.currentFile = "playback_" + dateText + "_" + startTimeText.replace(/:/g, "-")
-                    playbackExportSaveDialog.open()
+                    thermalViewerVisible = true
+                    thermalViewer.open()
+                    backend.startThermalStream()
                 }
             }
         }
@@ -864,6 +874,25 @@ ApplicationWindow {
                                           window.pendingExportStart,
                                           window.pendingExportEnd,
                                           savePath)
+        }
+    }
+
+    ThermalViewer {
+        id: thermalViewer
+        x: (window.width - width) / 2
+        y: (window.height - height) / 2
+        frameSource: backend.thermalFrameDataUrl
+        infoText: backend.thermalInfoText
+        onCloseRequested: {
+            close()
+            window.thermalViewerVisible = false
+            backend.stopThermalStream()
+        }
+        onClosed: {
+            if (window.thermalViewerVisible) {
+                window.thermalViewerVisible = false
+                backend.stopThermalStream()
+            }
         }
     }
 

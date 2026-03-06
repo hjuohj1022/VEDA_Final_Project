@@ -1,4 +1,4 @@
-﻿#ifndef BACKEND_H
+#ifndef BACKEND_H
 #define BACKEND_H
 
 #include <QObject>
@@ -47,6 +47,14 @@ class Backend : public QObject
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
     Q_PROPERTY(int detectedObjects READ detectedObjects NOTIFY detectedObjectsChanged)
     Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
+    Q_PROPERTY(QString thermalFrameDataUrl READ thermalFrameDataUrl NOTIFY thermalFrameDataUrlChanged)
+    Q_PROPERTY(QString thermalInfoText READ thermalInfoText NOTIFY thermalInfoTextChanged)
+    Q_PROPERTY(bool thermalStreaming READ thermalStreaming NOTIFY thermalStreamingChanged)
+    Q_PROPERTY(QString thermalPalette READ thermalPalette NOTIFY thermalPaletteChanged)
+    Q_PROPERTY(bool thermalAutoRange READ thermalAutoRange NOTIFY thermalAutoRangeChanged)
+    Q_PROPERTY(int thermalAutoRangeWindowPercent READ thermalAutoRangeWindowPercent NOTIFY thermalAutoRangeWindowPercentChanged)
+    Q_PROPERTY(int thermalManualMin READ thermalManualMin NOTIFY thermalManualRangeChanged)
+    Q_PROPERTY(int thermalManualMax READ thermalManualMax NOTIFY thermalManualRangeChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -78,6 +86,14 @@ public:
     int storagePercent() const { return m_storagePercent; }
     int detectedObjects() const { return m_detectedObjects; }
     QString networkStatus() const { return m_networkStatus; }
+    QString thermalFrameDataUrl() const { return m_thermalFrameDataUrl; }
+    QString thermalInfoText() const { return m_thermalInfoText; }
+    bool thermalStreaming() const { return m_thermalStreaming; }
+    QString thermalPalette() const { return m_thermalPalette; }
+    bool thermalAutoRange() const { return m_thermalAutoRange; }
+    int thermalAutoRangeWindowPercent() const { return m_thermalAutoRangeWindowPercent; }
+    int thermalManualMin() const { return m_thermalManualMin; }
+    int thermalManualMax() const { return m_thermalManualMax; }
 
     // QML 호출 가능 인터페이스
     // 인증/세션
@@ -121,6 +137,12 @@ public:
                                            const QString &endTimeText,
                                            const QString &savePath = QString());
     Q_INVOKABLE void cancelPlaybackExport();
+    Q_INVOKABLE void startThermalStream();
+    Q_INVOKABLE void stopThermalStream();
+    Q_INVOKABLE void setThermalPalette(const QString &palette);
+    Q_INVOKABLE void setThermalAutoRange(bool enabled);
+    Q_INVOKABLE void setThermalAutoRangeWindowPercent(int percent);
+    Q_INVOKABLE void setThermalManualRange(int minValue, int maxValue);
 
     // SUNAPI PTZ/Focus
     Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
@@ -189,6 +211,13 @@ signals:
     void playbackExportProgress(int percent, QString message);
     void playbackExportFinished(QString path);
     void playbackExportFailed(QString error);
+    void thermalFrameDataUrlChanged();
+    void thermalInfoTextChanged();
+    void thermalStreamingChanged();
+    void thermalPaletteChanged();
+    void thermalAutoRangeChanged();
+    void thermalAutoRangeWindowPercentChanged();
+    void thermalManualRangeChanged();
 
 private slots:
     void checkStorage();
@@ -298,6 +327,8 @@ private:
                                     QString *downloadUrl,
                                     QString *reason) const;
     void playbackExportStartDownload(const QUrl &downloadUrl, const QString &outPath);
+    void handleThermalChunkMessage(const QByteArray &message);
+    void processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal);
 
     // 공통 런타임 상태
     QNetworkAccessManager *m_manager;
@@ -385,6 +416,20 @@ private:
     bool m_playbackExportInProgress = false;
     QString m_playbackExportOutPath;
     QString m_playbackExportFinalPath;
+
+    // Thermal stream 상태
+    QString m_thermalFrameDataUrl;
+    QString m_thermalInfoText = "Thermal idle";
+    bool m_thermalStreaming = false;
+    QString m_thermalPalette = "Jet";
+    bool m_thermalAutoRange = true;
+    int m_thermalAutoRangeWindowPercent = 96;
+    int m_thermalManualMin = 7000;
+    int m_thermalManualMax = 10000;
+    int m_thermalTotalChunksExpected = 0;
+    QMap<int, QByteArray> m_thermalFrameChunks;
+    quint16 m_thermalHeaderMin = 0;
+    quint16 m_thermalHeaderMax = 0;
 };
 
 #endif // BACKEND_H

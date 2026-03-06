@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.19)
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
@@ -52,6 +52,7 @@ qt_add_executable(Team3VideoReceiver
     src/core/BackendSunapiExportWsSession.cpp
     src/core/BackendSunapiExportWsMux.cpp
     src/core/BackendStreamingWs.cpp
+    src/core/BackendThermal.cpp
     include/core/Backend.h
     .env
 )
@@ -72,6 +73,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/LoginScreen.qml
         src/ui/qml/PlaybackScreen.qml
         src/ui/qml/VideoPlayer.qml
+        src/ui/qml/ThermalViewer.qml
         src/ui/qml/components/IconButton.qml
     RESOURCES
         src/ui/assets/icons/README.txt
