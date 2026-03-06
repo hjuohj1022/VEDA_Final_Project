@@ -81,6 +81,15 @@ bool CctvManager::connect() {
     }
 
     ssl_ = SSL_new(ssl_ctx_);
+    
+    // SNI 설정 추가 (필수)
+    if (!SSL_set_tlsext_host_name(ssl_, host_.c_str())) {
+        std::cerr << "[CCTV] Failed to set SNI host name" << std::endl;
+        SSL_free(ssl_);
+        close(socket_fd_);
+        return false;
+    }
+
     SSL_set_fd(ssl_, socket_fd_);
 
     if (SSL_connect(ssl_) <= 0) {
