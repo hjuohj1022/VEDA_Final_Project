@@ -1,4 +1,4 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -32,6 +32,7 @@ void Backend::setupMqtt() {
     const QString pass = m_env.value("MQTT_PASSWORD").trimmed();
     const QString statusTopic = m_env.value("MQTT_STATUS_TOPIC", "system/status").trimmed();
     const QString detectTopic = m_env.value("MQTT_DETECTED_TOPIC", "system/detected").trimmed();
+    const QString thermalTopic = m_env.value("MQTT_THERMAL_TOPIC", "lepton/frame/chunk").trimmed();
     const bool useTls = (m_env.value("MQTT_USE_TLS", "1").trimmed() == "1");
     const QString caPathRaw = m_env.value("MQTT_CA_CERT", "certs/rootCA.crt").trimmed();
     const QString certPathRaw = m_env.value("MQTT_CLIENT_CERT", "certs/client-qt.crt").trimmed();
@@ -128,7 +129,8 @@ void Backend::setupMqtt() {
             }
             m_mqttClient->subscribe(QMqttTopicFilter(statusTopic), 0);
             m_mqttClient->subscribe(QMqttTopicFilter(detectTopic), 0);
-            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic;
+            m_mqttClient->subscribe(QMqttTopicFilter(thermalTopic), 0);
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << thermalTopic;
         });
 
         connect(m_mqttClient, &QMqttClient::disconnected, this, [=]() {
@@ -142,6 +144,7 @@ void Backend::setupMqtt() {
         connect(m_mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
             const QString topicName = topic.name();
             const QString payload = QString::fromUtf8(message).trimmed();
+            const bool debugThermal = (m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");
 
             if (topicName == statusTopic) {
                 if (!payload.isEmpty() && m_networkStatus != payload) {
@@ -159,6 +162,20 @@ void Backend::setupMqtt() {
                     m_detectedObjects = detected;
                     emit detectedObjectsChanged();
                 }
+                return;
+            }
+
+            if (topicName == thermalTopic) {
+                if (debugThermal) {
+                    static int thermalMsgCountTls = 0;
+                    thermalMsgCountTls++;
+                    if (thermalMsgCountTls <= 5 || (thermalMsgCountTls % 50) == 0) {
+                        qInfo() << "[MQTT][THERMAL][TLS] msg#" << thermalMsgCountTls
+                                << "bytes=" << message.size()
+                                << "topic=" << topicName;
+                    }
+                }
+                handleThermalChunkMessage(message);
             }
         });
 
@@ -184,7 +201,8 @@ void Backend::setupMqtt() {
         }
         m_mqttClient->subscribe(QMqttTopicFilter(statusTopic), 0);
         m_mqttClient->subscribe(QMqttTopicFilter(detectTopic), 0);
-        qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic;
+        m_mqttClient->subscribe(QMqttTopicFilter(thermalTopic), 0);
+        qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << thermalTopic;
     });
 
     connect(m_mqttClient, &QMqttClient::disconnected, this, [=]() {
@@ -198,6 +216,7 @@ void Backend::setupMqtt() {
     connect(m_mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
         const QString topicName = topic.name();
         const QString payload = QString::fromUtf8(message).trimmed();
+        const bool debugThermal = (m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");
 
         if (topicName == statusTopic) {
             if (!payload.isEmpty() && m_networkStatus != payload) {
@@ -215,6 +234,20 @@ void Backend::setupMqtt() {
                 m_detectedObjects = detected;
                 emit detectedObjectsChanged();
             }
+            return;
+        }
+
+        if (topicName == thermalTopic) {
+            if (debugThermal) {
+                static int thermalMsgCountTcp = 0;
+                thermalMsgCountTcp++;
+                if (thermalMsgCountTcp <= 5 || (thermalMsgCountTcp % 50) == 0) {
+                    qInfo() << "[MQTT][THERMAL][TCP] msg#" << thermalMsgCountTcp
+                            << "bytes=" << message.size()
+                            << "topic=" << topicName;
+                }
+            }
+            handleThermalChunkMessage(message);
         }
     });
 
