@@ -23,48 +23,24 @@ void Backend::loadPlaybackMonthRecordedDays(int channelIndex, int year, int mont
         return;
     }
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    if (host.isEmpty()) {
-        emit playbackMonthRecordedDaysFailed("month days failed: SUNAPI_IP is empty");
+    if (m_authToken.trimmed().isEmpty()) {
+        emit playbackMonthRecordedDaysFailed("month days failed: login required");
         return;
     }
-
-    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
 
     const QDate firstDate(year, month, 1);
     if (!firstDate.isValid()) {
         emit playbackMonthRecordedDaysFailed("month days failed: invalid date");
         return;
     }
-    const QDate lastDate = firstDate.addMonths(1).addDays(-1);
-    const QString fromDate = firstDate.toString("yyyy-MM-dd") + " 00:00:00";
-    const QString toDate = lastDate.toString("yyyy-MM-dd") + " 23:59:59";
     const QString yearMonth = firstDate.toString("yyyy-MM");
-
-    QUrl url;
-    url.setScheme(scheme);
-    url.setHost(host);
-    if (port > 0) {
-        url.setPort(port);
-    }
-    url.setPath("/stw-cgi/recording.cgi");
-
-    QUrlQuery query;
-    query.addQueryItem("msubmenu", "timeline");
-    query.addQueryItem("action", "view");
-    query.addQueryItem("FromDate", fromDate);
-    query.addQueryItem("ToDate", toDate);
-    query.addQueryItem("ChannelIDList", QString::number(channelIndex));
-    query.addQueryItem("Type", "All");
-    query.addQueryItem("OverlappedID", "0");
-    url.setQuery(query);
-
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
-    qInfo() << "[SUNAPI] request:" << "Playback month days" << "url=" << url.toString();
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/month-days", {
+        {"channel", QString::number(channelIndex)},
+        {"year", QString::number(year)},
+        {"month", QString::number(month)}
+    });
+    applyAuthIfNeeded(request);
+    qInfo() << "[SUNAPI] request:" << "Playback month days" << "url=" << request.url().toString();
 
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "SUNAPI_MONTH_DAYS");

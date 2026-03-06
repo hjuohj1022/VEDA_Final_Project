@@ -526,6 +526,9 @@ Item {
     }
 
     onSourceChanged: {
+        if (root.source && root.source.length > 0) {
+            console.log("[VIDEO][SOURCE]", root.source)
+        }
         vlc.url = root.source
         root.dptzReset()
         startPlayTimer.stop()

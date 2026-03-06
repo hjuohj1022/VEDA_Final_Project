@@ -8,6 +8,7 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QSslError>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -25,10 +26,8 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
     }
     m_playbackExportInProgress = true;
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
-    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : m_env.value("SUNAPI_PASSWORD").trimmed();
-    if (host.isEmpty() || user.isEmpty()) {
+    const QString sunapiHost = m_env.value("SUNAPI_IP").trimmed();
+    if (sunapiHost.isEmpty()) {
         m_playbackExportInProgress = false;
         emit playbackExportFailed("내보내기 실패: SUNAPI 접속 정보 누락");
         return;
@@ -53,12 +52,9 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         return;
     }
 
-    bool rtspPortOk = false;
-    const int rtspPort = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed().toInt(&rtspPortOk);
-    const int rtspPortFinal = rtspPortOk ? rtspPort : 554;
     QString realm;
     QString nonce;
-    if (!fetchPlaybackExportRtspChallenge(host, rtspPortFinal, rtspUri, &realm, &nonce, &prepError)) {
+    if (!fetchPlaybackExportRtspChallenge(rtspUri, &realm, &nonce, &prepError)) {
         m_playbackExportInProgress = false;
         emit playbackExportFailed(prepError);
         return;
@@ -72,23 +68,18 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
 
     QUrl digestUrl;
     digestUrl.setScheme(scheme);
-    digestUrl.setHost(host);
+    digestUrl.setHost(sunapiHost);
     if (httpPort > 0) {
         digestUrl.setPort(httpPort);
     }
-    digestUrl.setPath("/stw-cgi/security.cgi");
+    digestUrl.setPath("/api/sunapi/playback/digestauth");
     QUrlQuery dq;
-    dq.addQueryItem("msubmenu", "digestauth");
-    dq.addQueryItem("action", "view");
-    dq.addQueryItem("Method", "OPTIONS");
-    dq.addQueryItem("Realm", realm);
-    dq.addQueryItem("Nonce", nonce);
-    dq.addQueryItem("Uri", rtspUri);
-    dq.addQueryItem("username", user);
-    dq.addQueryItem("password", pass);
-    dq.addQueryItem("Nc", "00000001");
-    dq.addQueryItem("Cnonce", cnonce);
-    dq.addQueryItem("SunapiSeqId", QString::number(QRandomGenerator::global()->bounded(100000, 999999)));
+    dq.addQueryItem("method", "OPTIONS");
+    dq.addQueryItem("realm", realm);
+    dq.addQueryItem("nonce", nonce);
+    dq.addQueryItem("uri", rtspUri);
+    dq.addQueryItem("nc", "00000001");
+    dq.addQueryItem("cnonce", cnonce);
     digestUrl.setQuery(dq);
 
     QNetworkRequest digestReq(digestUrl);
@@ -113,10 +104,16 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         if (doc.isObject()) {
             digestResponse = doc.object().value("Response").toString().trimmed();
         }
+        const QString wsUser = QString::fromUtf8(digestReply->rawHeader("X-SUNAPI-USER")).trimmed();
         digestReply->deleteLater();
         if (digestResponse.isEmpty()) {
             m_playbackExportInProgress = false;
             emit playbackExportFailed("내보내기 실패: digest response 누락");
+            return;
+        }
+        if (wsUser.isEmpty()) {
+            m_playbackExportInProgress = false;
+            emit playbackExportFailed("내보내기 실패: digest 사용자 정보 누락");
             return;
         }
 
@@ -160,7 +157,7 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         auto st = std::make_shared<WsExportState>();
         st->uri = rtspUri;
         st->authHeader = QString("Authorization: Digest username=\"%1\", realm=\"%2\", uri=\"%3\", nonce=\"%4\", response=\"%5\"")
-                .arg(user, realm, rtspUri, nonce, digestResponse);
+                .arg(wsUser, realm, rtspUri, nonce, digestResponse);
         st->targetTsDelta = static_cast<qint64>(durationSec) * 90000LL;
         st->outPath = outPath;
         st->finalOutPath = finalOutPath;
@@ -444,6 +441,36 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         st->keepAliveTimer->start();
         emit playbackExportProgress(5, "내보내기 WebSocket 연결 시작");
         m_playbackExportWs = st->ws;
-        st->ws->open(QUrl(QString("ws://%1/StreamingServer").arg(host)));
+        const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
+        const QString wsScheme = (sunapiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
+        const int defaultPort = (sunapiScheme == "https") ? 443 : 80;
+        const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+        if (wsScheme == "wss" && m_sslConfigReady) {
+            st->ws->setSslConfiguration(m_sslConfig);
+            connect(st->ws, &QWebSocket::sslErrors, this, [this, st](const QList<QSslError> &errors) {
+                for (const auto &err : errors) {
+                    qWarning() << "[SUNAPI_EXPORT_WS][SSL]" << err.errorString();
+                }
+                if (m_sslIgnoreErrors && st && st->ws) {
+                    st->ws->ignoreSslErrors();
+                }
+            });
+        }
+
+        QUrl wsUrl;
+        wsUrl.setScheme(wsScheme);
+        wsUrl.setHost(sunapiHost);
+        if (httpPort > 0) {
+            wsUrl.setPort(httpPort);
+        }
+        QString wsPath = m_env.value("SUNAPI_STREAMING_WS_PATH", "/StreamingServer").trimmed();
+        if (wsPath.isEmpty()) {
+            wsPath = "/StreamingServer";
+        } else if (!wsPath.startsWith('/')) {
+            wsPath.prepend('/');
+        }
+        wsUrl.setPath(wsPath);
+        st->ws->open(wsUrl);
     });
 }

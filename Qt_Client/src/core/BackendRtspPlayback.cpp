@@ -7,8 +7,6 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRandomGenerator>
-#include <QRegularExpression>
-#include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -20,10 +18,9 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
         return;
     }
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
-    if (host.isEmpty() || user.isEmpty()) {
-        emit playbackPrepareFailed("Playback 준비 실패: SUNAPI_IP 또는 SUNAPI_USER가 비어 있습니다.");
+    const QString sunapiHost = m_env.value("SUNAPI_IP").trimmed();
+    if (sunapiHost.isEmpty()) {
+        emit playbackPrepareFailed("Playback 준비 실패: SUNAPI_IP가 비어 있습니다.");
         return;
     }
 
@@ -35,68 +32,77 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
     }
     const QString digestUriText = digestUri.toString();
 
-    bool portOk = false;
-    const int rtspPort = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed().toInt(&portOk);
-    const int port = portOk ? rtspPort : 554;
-
-    QTcpSocket socket;
-    // 먼저 RTSP OPTIONS로 Digest challenge(realm/nonce)만 획득
-    socket.connectToHost(host, static_cast<quint16>(port));
-    if (!socket.waitForConnected(1500)) {
-        emit playbackPrepareFailed(QString("Playback 준비 실패: RTSP 연결 실패 (%1)").arg(socket.errorString()));
-        return;
+    const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
+    const QString httpScheme = (sunapiScheme == "https") ? QStringLiteral("https") : QStringLiteral("http");
+    const int defaultPort = (httpScheme == "https") ? 443 : 80;
+    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+    QUrl step1Url;
+    step1Url.setScheme(httpScheme);
+    step1Url.setHost(sunapiHost);
+    if (httpPort > 0) {
+        step1Url.setPort(httpPort);
     }
+    step1Url.setPath("/api/sunapi/playback/challenge");
+    QUrlQuery q1;
+    q1.addQueryItem("uri", digestUriText);
+    q1.addQueryItem("rtsp_port", m_env.value("SUNAPI_RTSP_PORT", "554").trimmed());
+    step1Url.setQuery(q1);
 
-    const QByteArray optionsReq =
-            "OPTIONS " + digestUriText.toUtf8() + " RTSP/1.0\r\n"
-            "CSeq: 1\r\n"
-            "User-Agent: Team3VideoReceiver\r\n"
-            "\r\n";
-    socket.write(optionsReq);
-    socket.flush();
-    if (!socket.waitForReadyRead(1500)) {
-        emit playbackPrepareFailed("Playback 준비 실패: RTSP 챌린지 응답 대기 시간 초과");
-        return;
-    }
+    QNetworkRequest req1(step1Url);
+    applySslIfNeeded(req1);
+    req1.setRawHeader("Accept", "application/json");
+    QNetworkReply *reply1 = m_manager->get(req1);
+    attachIgnoreSslErrors(reply1, "SUNAPI_PLAYBACK_CHALLENGE");
 
-    QByteArray rtspResp = socket.readAll();
-    while (socket.waitForReadyRead(120)) {
-        rtspResp += socket.readAll();
-    }
-    socket.disconnectFromHost();
+    connect(reply1, &QNetworkReply::finished, this, [this, reply1, playbackUrl, digestUriText, sunapiHost, httpScheme, httpPort]() {
+        if (reply1->error() != QNetworkReply::NoError) {
+            const QString err = QString("Playback 준비 1단계 실패: %1").arg(reply1->errorString());
+            reply1->deleteLater();
+            emit playbackPrepareFailed(err);
+            return;
+        }
 
-    const QString rtspText = QString::fromUtf8(rtspResp);
-    QRegularExpression realmRe("realm\\s*=\\s*\"([^\"]+)\"", QRegularExpression::CaseInsensitiveOption);
-    QRegularExpression nonceRe("nonce\\s*=\\s*\"([^\"]+)\"", QRegularExpression::CaseInsensitiveOption);
-    const QString realm = realmRe.match(rtspText).captured(1).trimmed();
-    const QString nonce = nonceRe.match(rtspText).captured(1).trimmed();
-    if (realm.isEmpty() || nonce.isEmpty()) {
-        qWarning() << "[PLAYBACK] RTSP challenge parse failed:" << rtspText.left(400);
-        emit playbackPrepareFailed("Playback 준비 실패: RTSP Digest realm/nonce 추출 실패");
-        return;
-    }
+        QString realm;
+        QString nonce;
+        const QByteArray challengeBody = reply1->readAll();
+        const QJsonDocument challengeDoc = QJsonDocument::fromJson(challengeBody);
+        if (challengeDoc.isObject()) {
+            const QJsonObject obj = challengeDoc.object();
+            realm = obj.value("Realm").toString().trimmed();
+            if (realm.isEmpty()) realm = obj.value("realm").toString().trimmed();
+            nonce = obj.value("Nonce").toString().trimmed();
+            if (nonce.isEmpty()) nonce = obj.value("nonce").toString().trimmed();
+        }
+        reply1->deleteLater();
+        if (realm.isEmpty() || nonce.isEmpty()) {
+            emit playbackPrepareFailed("Playback 준비 1단계 실패: RTSP Digest realm/nonce 누락");
+            return;
+        }
 
-    const QString cnonce = QString::number(QRandomGenerator::global()->generate(), 16).left(8).toUpper();
-    QUrl step2Url(QString("http://%1/stw-cgi/security.cgi").arg(host));
-    QUrlQuery q2;
-    q2.addQueryItem("msubmenu", "digestauth");
-    q2.addQueryItem("action", "view");
-    q2.addQueryItem("Method", "OPTIONS");
-    q2.addQueryItem("Realm", realm);
-    q2.addQueryItem("Nonce", nonce);
-    q2.addQueryItem("Uri", digestUriText);
-    q2.addQueryItem("username", user);
-    q2.addQueryItem("password", "");
-    q2.addQueryItem("Nc", "00000001");
-    q2.addQueryItem("Cnonce", cnonce);
-    q2.addQueryItem("SunapiSeqId", QString::number(QRandomGenerator::global()->bounded(100000, 999999)));
-    step2Url.setQuery(q2);
+        const QString cnonce = QString::number(QRandomGenerator::global()->generate(), 16).left(8).toUpper();
+        QUrl step2Url;
+        step2Url.setScheme(httpScheme);
+        // Qt는 digestauth 쿼리를 직접 stw-cgi로 보내지 않고 Crow 고정 API를 사용한다.
+        step2Url.setHost(sunapiHost);
+        if (httpPort > 0) {
+            step2Url.setPort(httpPort);
+        }
+        step2Url.setPath("/api/sunapi/playback/digestauth");
+        QUrlQuery q2;
+        q2.addQueryItem("method", "OPTIONS");
+        q2.addQueryItem("realm", realm);
+        q2.addQueryItem("nonce", nonce);
+        q2.addQueryItem("uri", digestUriText);
+        q2.addQueryItem("nc", "00000001");
+        q2.addQueryItem("cnonce", cnonce);
+        step2Url.setQuery(q2);
 
-    QNetworkRequest req2(step2Url);
-    req2.setRawHeader("Accept", "application/json");
-    req2.setRawHeader("X-Secure-Session", "Normal");
-    QNetworkReply *reply2 = m_manager->get(req2);
-    connect(reply2, &QNetworkReply::finished, this, [this, reply2, playbackUrl, digestUriText, realm, nonce, user]() {
+        QNetworkRequest req2(step2Url);
+        applySslIfNeeded(req2);
+        req2.setRawHeader("Accept", "application/json");
+        req2.setRawHeader("X-Secure-Session", "Normal");
+        QNetworkReply *reply2 = m_manager->get(req2);
+        connect(reply2, &QNetworkReply::finished, this, [this, reply2, playbackUrl, digestUriText, realm, nonce]() {
         if (reply2->error() != QNetworkReply::NoError) {
             const QString err = QString("Playback 준비 2단계 실패: %1").arg(reply2->errorString());
             reply2->deleteLater();
@@ -114,6 +120,8 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
             wsDigestResponse = m_env.value("PLAYBACK_WS_DIGEST_RESPONSE").trimmed();
         }
 
+        const QString wsUser = QString::fromUtf8(reply2->rawHeader("X-SUNAPI-USER")).trimmed();
+
         const QString autoWs = m_env.value("PLAYBACK_WS_AUTO_CONNECT", "1").trimmed().toLower();
         const bool wsEnabled = (autoWs == "1" || autoWs == "true" || autoWs == "on");
 
@@ -124,6 +132,10 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
         if (wsEnabled) {
             if (wsDigestResponse.isEmpty()) {
                 emit playbackPrepareFailed("Playback WS 준비 실패: digest Response 값이 비어 있습니다.");
+                return;
+            }
+            if (wsUser.isEmpty()) {
+                emit playbackPrepareFailed("Playback WS 준비 실패: digest 사용자 정보가 비어 있습니다.");
                 return;
             }
 
@@ -145,7 +157,7 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
             m_playbackWsUri = digestUriText;
             m_playbackWsAuthHeader =
                     QString("Authorization: Digest username=\"%1\", realm=\"%2\", uri=\"%3\", nonce=\"%4\", response=\"%5\"")
-                    .arg(user, realm, digestUriText, nonce, wsDigestResponse);
+                    .arg(wsUser, realm, digestUriText, nonce, wsDigestResponse);
 
             streamingWsConnect();
 
@@ -232,5 +244,6 @@ void Backend::preparePlaybackRtsp(int channelIndex, const QString &dateText, con
             m_playbackValidRtpCount = 0;
             streamingWsDisconnect();
         }
+    });
     });
 }

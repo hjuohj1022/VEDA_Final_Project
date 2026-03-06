@@ -24,38 +24,16 @@ void Backend::loadPlaybackTimeline(int channelIndex, const QString &dateText) {
         return;
     }
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    if (host.isEmpty()) {
-        emit playbackTimelineFailed("timeline failed: SUNAPI_IP is empty");
+    if (m_authToken.trimmed().isEmpty()) {
+        emit playbackTimelineFailed("timeline failed: login required");
         return;
     }
-
-    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
-
-    QUrl url;
-    url.setScheme(scheme);
-    url.setHost(host);
-    if (port > 0) {
-        url.setPort(port);
-    }
-    url.setPath("/stw-cgi/recording.cgi");
-
-    QUrlQuery query;
-    query.addQueryItem("msubmenu", "timeline");
-    query.addQueryItem("action", "view");
-    query.addQueryItem("FromDate", date + " 00:00:00");
-    query.addQueryItem("ToDate", date + " 23:59:59");
-    query.addQueryItem("ChannelIDList", QString::number(channelIndex));
-    query.addQueryItem("Type", "All");
-    query.addQueryItem("OverlappedID", "0");
-    url.setQuery(query);
-
-    QNetworkRequest request(url);
-    applySslIfNeeded(request);
-    qInfo() << "[SUNAPI] request:" << "Playback timeline" << "url=" << url.toString();
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/timeline", {
+        {"channel", QString::number(channelIndex)},
+        {"date", date}
+    });
+    applyAuthIfNeeded(request);
+    qInfo() << "[SUNAPI] request:" << "Playback timeline" << "url=" << request.url().toString();
 
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "SUNAPI_TIMELINE");

@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDebug>
 #include <QRegularExpression>
+#include <QSslError>
 #include <QTimer>
 
 namespace {
@@ -23,7 +24,24 @@ void Backend::streamingWsConnect() {
         return;
     }
 
-    const QUrl wsUrl(QString("ws://%1/StreamingServer").arg(host));
+    const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
+    const QString wsScheme = (sunapiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
+    const int defaultPort = (sunapiScheme == "https") ? 443 : 80;
+    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+    QUrl wsUrl;
+    wsUrl.setScheme(wsScheme);
+    wsUrl.setHost(host);
+    if (httpPort > 0) {
+        wsUrl.setPort(httpPort);
+    }
+    QString wsPath = m_env.value("SUNAPI_STREAMING_WS_PATH", "/StreamingServer").trimmed();
+    if (wsPath.isEmpty()) {
+        wsPath = "/StreamingServer";
+    } else if (!wsPath.startsWith('/')) {
+        wsPath.prepend('/');
+    }
+    wsUrl.setPath(wsPath);
     if (!m_streamingWs) {
         // 최초 1회 소켓 생성 후 공통 시그널 핸들러 등록
         m_streamingWs = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
@@ -43,10 +61,22 @@ void Backend::streamingWsConnect() {
         connect(m_streamingWs, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
             emit streamingWsError(m_streamingWs ? m_streamingWs->errorString() : QString("unknown websocket error"));
         });
+        connect(m_streamingWs, &QWebSocket::sslErrors, this, [this](const QList<QSslError> &errors) {
+            for (const auto &err : errors) {
+                qWarning() << "[STREAMING_WS][SSL]" << err.errorString();
+            }
+            if (m_sslIgnoreErrors && m_streamingWs) {
+                m_streamingWs->ignoreSslErrors();
+            }
+        });
     } else if (m_streamingWs->state() == QAbstractSocket::ConnectedState
                || m_streamingWs->state() == QAbstractSocket::ConnectingState) {
         // 기존 연결이 살아있으면 강제로 정리 후 재접속
         m_streamingWs->abort();
+    }
+
+    if (wsScheme == "wss" && m_sslConfigReady) {
+        m_streamingWs->setSslConfiguration(m_sslConfig);
     }
 
     emit streamingWsStateChanged("connecting");

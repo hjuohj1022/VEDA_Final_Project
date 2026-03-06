@@ -8,6 +8,7 @@ void Backend::skipLoginTemporarily() {
 
     m_isLoggedIn = true;
     m_userId = "Skip";
+    m_authToken.clear();
     m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
     m_sessionTimer->start();
 
@@ -29,6 +30,7 @@ void Backend::logout() {
 
     m_isLoggedIn = false;
     m_userId.clear();
+    m_authToken.clear();
     m_sessionTimer->stop();
     m_sessionRemainingSeconds = 0;
 

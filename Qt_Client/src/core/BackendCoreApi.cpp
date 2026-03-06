@@ -4,6 +4,32 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+// 서버 API 요청에 로그인 토큰(Bearer)을 조건부로 주입
+void Backend::applyAuthIfNeeded(QNetworkRequest &request) const {
+    if (m_authToken.trimmed().isEmpty()) {
+        return;
+    }
+
+    const QUrl reqUrl = request.url();
+    const QUrl apiBase(serverUrl());
+    if (!reqUrl.isValid() || !apiBase.isValid()) {
+        return;
+    }
+
+    const auto defaultPortFor = [](const QString &scheme) {
+        return (scheme.compare("https", Qt::CaseInsensitive) == 0) ? 443 : 80;
+    };
+
+    const bool sameScheme = (reqUrl.scheme().compare(apiBase.scheme(), Qt::CaseInsensitive) == 0);
+    const bool sameHost = (reqUrl.host().compare(apiBase.host(), Qt::CaseInsensitive) == 0);
+    const bool samePort = (reqUrl.port(defaultPortFor(reqUrl.scheme())) == apiBase.port(defaultPortFor(apiBase.scheme())));
+    if (!sameScheme || !sameHost || !samePort) {
+        return;
+    }
+
+    request.setRawHeader("Authorization", QByteArray("Bearer ") + m_authToken.toUtf8());
+}
+
 // API URL 생성
 QUrl Backend::buildApiUrl(const QString &path, const QMap<QString, QString> &query) const {
     QUrl url(serverUrl());
@@ -45,7 +71,7 @@ QUrl Backend::buildSunapiUrl(const QString &cgiName,
     if (port > 0) {
         url.setPort(port);
     }
-    url.setPath(QString("/stw-cgi/%1").arg(cgiName));
+    url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgiName));
 
     QUrlQuery query;
     if (params.contains("msubmenu")) {

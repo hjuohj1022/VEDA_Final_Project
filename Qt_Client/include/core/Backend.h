@@ -199,6 +199,7 @@ private:
     // Core/SSL 유틸
     void setupSslConfiguration();
     void applySslIfNeeded(QNetworkRequest &request) const;
+    void applyAuthIfNeeded(QNetworkRequest &request) const;
     void attachIgnoreSslErrors(QNetworkReply *reply, const QString &tag) const;
 
     // Core API URL/Request 유틸
@@ -253,9 +254,7 @@ private:
                                          QString *outPath,
                                          QString *finalOutPath,
                                          QString *error);
-    bool fetchPlaybackExportRtspChallenge(const QString &host,
-                                          int rtspPort,
-                                          const QString &rtspUri,
+    bool fetchPlaybackExportRtspChallenge(const QString &rtspUri,
                                           QString *realm,
                                           QString *nonce,
                                           QString *error) const;
@@ -327,6 +326,7 @@ private:
     // 인증/세션 상태
     bool m_isLoggedIn = false;
     QString m_userId;
+    QString m_authToken;
     int m_sessionRemainingSeconds = 0;
     const int m_sessionTimeoutSeconds = 300;
     bool m_loginLocked = false;

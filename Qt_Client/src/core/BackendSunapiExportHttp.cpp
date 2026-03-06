@@ -88,7 +88,7 @@ void Backend::requestPlaybackExport(int channelIndex,
         url.setScheme(scheme);
         url.setHost(host);
         if (port > 0) url.setPort(port);
-        url.setPath(QString("/stw-cgi/%1").arg(cgi));
+        url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgi));
         QUrlQuery q;
         q.addQueryItem("msubmenu", submenu);
         q.addQueryItem("action", action);
@@ -133,21 +133,32 @@ void Backend::requestPlaybackExport(int channelIndex,
             // 608(Not Supported)인 경우 RTSP-over-WS 경로로 폴백
             if (lastCreateReason->contains("Error Code: 608", Qt::CaseInsensitive)) {
                 qInfo() << "[SUNAPI][EXPORT] fallback to RTSP-over-WS backup.smp path (Error 608)";
-                const bool started = startFfmpegBackup(
-                    [this, channelIndex, dateText, startTimeText, endTimeText, outPath]() {
-                        if (m_playbackExportCancelRequested) {
-                            m_playbackExportInProgress = false;
-                            return;
-                        }
-                        requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
-                    });
-                if (!started) {
-                    if (m_playbackExportCancelRequested) {
-                        m_playbackExportInProgress = false;
+                const QString ffmpegBackupRaw = m_env.value("PLAYBACK_EXPORT_USE_FFMPEG_BACKUP", "0").trimmed().toLower();
+                const bool useFfmpegBackup =
+                        (ffmpegBackupRaw == "1" || ffmpegBackupRaw == "true" || ffmpegBackupRaw == "on");
+                if (useFfmpegBackup) {
+                    const bool started = startFfmpegBackup(
+                        [this, channelIndex, dateText, startTimeText, endTimeText, outPath]() {
+                            if (m_playbackExportCancelRequested) {
+                                m_playbackExportInProgress = false;
+                                return;
+                            }
+                            requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
+                        });
+                    if (started) {
                         return;
                     }
-                    requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
                 }
+                if (m_playbackExportCancelRequested) {
+                    m_playbackExportInProgress = false;
+                    return;
+                }
+                if (useFfmpegBackup) {
+                    qWarning() << "[SUNAPI][EXPORT] ffmpeg backup unavailable -> direct WS fallback";
+                } else {
+                    qInfo() << "[SUNAPI][EXPORT] ffmpeg backup disabled -> direct WS fallback";
+                }
+                requestPlaybackExportViaWs(channelIndex, dateText, startTimeText, endTimeText, outPath);
             } else if (!lastCreateReason->trimmed().isEmpty()) {
                 m_playbackExportInProgress = false;
                 emit playbackExportFailed(QString("내보내기 실패: create 엔드포인트 호환 실패 (%1)").arg(*lastCreateReason));
