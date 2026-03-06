@@ -114,12 +114,8 @@ QString Backend::buildPlaybackRtspUrl(int channelIndex, const QString &dateText,
         return QString();
     }
 
-    const QString user = m_useCustomRtspAuth
-            ? m_rtspUsernameOverride
-            : m_env.value("SUNAPI_USER").trimmed();
-    const QString pass = m_useCustomRtspAuth
-            ? m_rtspPasswordOverride
-            : m_env.value("SUNAPI_PASSWORD").trimmed();
+    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : QString();
+    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : QString();
 
     QString authPrefix;
     if (!user.isEmpty()) {

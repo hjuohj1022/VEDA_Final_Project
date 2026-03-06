@@ -7,9 +7,7 @@
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QRegularExpression>
-#include <QSet>
 #include <QUrl>
-#include <QUrlQuery>
 #include <QDebug>
 #include <algorithm>
 #include <functional>
@@ -118,67 +116,6 @@ void collectNumbersFromJson(const QJsonValue &value,
     if (pathLower.contains("free") || pathLower.contains("avail")) {
         freeBytes = std::max(freeBytes, bytes);
     }
-}
-
-QList<QUrl> buildStorageCandidateUrls(const QMap<QString, QString> &env) {
-    QList<QUrl> out;
-    QSet<QString> dedup;
-
-    const QString host = env.value("SUNAPI_IP").trimmed();
-    if (host.isEmpty()) return out;
-
-    const QString schemeRaw = env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int port = env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
-
-    const QString cgiEnv = env.value("SUNAPI_STORAGE_CGI", "recording.cgi").trimmed();
-    const QString submenuEnv = env.value("SUNAPI_STORAGE_SUBMENU", "storage").trimmed();
-    const QString actionEnv = env.value("SUNAPI_STORAGE_ACTION", "view").trimmed();
-    const QString extraQuery = env.value("SUNAPI_STORAGE_QUERY").trimmed();
-
-    auto addCandidate = [&](const QString &cgi, const QString &submenu, const QString &action, const QString &extra = QString()) {
-        if (cgi.isEmpty() || submenu.isEmpty() || action.isEmpty()) return;
-        QUrl url;
-        url.setScheme(scheme);
-        url.setHost(host);
-        if (port > 0) url.setPort(port);
-        url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgi));
-
-        QUrlQuery q;
-        q.addQueryItem("msubmenu", submenu);
-        q.addQueryItem("action", action);
-        const QString eq = extra.trimmed();
-        if (!eq.isEmpty()) {
-            const QStringList pairs = eq.split('&', Qt::SkipEmptyParts);
-            for (const QString &pair : pairs) {
-                const int sep = pair.indexOf('=');
-                if (sep > 0) q.addQueryItem(pair.left(sep), pair.mid(sep + 1));
-                else q.addQueryItem(pair, QString());
-            }
-        }
-        url.setQuery(q);
-        const QString key = url.toString();
-        if (!dedup.contains(key)) {
-            dedup.insert(key);
-            out.push_back(url);
-        }
-    };
-
-    // .env 기반 우선 후보 URL 추가
-    addCandidate(cgiEnv, submenuEnv, actionEnv, extraQuery);
-
-    // 장비별 대체 후보 URL 추가
-    addCandidate("recording.cgi", "storagestatus", "view");
-    addCandidate("recording.cgi", "storageinfo", "view");
-    addCandidate("recording.cgi", "storage", "view", "Storage=SD");
-    addCandidate("recording.cgi", "storage", "view", "Channel=0");
-    addCandidate("recording.cgi", "storage", "view", "Storage=SD&Channel=0");
-    addCandidate("system.cgi", "storage", "view");
-    addCandidate("system.cgi", "storageinfo", "view");
-    addCandidate("eventstatus.cgi", "storage", "view");
-
-    return out;
 }
 
 StorageParseResult parseStoragePayload(const QByteArray &payload) {

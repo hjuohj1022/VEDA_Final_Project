@@ -92,9 +92,9 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `RTSP_MAIN_PATH_TEMPLATE`, `RTSP_SUB_PATH_TEMPLATE`
 - SUNAPI/Playback
   - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
-  - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_HOST`, `SUNAPI_RTSP_PORT`
+  - `SUNAPI_RTSP_HOST`, `SUNAPI_RTSP_PORT`
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
-  - `SUNAPI_STORAGE_CGI`, `SUNAPI_STORAGE_SUBMENU`, `SUNAPI_STORAGE_ACTION`, `SUNAPI_STORAGE_QUERY`
+  - Storage 조회는 Crow 고정 API `GET /api/sunapi/storage` 사용
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
   - `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP` (608 장비에서 ffmpeg 백업 사용 여부)
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
@@ -144,7 +144,7 @@ ffmpeg 배치/버전 관리:
 
 - 현재 상태
   - Qt는 Playback/Export 준비 + PTZ/Focus + Export HTTP에서 Crow API를 사용합니다.
-  - 다만 전체 direct 제거는 진행 중이며, RTSP 관련 일부 경로는 아직 `SUNAPI_USER/SUNAPI_PASSWORD`를 참조합니다.
+  - Qt는 카메라 계정(`SUNAPI_USER/SUNAPI_PASSWORD`)을 더 이상 사용하지 않습니다.
 
 - 최종 목표
   - Qt는 Crow API + Bearer 토큰만 사용

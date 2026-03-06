@@ -14,6 +14,13 @@ Item {
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     
     property bool isLoggedIn: backend.isLoggedIn
+
+    function triggerSignIn() {
+        if (root.signupMode || backend.loginLocked) {
+            return
+        }
+        backend.login(idField.text, pwField.text)
+    }
     
     // 로그인 전 화면
     Rectangle {
@@ -79,6 +86,7 @@ Item {
                         border.color: idField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                         radius: 6
                     }
+                    onAccepted: triggerSignIn()
                 }
                 
                 TextField {
@@ -94,6 +102,7 @@ Item {
                         border.color: pwField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                         radius: 6
                     }
+                    onAccepted: triggerSignIn()
                 }
 
                 TextField {
@@ -137,7 +146,7 @@ Item {
                     }
                     
                     onClicked: {
-                        backend.login(idField.text, pwField.text)
+                        triggerSignIn()
                     }
                 }
 

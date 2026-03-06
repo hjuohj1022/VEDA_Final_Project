@@ -69,7 +69,7 @@ Item {
                               ? root.cameraNames[index]
                               : ("Cam " + (index + 1))
 
-                source: (root.isActive && backend.isLoggedIn)
+                source: root.isActive
                         ? ((backend.rtspIp, backend.rtspPort),
                            backend.buildRtspUrl(index, true))
                         : ""
