@@ -5,9 +5,10 @@
  * @brief   PCA9685 I2C PWM 드라이버 + 3채널 서보 제어 + SPI 명령 파서
  *
  * 명령 형식 (SPI DATA 필드, 최대 30바이트):
- *   "motor1 left  90"   → motor1을 현재 각도에서 왼쪽(CCW) 90° 이동
- *   "motor2 right 45"   → motor2를 현재 각도에서 오른쪽(CW) 45° 이동
- *   "motor3 set   120"  → motor3를 절대 120°로 이동
+ *   "motor1 left press"    → motor1을 왼쪽(CCW)으로 1도씩 계속 이동
+ *   "motor2 right press"   → motor2를 오른쪽(CW)으로 1도씩 계속 이동
+ *   "motor1 release"       → motor1 이동 중지
+ *   "motor3 set 120"       → motor3를 절대 120°로 이동
  *
  * 하드웨어:
  *   PCA9685 ← I2C1 (PB6=SCL, PB7=SDA)
@@ -26,9 +27,12 @@
 /* ── 내부 상태 ─────────────────────────────── */
 static I2C_HandleTypeDef *s_hi2c = NULL;
 static int16_t s_angle[MOTOR_NUM] = {90, 90, 90};
+static int8_t  s_moving[MOTOR_NUM] = {0, 0, 0};      /* -1: Left, 1: Right, 0: Stop */
+static uint32_t s_last_tick[MOTOR_NUM] = {0, 0, 0};
 
-#define SMOOTH_STEP_DEG   2   // 작을수록 부드러움 (권장: 1~5)
-#define SMOOTH_STEP_MS    10  // 클수록 느림 (권장: 5~20)
+#define SMOOTH_STEP_DEG   1   // 버튼 누를 때 1도씩 이동
+#define MOVING_INTERVAL_MS 20 // 20ms 마다 1도씩 이동 (초당 50도)
+
 /* ── PCA9685 저수준 함수 ───────────────────── */
 
 static HAL_StatusTypeDef pca_write(uint8_t reg, uint8_t val)
@@ -113,6 +117,7 @@ int Motor_Init(I2C_HandleTypeDef *hi2c)
     /* 전체 서보 90° 중립 */
     for (uint8_t i = 0; i < MOTOR_NUM; i++) {
         s_angle[i] = 90;
+        s_moving[i] = 0;
         pca_set_pwm(i, PULSE_US_TO_TICK(s_cal_center[i]));
     }
 
@@ -126,25 +131,8 @@ void Motor_SetAngle(uint8_t motor_id, int16_t angle)
     if (angle < MOTOR_ANGLE_MIN) angle = MOTOR_ANGLE_MIN;
     if (angle > MOTOR_ANGLE_MAX) angle = MOTOR_ANGLE_MAX;
 
-    int16_t current = s_angle[motor_id];
-
-    /* 이미 목표 위치면 그냥 리턴 */
-    if (current == angle) return;
-
-    /* 현재 → 목표까지 스텝 단위로 이동 */
-    while (current != angle) {
-        if (current < angle) {
-            current += SMOOTH_STEP_DEG;
-            if (current > angle) current = angle;
-        } else {
-            current -= SMOOTH_STEP_DEG;
-            if (current < angle) current = angle;
-        }
-        pca_set_pwm(motor_id, angle_to_tick(motor_id, current));
-        HAL_Delay(SMOOTH_STEP_MS);
-    }
-
     s_angle[motor_id] = angle;
+    pca_set_pwm(motor_id, angle_to_tick(motor_id, s_angle[motor_id]));
 }
 
 void Motor_MoveRelative(uint8_t motor_id, int16_t delta)
@@ -159,48 +147,96 @@ int16_t Motor_GetAngle(uint8_t motor_id)
     return s_angle[motor_id];
 }
 
+void Motor_StartMove(uint8_t motor_id, int8_t dir)
+{
+    if (motor_id >= MOTOR_NUM) return;
+    s_moving[motor_id] = dir;
+    s_last_tick[motor_id] = HAL_GetTick();
+}
+
+void Motor_Stop(uint8_t motor_id)
+{
+    if (motor_id >= MOTOR_NUM) return;
+    s_moving[motor_id] = 0;
+}
+
+void Motor_Update(void)
+{
+    uint32_t now = HAL_GetTick();
+    for (uint8_t i = 0; i < MOTOR_NUM; i++) {
+        if (s_moving[i] != 0) {
+            if (now - s_last_tick[i] >= MOVING_INTERVAL_MS) {
+                int16_t next_angle = s_angle[i] + (s_moving[i] * SMOOTH_STEP_DEG);
+                
+                if (next_angle < MOTOR_ANGLE_MIN) next_angle = MOTOR_ANGLE_MIN;
+                if (next_angle > MOTOR_ANGLE_MAX) next_angle = MOTOR_ANGLE_MAX;
+                
+                if (next_angle != s_angle[i]) {
+                    s_angle[i] = next_angle;
+                    pca_set_pwm(i, angle_to_tick(i, s_angle[i]));
+                }
+                s_last_tick[i] = now;
+            }
+        }
+    }
+}
+
 int Motor_ParseAndRun(const char *data)
 {
     if (!data) return -1;
 
-    const char *p = skip_space(data);
+    int motor_num = 0;
+    char cmd1[16] = {0};
+    char cmd2[16] = {0};
 
-    /* "motor" 키워드 확인 */
-    if (strncasecmp(p, "motor", 5) != 0) return -1;
-    p += 5;
+    /* "motor1 left press" -> n=3, "motor1 release" -> n=2 */
+    int n = sscanf(data, " motor%d %15s %15s", &motor_num, cmd1, cmd2);
 
-    /* 모터 번호 파싱: motor1 / motor2 / motor3 */
-    if (*p < '1' || *p > '3') return -1;
-    uint8_t motor_id = (uint8_t)(*p - '1');  /* 0,1,2 */
-    p++;
+    if (n < 2) return -1;
+    if (motor_num < 1 || motor_num > MOTOR_NUM) return -1;
+    uint8_t motor_id = (uint8_t)(motor_num - 1);
 
-    p = skip_space(p);
+    /* 소문자로 변환하여 비교 */
+    for (int j = 0; cmd1[j]; j++) cmd1[j] = (char)tolower((unsigned char)cmd1[j]);
+    for (int j = 0; cmd2[j]; j++) cmd2[j] = (char)tolower((unsigned char)cmd2[j]);
 
-    /* 방향/모드 파싱 */
-    char dir[8] = {0};
-    int i = 0;
-    while (*p && !isspace((unsigned char)*p) && i < (int)(sizeof(dir) - 1))
-        dir[i++] = (char)tolower((unsigned char)*p++);
-    dir[i] = '\0';
-
-    p = skip_space(p);
-
-    /* 각도 파싱 */
-    if (*p == '\0') return -1;
-    char *endptr = NULL;
-    long deg = strtol(p, &endptr, 10);
-    if (endptr == p) return -1;
-
-    /* 명령 실행 */
-    if (strcmp(dir, "left") == 0) {
-        Motor_MoveRelative(motor_id, -(int16_t)deg);
-    } else if (strcmp(dir, "right") == 0) {
-        Motor_MoveRelative(motor_id, (int16_t)deg);
-    } else if (strcmp(dir, "set") == 0) {
-        Motor_SetAngle(motor_id, (int16_t)deg);
-    } else {
-        return -1;
+    if (n == 2) {
+        /* "motor1 release" 또는 "motor1 stop" */
+        if (strcmp(cmd1, "release") == 0 || strcmp(cmd1, "stop") == 0) {
+            Motor_Stop(motor_id);
+            return 0;
+        }
+    } else if (n == 3) {
+        /* "motor1 left press" / "motor1 right press" */
+        if (strcmp(cmd2, "press") == 0) {
+            if (strcmp(cmd1, "left") == 0) {
+                Motor_StartMove(motor_id, -1);
+                return 0;
+            } else if (strcmp(cmd1, "right") == 0) {
+                Motor_StartMove(motor_id, 1);
+                return 0;
+            }
+        }
+        /* "motor1 left release" / "motor1 right release" */
+        else if (strcmp(cmd2, "release") == 0) {
+            Motor_Stop(motor_id);
+            return 0;
+        }
+        /* "motor1 set 120" (절대 각도) */
+        else if (strcmp(cmd1, "set") == 0) {
+            Motor_SetAngle(motor_id, (int16_t)atoi(cmd2));
+            return 0;
+        }
+        /* "motor1 left 10" (상대 각도 이동) */
+        else if (strcmp(cmd1, "left") == 0) {
+            Motor_MoveRelative(motor_id, -(int16_t)atoi(cmd2));
+            return 0;
+        }
+        else if (strcmp(cmd1, "right") == 0) {
+            Motor_MoveRelative(motor_id, (int16_t)atoi(cmd2));
+            return 0;
+        }
     }
 
-    return 0;
+    return -1;
 }
