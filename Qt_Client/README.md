@@ -36,6 +36,44 @@
 - `Back to Sign In` 클릭 시 회원가입 입력값 초기화
 - 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
 
+## Qt Client Architecture Diagram
+
+```text
+                 +----------------------------------------------+
+                 |              QML UI Layer                    |
+                 | Main.qml / LoginScreen / VideoGrid / Sidebar |
+                 | - Login / Live / Playback / Export controls  |
+                 +------------------------+---------------------+
+                                          | signals / bindings
+                                          v
+                 +------------------------+---------------------+
+                 |             Backend Facade (QObject)         |
+                 |                include/core/Backend.h        |
+                 +-----------+----------------+-----------------+
+                             |                |
+                             |                +-----------------------------+
+                             |                                              |
+                             v                                              v
+        +--------------------+-------------------+          +---------------+------------------+
+        | Auth / Core / Session                  |          | Media / Playback / Export         |
+        | BackendAuth* / BackendCore* / Init     |          | BackendRtsp* / BackendSunapi*     |
+        | - JWT 저장, SSL 설정, API 요청 공통화  |          | - Live RTSP, WS RTSP 시퀀스, Export|
+        +--------------------+-------------------+          +---------------+------------------+
+                             |                                              |
+                HTTPS API + Bearer                                          | RTSP/RTSPS, WS/WSS
+                             |                                              |
+                             v                                              v
+          +------------------+--------------------+          +--------------+-------------------+
+          | Crow API Gateway (외부)               |          | Media Endpoints (외부)           |
+          | /login /recordings /api/sunapi/*      |          | MediaMTX / Camera StreamingServer|
+          +---------------------------------------+          +----------------------------------+
+```
+
+- 핵심 원칙
+  - Qt는 Crow API + Bearer 토큰 중심으로 동작
+  - Playback/Export 세션 준비는 Crow 세션 API 응답을 사용
+  - 카메라 계정/Digest 계산/CGI 상세는 클라이언트에서 직접 처리하지 않음
+
 ## Playback 작동 원리
 
 1. 사용자가 채널/날짜/시간 선택 후 재생 요청  
