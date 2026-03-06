@@ -1,6 +1,5 @@
 ﻿#include "Backend.h"
 
-#include <QDateTime>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSettings>
@@ -90,51 +89,6 @@ QString Backend::buildRtspUrl(int cameraIndex, bool useSubStream) const {
     const QString schemeRaw = m_env.value("RTSP_SCHEME", "rtsps").trimmed().toLower();
     const QString scheme = (schemeRaw == "rtsps") ? QString("rtsps") : QString("rtsp");
     return QString("%1://%2%3:%4%5").arg(scheme, authPrefix, m_rtspIp, m_rtspPort, path);
-}
-
-QString Backend::buildPlaybackRtspUrl(int channelIndex, const QString &dateText, const QString &timeText) const {
-    if (channelIndex < 0) {
-        return QString();
-    }
-
-    const QString dateTrimmed = dateText.trimmed();
-    const QString timeTrimmed = timeText.trimmed();
-    const QString dateTimeText = dateTrimmed + " " + timeTrimmed;
-    const QDateTime dt = QDateTime::fromString(dateTimeText, "yyyy-MM-dd HH:mm:ss");
-    if (!dt.isValid()) {
-        return QString();
-    }
-
-    const QString ts = dt.toString("yyyyMMddHHmmss");
-    const QString rtspHost = m_env.value("SUNAPI_RTSP_HOST").trimmed();
-    const QString host = !rtspHost.isEmpty()
-            ? rtspHost
-            : (m_env.value("SUNAPI_IP").trimmed().isEmpty() ? m_rtspIp : m_env.value("SUNAPI_IP").trimmed());
-    if (host.trimmed().isEmpty()) {
-        return QString();
-    }
-
-    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : QString();
-    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : QString();
-
-    QString authPrefix;
-    if (!user.isEmpty()) {
-        authPrefix = QString::fromUtf8(QUrl::toPercentEncoding(user));
-        if (!pass.isEmpty()) {
-            authPrefix += ":" + QString::fromUtf8(QUrl::toPercentEncoding(pass));
-        }
-        authPrefix += "@";
-    }
-
-    const QString portText = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed();
-    bool ok = false;
-    int port = portText.toInt(&ok);
-    if (!ok || port < 1 || port > 65535) {
-        port = 554;
-    }
-
-    return QString("rtsp://%1%2:%3/%4/recording/%5/play.smp")
-            .arg(authPrefix, host, QString::number(port), QString::number(channelIndex), ts);
 }
 
 bool Backend::updateRtspIp(QString ip) {

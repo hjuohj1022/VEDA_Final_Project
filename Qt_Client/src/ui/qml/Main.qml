@@ -107,6 +107,15 @@ ApplicationWindow {
         rtspConnectTimeout.stop()
     }
 
+    function closeRtspSettingsPopup() {
+        stopRtspConnectCheck()
+        rtspConfigError = ""
+        rtspConfigIsError = false
+        if (rtspSettingsPopup && rtspSettingsPopup.visible) {
+            rtspSettingsPopup.visible = false
+        }
+    }
+
     function startRtspProbe(ip, portText, useCustomAuth, username, password) {
         stopRtspConnectCheck()
         pendingRtspIp = ip
@@ -699,6 +708,7 @@ ApplicationWindow {
             if (!backend.isLoggedIn) {
                 inlineMainViewVisible = false
                 inlineMainCameraIndex = -1
+                closeRtspSettingsPopup()
             }
             stackLayout.currentIndex = backend.isLoggedIn
                                      ? (inlineMainViewVisible ? 3 : 0)
@@ -707,6 +717,7 @@ ApplicationWindow {
         function onSessionExpired() {
             inlineMainViewVisible = false
             inlineMainCameraIndex = -1
+            closeRtspSettingsPopup()
             stackLayout.currentIndex = 1
         }
         function onRtspProbeFinished(success, error) {
@@ -915,7 +926,7 @@ ApplicationWindow {
         width: 380
         height: rtspAdvancedToggle.checked ? 330 : 230
         visible: false
-        modality: Qt.ApplicationModal
+        modality: Qt.NonModal
         flags: Qt.Dialog | Qt.FramelessWindowHint
         color: "transparent"
 
@@ -924,10 +935,30 @@ ApplicationWindow {
                 stopRtspConnectCheck()
                 return
             }
+            backend.resetSessionTimer()
             x = window.x + (window.width - width) / 2
             y = window.y + (window.height - height) / 2
             rtspIpField.forceActiveFocus()
             rtspIpField.selectAll()
+        }
+
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            onTapped: backend.resetSessionTimer()
+        }
+
+        HoverHandler {
+            onPointChanged: {
+                var p = point.position
+                resetSessionFromMove(p.x, p.y)
+            }
+        }
+
+        WheelHandler {
+            onWheel: (event) => {
+                backend.resetSessionTimer()
+                event.accepted = false
+            }
         }
 
         Rectangle {
@@ -936,6 +967,27 @@ ApplicationWindow {
             border.color: theme.border
             border.width: 1
             radius: 10
+
+            Keys.onPressed: backend.resetSessionTimer()
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.AllButtons
+                propagateComposedEvents: true
+                onPressed: (mouse) => {
+                    backend.resetSessionTimer()
+                    mouse.accepted = false
+                }
+                onPositionChanged: (mouse) => {
+                    backend.resetSessionTimer()
+                    mouse.accepted = false
+                }
+                onWheel: (wheel) => {
+                    backend.resetSessionTimer()
+                    wheel.accepted = false
+                }
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -956,6 +1008,7 @@ ApplicationWindow {
                     color: theme.textPrimary
                     placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
                     onTextEdited: {
+                        backend.resetSessionTimer()
                         var sanitized = sanitizeIpv4Input(text)
                         if (sanitized !== text) {
                             text = sanitized
@@ -977,6 +1030,7 @@ ApplicationWindow {
                     color: theme.textPrimary
                     placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
                     onTextEdited: {
+                        backend.resetSessionTimer()
                         var sanitized = sanitizePortInput(text)
                         if (sanitized !== text) {
                             text = sanitized
@@ -988,7 +1042,10 @@ ApplicationWindow {
                         border.color: rtspPortField.activeFocus ? theme.accent : theme.border
                         radius: 6
                     }
-                    onAccepted: saveRtspButton.clicked()
+                    onAccepted: {
+                        backend.resetSessionTimer()
+                        saveRtspButton.clicked()
+                    }
                 }
 
                 CheckBox {
@@ -998,6 +1055,7 @@ ApplicationWindow {
                     checked: false
                     enabled: !window.rtspConnecting
                     onToggled: {
+                        backend.resetSessionTimer()
                         if (!checked) {
                             rtspUserField.text = ""
                             rtspPassField.text = ""
@@ -1035,6 +1093,7 @@ ApplicationWindow {
                             border.color: rtspUserField.activeFocus ? theme.accent : theme.border
                             radius: 6
                         }
+                        onTextEdited: backend.resetSessionTimer()
                     }
 
                     TextField {
@@ -1048,6 +1107,13 @@ ApplicationWindow {
                             color: theme.bgSecondary
                             border.color: rtspPassField.activeFocus ? theme.accent : theme.border
                             radius: 6
+                        }
+                        onTextEdited: backend.resetSessionTimer()
+                        onAccepted: {
+                            backend.resetSessionTimer()
+                            if (!window.rtspConnecting) {
+                                saveRtspButton.clicked()
+                            }
                         }
                     }
                 }
@@ -1069,6 +1135,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 96
                         enabled: !window.rtspConnecting
                         onClicked: {
+                            backend.resetSessionTimer()
                             var changed = backend.resetRtspConfigToEnv()
                             rtspIpField.text = backend.rtspIp
                             rtspPortField.text = backend.rtspPort
@@ -1100,6 +1167,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 96
                         enabled: true
                         onClicked: {
+                            backend.resetSessionTimer()
                             if (window.rtspConnecting) {
                                 window.stopRtspConnectCheck()
                                 rtspConfigIsError = false
@@ -1130,6 +1198,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 96
                         enabled: !window.rtspConnecting
                         onClicked: {
+                            backend.resetSessionTimer()
                             var ip = rtspIpField.text.trim()
                             var portText = rtspPortField.text.trim()
                             var useCustomAuth = rtspAdvancedToggle.checked

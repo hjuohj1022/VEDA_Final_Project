@@ -5,6 +5,7 @@
 #include <QRegularExpression>
 #include <QSslError>
 #include <QTimer>
+#include <QUrl>
 
 namespace {
 QString normalizeHex(const QString &input) {
@@ -18,16 +19,17 @@ QString normalizeHex(const QString &input) {
 }
 
 void Backend::streamingWsConnect() {
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    if (host.isEmpty()) {
-        emit streamingWsError("SUNAPI_IP is empty");
+    const QUrl apiBase(serverUrl());
+    const QString host = apiBase.host().trimmed();
+    if (!apiBase.isValid() || host.isEmpty()) {
+        emit streamingWsError("API_URL is invalid");
         return;
     }
 
-    const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
-    const QString wsScheme = (sunapiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
-    const int defaultPort = (sunapiScheme == "https") ? 443 : 80;
-    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+    const QString apiScheme = apiBase.scheme().trimmed().toLower();
+    const QString wsScheme = (apiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
+    const int defaultPort = (apiScheme == "https") ? 443 : 80;
+    const int httpPort = apiBase.port(defaultPort);
 
     QUrl wsUrl;
     wsUrl.setScheme(wsScheme);
