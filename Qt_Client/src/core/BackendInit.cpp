@@ -224,6 +224,6 @@ Backend::Backend(QObject *parent) : QObject(parent)
 Backend::~Backend() {}
 
 bool Backend::isLoggedIn() const { return m_isLoggedIn; }
-QString Backend::serverUrl() const { return m_env.value("API_URL", "http://localhost:8080"); }
+QString Backend::serverUrl() const { return m_env.value("API_URL", "https://localhost:8080"); }
 QString Backend::rtspIp() const { return m_rtspIp; }
 QString Backend::rtspPort() const { return m_rtspPort; }

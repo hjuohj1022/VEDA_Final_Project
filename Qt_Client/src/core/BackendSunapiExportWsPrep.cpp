@@ -5,9 +5,14 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMap>
-#include <QRegularExpression>
-#include <QTcpSocket>
+#include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 QString Backend::resolvePlaybackExportFfmpegBinary() const {
     // .env 경로 우선, 없으면 실행 디렉터리 인접 경로 탐색
@@ -65,7 +70,8 @@ bool Backend::buildPlaybackExportWsRtspUri(int channelIndex,
         return false;
     }
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    const QString rtspHost = m_env.value("SUNAPI_RTSP_HOST").trimmed();
+    const QString host = !rtspHost.isEmpty() ? rtspHost : m_env.value("SUNAPI_IP").trimmed();
     if (host.isEmpty()) {
         if (error) *error = "내보내기 실패: SUNAPI 접속 정보 누락";
         return false;
@@ -122,44 +128,65 @@ bool Backend::buildPlaybackExportWsOutputPath(const QString &savePath,
     return true;
 }
 
-bool Backend::fetchPlaybackExportRtspChallenge(const QString &host,
-                                               int rtspPort,
-                                               const QString &rtspUri,
+bool Backend::fetchPlaybackExportRtspChallenge(const QString &rtspUri,
                                                QString *realm,
                                                QString *nonce,
                                                QString *error) const {
-    QTcpSocket socket;
-    socket.connectToHost(host, static_cast<quint16>(rtspPort));
-    if (!socket.waitForConnected(2000)) {
-        if (error) *error = QString("내보내기 실패: RTSP 연결 실패 (%1)").arg(socket.errorString());
+    const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
+    const QString httpScheme = (sunapiScheme == "https") ? QStringLiteral("https") : QStringLiteral("http");
+    const int defaultPort = (httpScheme == "https") ? 443 : 80;
+    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+
+    QUrl url;
+    url.setScheme(httpScheme);
+    url.setHost(m_env.value("SUNAPI_IP").trimmed());
+    if (httpPort > 0) {
+        url.setPort(httpPort);
+    }
+    url.setPath("/api/sunapi/playback/challenge");
+    QUrlQuery q;
+    q.addQueryItem("uri", rtspUri);
+    q.addQueryItem("rtsp_port", m_env.value("SUNAPI_RTSP_PORT", "554").trimmed());
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    applySslIfNeeded(req);
+
+    QNetworkReply *reply = m_manager->get(req);
+    attachIgnoreSslErrors(reply, "SUNAPI_EXPORT_WS_CHALLENGE");
+
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(4000);
+    loop.exec();
+
+    if (timer.isActive()) {
+        timer.stop();
+    } else if (reply->isRunning()) {
+        reply->abort();
+    }
+
+    if (reply->error() != QNetworkReply::NoError) {
+        if (error) *error = QString("내보내기 실패: RTSP challenge 요청 실패 (%1)").arg(reply->errorString());
+        reply->deleteLater();
         return false;
     }
 
-    QByteArray optReq;
-    optReq += "OPTIONS " + rtspUri.toUtf8() + " RTSP/1.0\r\n";
-    optReq += "CSeq: 1\r\n";
-    optReq += "User-Agent: UWC[undefined]\r\n";
-    optReq += "\r\n";
-    socket.write(optReq);
-    socket.flush();
-    if (!socket.waitForReadyRead(2000)) {
-        socket.disconnectFromHost();
-        if (error) *error = "내보내기 실패: RTSP challenge 응답 대기 시간 초과";
-        return false;
+    QString localRealm;
+    QString localNonce;
+    const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    reply->deleteLater();
+    if (doc.isObject()) {
+        const QJsonObject obj = doc.object();
+        localRealm = obj.value("Realm").toString().trimmed();
+        if (localRealm.isEmpty()) localRealm = obj.value("realm").toString().trimmed();
+        localNonce = obj.value("Nonce").toString().trimmed();
+        if (localNonce.isEmpty()) localNonce = obj.value("nonce").toString().trimmed();
     }
-    QByteArray challengeResp = socket.readAll();
-    while (socket.waitForReadyRead(120)) {
-        challengeResp += socket.readAll();
-    }
-    socket.disconnectFromHost();
-
-    const QString challengeText = QString::fromUtf8(challengeResp);
-    const QRegularExpression realmRe("realm\\s*=\\s*\"([^\"]+)\"",
-                                     QRegularExpression::CaseInsensitiveOption);
-    const QRegularExpression nonceRe("nonce\\s*=\\s*\"([^\"]+)\"",
-                                     QRegularExpression::CaseInsensitiveOption);
-    const QString localRealm = realmRe.match(challengeText).captured(1).trimmed();
-    const QString localNonce = nonceRe.match(challengeText).captured(1).trimmed();
     if (localRealm.isEmpty() || localNonce.isEmpty()) {
         if (error) *error = "내보내기 실패: RTSP Digest challenge 파싱 실패";
         return false;

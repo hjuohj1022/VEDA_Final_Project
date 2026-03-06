@@ -16,6 +16,7 @@ void Backend::refreshRecordings() {
     QUrl url(serverUrl() + "/recordings");
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    applyAuthIfNeeded(request);
     qDebug() << "Refreshing recordings from:" << url.toString();
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "RECORDINGS_LIST");
@@ -66,6 +67,7 @@ void Backend::deleteRecording(QString name) {
     url.setQuery(query);
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    applyAuthIfNeeded(request);
     QNetworkReply *reply = m_manager->deleteResource(request);
     attachIgnoreSslErrors(reply, "RECORDINGS_DELETE");
     connect(reply, &QNetworkReply::finished, this, [=](){
@@ -84,6 +86,7 @@ void Backend::renameRecording(QString oldName, QString newName) {
     QUrl url(serverUrl() + "/recordings/rename");
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    applyAuthIfNeeded(request);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QJsonObject json;
@@ -130,6 +133,7 @@ void Backend::downloadAndPlay(QString fileName) {
     QUrl url = QUrl(getStreamUrl(fileName));
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    applyAuthIfNeeded(request);
     m_downloadReply = m_manager->get(request);
     attachIgnoreSslErrors(m_downloadReply, "RECORDINGS_DOWNLOAD_PLAY");
 
@@ -182,6 +186,7 @@ void Backend::exportRecording(QString fileName, QString savePath) {
     QUrl url = QUrl(getStreamUrl(fileName));
     QNetworkRequest request(url);
     applySslIfNeeded(request);
+    applyAuthIfNeeded(request);
     m_downloadReply = m_manager->get(request);
     attachIgnoreSslErrors(m_downloadReply, "RECORDINGS_EXPORT");
 

@@ -41,8 +41,10 @@
 1. 사용자가 채널/날짜/시간 선택 후 재생 요청  
 2. SUNAPI `recording.cgi?msubmenu=timeline`으로 녹화 구간 조회  
 3. 선택 시간이 녹화 구간인지 검증  
-4. `ws://<SUNAPI_IP>/StreamingServer` 연결  
-5. WebSocket 바이너리 프레임으로 RTSP 시퀀스 전송  
+4. Crow API로 RTSP challenge/digest 값을 준비한 뒤 WS 연결  
+   - `GET /api/sunapi/playback/challenge`
+   - `GET /api/sunapi/playback/digestauth`
+5. `wss://<SUNAPI_IP><SUNAPI_STREAMING_WS_PATH>` 연결 후 WebSocket 바이너리 프레임으로 RTSP 시퀀스 전송  
    - `OPTIONS` (401) -> Digest 포함 `OPTIONS` (200)  
    - 다중 `SETUP` (track별 interleaved channel)  
    - `PLAY`  
@@ -90,12 +92,13 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `RTSP_MAIN_PATH_TEMPLATE`, `RTSP_SUB_PATH_TEMPLATE`
 - SUNAPI/Playback
   - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
-  - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_PORT`
+  - `SUNAPI_USER`, `SUNAPI_PASSWORD`, `SUNAPI_RTSP_HOST`, `SUNAPI_RTSP_PORT`
   - `SUNAPI_STORAGE_CGI`, `SUNAPI_STORAGE_SUBMENU`, `SUNAPI_STORAGE_ACTION`, `SUNAPI_STORAGE_QUERY`
   - `SUNAPI_EXPORT_CREATE_*`, `SUNAPI_EXPORT_POLL_*`, `SUNAPI_EXPORT_DOWNLOAD_*`
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
+  - `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP` (608 장비에서 ffmpeg 백업 사용 여부)
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
-  - `PLAYBACK_WS_DIGEST_RESPONSE`, `PLAYBACK_WS_HEX1`, `PLAYBACK_WS_HEX2`, `PLAYBACK_WS_HEX3`
+  - `SUNAPI_STREAMING_WS_PATH`, `PLAYBACK_WS_DIGEST_RESPONSE`
   - `PLAYBACK_WS_SDP_FILE_PROTOCOL`
   - `PLAYBACK_EXPORT_FFMPEG_PATH` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
 
@@ -115,11 +118,31 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/recordings` | 녹화 목록 조회 |
 | `DELETE` | `/recordings?file={name}` | 녹화 파일 삭제 |
 | `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
-| `GET` | `/stw-cgi/... (SUNAPI)` | 카메라 SD 저장소 용량 조회(앱 내부 SUNAPI 호출) |
+| `GET` | `/api/sunapi/storage` | 카메라 SD 저장소 조회 (Crow 프록시) |
+| `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
+| `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |
+| `GET` | `/api/sunapi/playback/challenge` | Playback RTSP challenge 조회 |
+| `GET` | `/api/sunapi/playback/digestauth` | Playback digest response 조회 |
 
 참고:
-- Storage 메트릭은 백엔드 `/system/storage`가 아니라, 카메라 SUNAPI(`SUNAPI_STORAGE_*`)를 직접 호출해 계산합니다.
+- Storage/Timeline/MonthDays/Playback digest는 Crow API를 통해 조회합니다.
 - 빌드 시 로컬 `tools/ffmpeg.exe`가 있으면 실행 폴더로 자동 복사하도록 CMake POST_BUILD가 설정되어 있습니다.
+
+## Qt -> Crow API 전환 현황 (한글)
+
+- 적용 완료
+  - Playback RTSP challenge: Qt direct TCP -> Crow `/api/sunapi/playback/challenge`
+  - Playback digestauth: Qt direct CGI 조합 -> Crow `/api/sunapi/playback/digestauth`
+  - Export WS 준비 challenge 경로: Qt direct TCP -> Crow API
+  - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
+
+- 현재 상태
+  - Qt는 핵심 Playback/Export 준비 단계에서 Crow API를 사용합니다.
+  - 다만 전체 direct 제거는 진행 중이며, 일부 기능은 아직 `SUNAPI_USER/SUNAPI_PASSWORD`를 참조합니다.
+
+- 최종 목표
+  - Qt는 Crow API + Bearer 토큰만 사용
+  - 카메라 Digest/계정/직접 CGI 호출은 Crow 내부 전용으로 완전 이관
 
 ## 프로젝트 구조
 

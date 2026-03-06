@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
+#include <QTimer>
 #include <QUrl>
 #include <memory>
 
@@ -44,7 +45,10 @@ bool Backend::startPlaybackExportViaFfmpegBackup(int channelIndex,
                                                  const QString &endTimeText,
                                                  const QString &outPath,
                                                  const std::function<void()> &onFailedFallback) {
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
+    // HTTP SUNAPI 프록시 호스트와 RTSP 원본 호스트를 분리
+    const QString host = m_env.value("SUNAPI_RTSP_HOST",
+                          m_env.value("RTSP_IP",
+                          m_env.value("SUNAPI_IP"))).trimmed();
     const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
     const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : m_env.value("SUNAPI_PASSWORD").trimmed();
     if (host.isEmpty() || user.isEmpty()) {
@@ -199,7 +203,24 @@ bool Backend::startPlaybackExportViaFfmpegBackup(int channelIndex,
             m_playbackExportFfmpegProc = nullptr;
             proc->deleteLater();
             (*launchAttempt)(attemptIdx + 1);
+            return;
         }
+
+        // ffmpeg가 장시간 멈춘 경우 다음 시도로 넘기기 위한 watchdog
+        const int ffmpegTimeoutMs = qMax(5000, m_env.value("PLAYBACK_EXPORT_FFMPEG_TIMEOUT_MS", "20000").toInt());
+        QPointer<QProcess> procGuard(proc);
+        QTimer::singleShot(ffmpegTimeoutMs, this, [this, procGuard, attemptIdx, launchAttempt, attemptHandled, ffmpegTimeoutMs]() {
+            if (!procGuard || *attemptHandled) return;
+            if (procGuard->state() == QProcess::NotRunning) return;
+            *attemptHandled = true;
+            qWarning() << "[SUNAPI][EXPORT][FFMPEG] timeout:"
+                       << "attempt=" << attemptIdx
+                       << "timeoutMs=" << ffmpegTimeoutMs;
+            procGuard->kill();
+            m_playbackExportFfmpegProc = nullptr;
+            procGuard->deleteLater();
+            (*launchAttempt)(attemptIdx + 1);
+        });
     };
     (*launchAttempt)(0);
 

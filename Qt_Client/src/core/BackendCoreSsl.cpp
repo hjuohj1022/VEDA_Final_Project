@@ -89,6 +89,8 @@ void Backend::setupSslConfiguration() {
 
 // HTTPS 요청에 SSL 설정 적용
 void Backend::applySslIfNeeded(QNetworkRequest &request) const {
+    applyAuthIfNeeded(request);
+
     const QUrl url = request.url();
     if (url.scheme().compare("https", Qt::CaseInsensitive) != 0) {
         return;

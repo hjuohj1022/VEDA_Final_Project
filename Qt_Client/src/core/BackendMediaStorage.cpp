@@ -143,7 +143,7 @@ QList<QUrl> buildStorageCandidateUrls(const QMap<QString, QString> &env) {
         url.setScheme(scheme);
         url.setHost(host);
         if (port > 0) url.setPort(port);
-        url.setPath(QString("/stw-cgi/%1").arg(cgi));
+        url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgi));
 
         QUrlQuery q;
         q.addQueryItem("msubmenu", submenu);
@@ -257,63 +257,53 @@ StorageParseResult parseStoragePayload(const QByteArray &payload) {
 
 // 카메라 저장소 사용량 조회
 void Backend::checkStorage() {
-    const QList<QUrl> candidates = buildStorageCandidateUrls(m_env);
-    if (candidates.isEmpty()) {
+    // 로그인 전에는 Crow SUNAPI API 호출을 생략
+    if (m_authToken.trimmed().isEmpty()) {
         return;
     }
+    const auto reqTimer = std::make_shared<QElapsedTimer>();
+    reqTimer->start();
 
-    const auto issueAt = std::make_shared<std::function<void(int)>>();
-    *issueAt = [this, candidates, issueAt](int index) {
-        if (index < 0 || index >= candidates.size()) {
-            return;
-        }
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/storage");
+    applyAuthIfNeeded(request);
+    QNetworkReply *reply = m_manager->get(request);
+    attachIgnoreSslErrors(reply, "SUNAPI_STORAGE_CHECK");
 
-        const QUrl url = candidates.at(index);
-        const auto reqTimer = std::make_shared<QElapsedTimer>();
-        reqTimer->start();
-        QNetworkRequest request(url);
-        applySslIfNeeded(request);
-        QNetworkReply *reply = m_manager->get(request);
-        attachIgnoreSslErrors(reply, "SUNAPI_STORAGE_CHECK");
+    connect(reply, &QNetworkReply::finished, this, [this, reply, reqTimer]() {
+        const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
-        connect(reply, &QNetworkReply::finished, this, [this, candidates, index, reply, issueAt, url, reqTimer]() {
-            const QByteArray data = reply->readAll();
-            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-
-            if (reply->error() == QNetworkReply::NoError) {
-                const StorageParseResult parsed = parseStoragePayload(data);
-                if (parsed.ok && parsed.totalBytes > 0.0) {
-                    const double totalBytes = parsed.totalBytes;
-                    const double usedBytes = parsed.usedBytes;
-                    m_storagePercent = static_cast<int>((usedBytes / totalBytes) * 100.0);
-                    m_storageUsed = formatStorageBytes(usedBytes);
-                    m_storageTotal = formatStorageBytes(totalBytes);
-                    qInfo() << "[SUNAPI][STORAGE] parsed"
-                            << "url=" << url
-                            << "usedBytes=" << usedBytes
-                            << "totalBytes=" << totalBytes
-                            << "display=" << m_storageUsed << "/" << m_storageTotal;
-                    emit storageChanged();
-                    setLatency(static_cast<int>(reqTimer->elapsed()));
-                    reply->deleteLater();
-                    return;
-                }
-            }
-
-            const bool hasNext = (index + 1) < candidates.size();
-            if (hasNext) {
-                reply->deleteLater();
-                (*issueAt)(index + 1);
-                return;
-            }
-
-            qWarning() << "[SUNAPI][STORAGE] parse failed (all candidates)"
-                       << "lastUrl=" << reply->request().url()
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "[SUNAPI][STORAGE] crow api failed"
+                       << "url=" << reply->request().url()
                        << "status=" << status
                        << "body=" << QString::fromUtf8(data.left(220));
             reply->deleteLater();
-        });
-    };
+            return;
+        }
 
-    (*issueAt)(0);
+        const StorageParseResult parsed = parseStoragePayload(data);
+        if (!parsed.ok || parsed.totalBytes <= 0.0) {
+            qWarning() << "[SUNAPI][STORAGE] parse failed from crow api"
+                       << "url=" << reply->request().url()
+                       << "status=" << status
+                       << "body=" << QString::fromUtf8(data.left(220));
+            reply->deleteLater();
+            return;
+        }
+
+        const double totalBytes = parsed.totalBytes;
+        const double usedBytes = parsed.usedBytes;
+        m_storagePercent = static_cast<int>((usedBytes / totalBytes) * 100.0);
+        m_storageUsed = formatStorageBytes(usedBytes);
+        m_storageTotal = formatStorageBytes(totalBytes);
+        qInfo() << "[SUNAPI][STORAGE] parsed"
+                << "url=" << reply->request().url()
+                << "usedBytes=" << usedBytes
+                << "totalBytes=" << totalBytes
+                << "display=" << m_storageUsed << "/" << m_storageTotal;
+        emit storageChanged();
+        setLatency(static_cast<int>(reqTimer->elapsed()));
+        reply->deleteLater();
+    });
 }

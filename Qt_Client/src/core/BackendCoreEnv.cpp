@@ -52,6 +52,6 @@ void Backend::loadEnv() {
         qWarning() << "[ENV] .env file not found. using defaults.";
     } else {
         qInfo() << "[ENV] loaded from:" << loadedPath
-                << "API_URL=" << m_env.value("API_URL", "http://localhost:8080");
+                << "API_URL=" << m_env.value("API_URL", "https://localhost:8080");
     }
 }

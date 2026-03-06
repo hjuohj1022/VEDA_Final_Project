@@ -106,9 +106,10 @@ QString Backend::buildPlaybackRtspUrl(int channelIndex, const QString &dateText,
     }
 
     const QString ts = dt.toString("yyyyMMddHHmmss");
-    const QString host = m_env.value("SUNAPI_IP").trimmed().isEmpty()
-            ? m_rtspIp
-            : m_env.value("SUNAPI_IP").trimmed();
+    const QString rtspHost = m_env.value("SUNAPI_RTSP_HOST").trimmed();
+    const QString host = !rtspHost.isEmpty()
+            ? rtspHost
+            : (m_env.value("SUNAPI_IP").trimmed().isEmpty() ? m_rtspIp : m_env.value("SUNAPI_IP").trimmed());
     if (host.trimmed().isEmpty()) {
         return QString();
     }

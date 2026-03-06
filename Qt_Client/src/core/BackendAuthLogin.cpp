@@ -50,6 +50,7 @@ void Backend::login(QString id, QString pw) {
         const bool timedOut = reply->property("timedOut").toBool();
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
         if (loginTimeout) {
             loginTimeout->stop();
         }
@@ -61,6 +62,16 @@ void Backend::login(QString id, QString pw) {
 
         // 정상 로그인 시 세션 타이머 초기화 및 잠금 상태 해제
         if (reply->error() == QNetworkReply::NoError) {
+            QString token;
+            const QJsonDocument doc = QJsonDocument::fromJson(responseBody);
+            if (doc.isObject()) {
+                token = doc.object().value("token").toString().trimmed();
+            }
+            m_authToken = token;
+            if (m_authToken.isEmpty()) {
+                qWarning() << "[LOGIN] token missing in response";
+            }
+
             m_isLoggedIn = true;
             m_userId = id;
             m_sessionRemainingSeconds = m_sessionTimeoutSeconds;
