@@ -217,12 +217,10 @@ private:
     void loadEnv();
     void setupMqtt();
 
-    // SUNAPI 명령/Playback WS 런타임
-    bool sendSunapiCommand(const QString &cgiName,
-                           const QMap<QString, QString> &params,
-                           int cameraIndex,
-                           const QString &actionLabel,
-                           bool includeChannelParam = true);
+    // SUNAPI PTZ/Focus 런타임
+    bool sendSunapiPtzFocusCommand(int cameraIndex,
+                                   const QString &command,
+                                   const QString &actionLabel);
     QString ensurePlaybackWsSdpSource();
     void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
     void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
