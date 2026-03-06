@@ -36,15 +36,52 @@
 - `Back to Sign In` 클릭 시 회원가입 입력값 초기화
 - 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
 
+## Qt Client Architecture Diagram
+
+```text
+                 +----------------------------------------------+
+                 |              QML UI Layer                    |
+                 | Main.qml / LoginScreen / VideoGrid / Sidebar |
+                 | - Login / Live / Playback / Export controls  |
+                 +------------------------+---------------------+
+                                          | signals / bindings
+                                          v
+                 +------------------------+---------------------+
+                 |             Backend Facade (QObject)         |
+                 |                include/core/Backend.h        |
+                 +-----------+----------------+-----------------+
+                             |                |
+                             |                +-----------------------------+
+                             |                                              |
+                             v                                              v
+        +--------------------+-------------------+          +---------------+------------------+
+        | Auth / Core / Session                  |          | Media / Playback / Export         |
+        | BackendAuth* / BackendCore* / Init     |          | BackendRtsp* / BackendSunapi*     |
+        | - JWT 저장, SSL 설정, API 요청 공통화  |          | - Live RTSP, WS RTSP 시퀀스, Export|
+        +--------------------+-------------------+          +---------------+------------------+
+                             |                                              |
+                HTTPS API + Bearer                                          | RTSP/RTSPS, WS/WSS
+                             |                                              |
+                             v                                              v
+          +------------------+--------------------+          +--------------+-------------------+
+          | Crow API Gateway (외부)               |          | Media Endpoints (외부)           |
+          | /login /recordings /api/sunapi/*      |          | MediaMTX / Camera StreamingServer|
+          +---------------------------------------+          +----------------------------------+
+```
+
+- 핵심 원칙
+  - Qt는 Crow API + Bearer 토큰 중심으로 동작
+  - Playback/Export 세션 준비는 Crow 세션 API 응답을 사용
+  - 카메라 계정/Digest 계산/CGI 상세는 클라이언트에서 직접 처리하지 않음
+
 ## Playback 작동 원리
 
 1. 사용자가 채널/날짜/시간 선택 후 재생 요청  
 2. SUNAPI `recording.cgi?msubmenu=timeline`으로 녹화 구간 조회  
 3. 선택 시간이 녹화 구간인지 검증  
-4. Crow API로 RTSP challenge/digest 값을 준비한 뒤 WS 연결  
-   - `GET /api/sunapi/playback/challenge`
-   - `GET /api/sunapi/playback/digestauth`
-5. `wss://<SUNAPI_IP><SUNAPI_STREAMING_WS_PATH>` 연결 후 WebSocket 바이너리 프레임으로 RTSP 시퀀스 전송  
+4. Crow 세션 API로 RTSP URI/challenge/digest 값을 한 번에 준비  
+   - `GET /api/sunapi/playback/session`
+5. `wss://<API_URL host><SUNAPI_STREAMING_WS_PATH>` 연결 후 WebSocket 바이너리 프레임으로 RTSP 시퀀스 전송  
    - `OPTIONS` (401) -> Digest 포함 `OPTIONS` (200)  
    - 다중 `SETUP` (track별 interleaved channel)  
    - `PLAY`  
@@ -91,8 +128,9 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `RTSP_USERNAME`, `RTSP_PASSWORD`
   - `RTSP_MAIN_PATH_TEMPLATE`, `RTSP_SUB_PATH_TEMPLATE`
 - SUNAPI/Playback
-  - `SUNAPI_SCHEME`, `SUNAPI_IP`, `SUNAPI_PORT`
-  - `SUNAPI_RTSP_HOST`, `SUNAPI_RTSP_PORT`
+  - `SUNAPI_RTSP_PORT`
+  - `SUNAPI_STREAMING_WS_PATH` (세션 API 응답 WsPath가 없을 때 fallback)
+  - `SUNAPI_RTSP_HOST`, `SUNAPI_IP` (선택: `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=1`일 때 ffmpeg 백업 경로에서만 사용)
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
   - Storage 조회는 Crow 고정 API `GET /api/sunapi/storage` 사용
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
@@ -125,8 +163,8 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/api/sunapi/export/create` | Playback Export 작업 생성 |
 | `GET` | `/api/sunapi/export/status` | Playback Export 상태 조회 |
 | `GET` | `/api/sunapi/export/download` | Playback Export 파일 다운로드 |
-| `GET` | `/api/sunapi/playback/challenge` | Playback RTSP challenge 조회 |
-| `GET` | `/api/sunapi/playback/digestauth` | Playback digest response 조회 |
+| `GET` | `/api/sunapi/playback/session` | Playback WS 세션 정보 생성(URI/challenge/digest) |
+| `GET` | `/api/sunapi/export/session` | Export WS 세션 정보 생성(URI/challenge/digest) |
 
 참고:
 - Storage/Timeline/MonthDays/Playback digest는 Crow API를 통해 조회합니다.
@@ -135,9 +173,8 @@ ffmpeg 배치/버전 관리:
 ## Qt -> Crow API 전환 현황 (한글)
 
 - 적용 완료
-  - Playback RTSP challenge: Qt direct TCP -> Crow `/api/sunapi/playback/challenge`
-  - Playback digestauth: Qt direct CGI 조합 -> Crow `/api/sunapi/playback/digestauth`
-  - Export WS 준비 challenge 경로: Qt direct TCP -> Crow API
+  - Playback WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/playback/session`
+  - Export WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/export/session`
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
   - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)

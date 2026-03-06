@@ -107,7 +107,6 @@ public:
 
     // Playback 제어
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
-    Q_INVOKABLE QString buildPlaybackRtspUrl(int channelIndex, const QString &dateText, const QString &timeText) const;
     Q_INVOKABLE void preparePlaybackRtsp(int channelIndex, const QString &dateText, const QString &timeText);
     Q_INVOKABLE void loadPlaybackTimeline(int channelIndex, const QString &dateText);
     Q_INVOKABLE void loadPlaybackMonthRecordedDays(int channelIndex, int year, int month);
@@ -236,22 +235,11 @@ private:
 
     // Playback Export 준비/경로/인증 유틸
     QString resolvePlaybackExportFfmpegBinary() const;
-    bool buildPlaybackExportWsRtspUri(int channelIndex,
-                                      const QString &dateText,
-                                      const QString &startTimeText,
-                                      const QString &endTimeText,
-                                      QString *rtspUri,
-                                      int *durationSec,
-                                      QString *error) const;
     bool buildPlaybackExportWsOutputPath(const QString &savePath,
                                          bool *wantsAvi,
                                          QString *outPath,
                                          QString *finalOutPath,
                                          QString *error);
-    bool fetchPlaybackExportRtspChallenge(const QString &rtspUri,
-                                          QString *realm,
-                                          QString *nonce,
-                                          QString *error) const;
 
     // Playback Export RTSP/RTP 처리
     QByteArray buildPlaybackExportRtspRequest(int &nextCseq,

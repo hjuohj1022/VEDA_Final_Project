@@ -7,11 +7,9 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
-#include <QRandomGenerator>
 #include <QSslError>
 #include <QTimer>
 #include <QUrl>
-#include <QUrlQuery>
 #include <QWebSocket>
 
 void Backend::requestPlaybackExportViaWs(int channelIndex,
@@ -26,86 +24,82 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
     }
     m_playbackExportInProgress = true;
 
-    const QString sunapiHost = m_env.value("SUNAPI_IP").trimmed();
-    if (sunapiHost.isEmpty()) {
+    const int startSec = sunapiExportParseHmsToSec(startTimeText);
+    const int endSec = sunapiExportParseHmsToSec(endTimeText);
+    if (startSec < 0 || endSec < 0 || endSec < startSec) {
         m_playbackExportInProgress = false;
-        emit playbackExportFailed("내보내기 실패: SUNAPI 접속 정보 누락");
+        emit playbackExportFailed("내보내기 실패: 시작/종료 시간 형식 오류");
         return;
     }
-
-    QString rtspUri;
-    int durationSec = 0;
-    QString prepError;
-    if (!buildPlaybackExportWsRtspUri(channelIndex, dateText, startTimeText, endTimeText,
-                                      &rtspUri, &durationSec, &prepError)) {
-        m_playbackExportInProgress = false;
-        emit playbackExportFailed(prepError);
-        return;
-    }
+    const int durationSec = qMax(1, (endSec - startSec) + 1);
 
     bool wantsAvi = false;
     QString outPath;
     QString finalOutPath;
+    QString prepError;
     if (!buildPlaybackExportWsOutputPath(savePath, &wantsAvi, &outPath, &finalOutPath, &prepError)) {
         m_playbackExportInProgress = false;
         emit playbackExportFailed(prepError);
         return;
     }
 
-    QString realm;
-    QString nonce;
-    if (!fetchPlaybackExportRtspChallenge(rtspUri, &realm, &nonce, &prepError)) {
-        m_playbackExportInProgress = false;
-        emit playbackExportFailed(prepError);
-        return;
-    }
+    QNetworkRequest sessionReq = makeApiJsonRequest("/api/sunapi/export/session", {
+        {"channel", QString::number(channelIndex)},
+        {"date", dateText.trimmed()},
+        {"start_time", startTimeText.trimmed()},
+        {"end_time", endTimeText.trimmed()},
+        {"rtsp_port", m_env.value("SUNAPI_RTSP_PORT", "554").trimmed()}
+    });
+    applyAuthIfNeeded(sessionReq);
+    sessionReq.setRawHeader("Accept", "application/json");
+    sessionReq.setRawHeader("X-Secure-Session", "Normal");
 
-    const QString cnonce = QString::number(QRandomGenerator::global()->generate(), 16).left(8).toUpper();
-    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+    QNetworkReply *sessionReply = m_manager->get(sessionReq);
+    attachIgnoreSslErrors(sessionReply, "SUNAPI_EXPORT_WS_SESSION");
 
-    QUrl digestUrl;
-    digestUrl.setScheme(scheme);
-    digestUrl.setHost(sunapiHost);
-    if (httpPort > 0) {
-        digestUrl.setPort(httpPort);
-    }
-    digestUrl.setPath("/api/sunapi/playback/digestauth");
-    QUrlQuery dq;
-    dq.addQueryItem("method", "OPTIONS");
-    dq.addQueryItem("realm", realm);
-    dq.addQueryItem("nonce", nonce);
-    dq.addQueryItem("uri", rtspUri);
-    dq.addQueryItem("nc", "00000001");
-    dq.addQueryItem("cnonce", cnonce);
-    digestUrl.setQuery(dq);
-
-    QNetworkRequest digestReq(digestUrl);
-    applySslIfNeeded(digestReq);
-    digestReq.setRawHeader("Accept", "application/json");
-    digestReq.setRawHeader("X-Secure-Session", "Normal");
-    QNetworkReply *digestReply = m_manager->get(digestReq);
-    attachIgnoreSslErrors(digestReply, "SUNAPI_EXPORT_WS_DIGEST");
-
-    connect(digestReply, &QNetworkReply::finished, this, [=]() {
-        if (digestReply->error() != QNetworkReply::NoError) {
-            const QString e = digestReply->errorString();
-            digestReply->deleteLater();
+    connect(sessionReply, &QNetworkReply::finished, this, [=]() {
+        if (sessionReply->error() != QNetworkReply::NoError) {
+            const QString e = sessionReply->errorString();
+            sessionReply->deleteLater();
             m_playbackExportInProgress = false;
-            emit playbackExportFailed(QString("내보내기 실패: digestauth 요청 실패 (%1)").arg(e));
+            emit playbackExportFailed(QString("내보내기 실패: 세션 요청 실패 (%1)").arg(e));
             return;
         }
 
+        QString rtspUri;
+        QString realm;
+        QString nonce;
         QString digestResponse;
-        const QByteArray body = digestReply->readAll();
+        QString wsUser;
+        QString wsPathFromSession;
+        const QByteArray body = sessionReply->readAll();
         const QJsonDocument doc = QJsonDocument::fromJson(body);
         if (doc.isObject()) {
-            digestResponse = doc.object().value("Response").toString().trimmed();
+            const QJsonObject obj = doc.object();
+            rtspUri = obj.value("Uri").toString().trimmed();
+            if (rtspUri.isEmpty()) rtspUri = obj.value("uri").toString().trimmed();
+            realm = obj.value("Realm").toString().trimmed();
+            if (realm.isEmpty()) realm = obj.value("realm").toString().trimmed();
+            nonce = obj.value("Nonce").toString().trimmed();
+            if (nonce.isEmpty()) nonce = obj.value("nonce").toString().trimmed();
+            digestResponse = obj.value("Response").toString().trimmed();
+            if (digestResponse.isEmpty()) digestResponse = obj.value("response").toString().trimmed();
+            wsUser = obj.value("Username").toString().trimmed();
+            if (wsUser.isEmpty()) wsUser = obj.value("username").toString().trimmed();
+            wsPathFromSession = obj.value("WsPath").toString().trimmed();
+            if (wsPathFromSession.isEmpty()) wsPathFromSession = obj.value("ws_path").toString().trimmed();
         }
-        const QString wsUser = QString::fromUtf8(digestReply->rawHeader("X-SUNAPI-USER")).trimmed();
-        digestReply->deleteLater();
+        sessionReply->deleteLater();
+        if (rtspUri.isEmpty()) {
+            m_playbackExportInProgress = false;
+            emit playbackExportFailed("내보내기 실패: RTSP URI 누락");
+            return;
+        }
+        if (realm.isEmpty() || nonce.isEmpty()) {
+            m_playbackExportInProgress = false;
+            emit playbackExportFailed("내보내기 실패: digest challenge 누락");
+            return;
+        }
         if (digestResponse.isEmpty()) {
             m_playbackExportInProgress = false;
             emit playbackExportFailed("내보내기 실패: digest response 누락");
@@ -453,10 +447,11 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         st->keepAliveTimer->start();
         emit playbackExportProgress(5, "내보내기 WebSocket 연결 시작");
         m_playbackExportWs = st->ws;
-        const QString sunapiScheme = m_env.value("SUNAPI_SCHEME", "https").trimmed().toLower();
-        const QString wsScheme = (sunapiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
-        const int defaultPort = (sunapiScheme == "https") ? 443 : 80;
-        const int httpPort = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
+        const QUrl apiBase(serverUrl());
+        const QString apiScheme = apiBase.scheme().trimmed().toLower();
+        const QString wsScheme = (apiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
+        const int defaultPort = (apiScheme == "https") ? 443 : 80;
+        const int httpPort = apiBase.port(defaultPort);
 
         if (wsScheme == "wss" && m_sslConfigReady) {
             st->ws->setSslConfiguration(m_sslConfig);
@@ -472,11 +467,14 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
 
         QUrl wsUrl;
         wsUrl.setScheme(wsScheme);
-        wsUrl.setHost(sunapiHost);
+        wsUrl.setHost(apiBase.host());
         if (httpPort > 0) {
             wsUrl.setPort(httpPort);
         }
-        QString wsPath = m_env.value("SUNAPI_STREAMING_WS_PATH", "/StreamingServer").trimmed();
+        QString wsPath = m_env.value("SUNAPI_STREAMING_WS_PATH").trimmed();
+        if (wsPath.isEmpty()) {
+            wsPath = wsPathFromSession;
+        }
         if (wsPath.isEmpty()) {
             wsPath = "/StreamingServer";
         } else if (!wsPath.startsWith('/')) {
