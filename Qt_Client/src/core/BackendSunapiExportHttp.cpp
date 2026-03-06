@@ -37,16 +37,10 @@ void Backend::requestPlaybackExport(int channelIndex,
         return;
     }
 
-    const QString host = m_env.value("SUNAPI_IP").trimmed();
-    if (host.isEmpty()) {
-        emit playbackExportFailed("내보내기 실패: SUNAPI_IP 비어 있음");
+    if (m_authToken.trimmed().isEmpty()) {
+        emit playbackExportFailed("내보내기 실패: 로그인 필요");
         return;
     }
-
-    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
 
     QString outPath = savePath.trimmed();
     if (outPath.startsWith("file:", Qt::CaseInsensitive)) {
@@ -61,52 +55,7 @@ void Backend::requestPlaybackExport(int channelIndex,
     const QString startDt = QString("%1 %2").arg(dateText.trimmed(), startTimeText.trimmed());
     const QString endDt = QString("%1 %2").arg(dateText.trimmed(), endTimeText.trimmed());
 
-    struct Candidate {
-        QString cgi;
-        QString submenu;
-        QString action;
-        QString extraQuery;
-    };
-
-    QList<Candidate> createCandidates;
-    // 장비별 export CGI 호환성 차이를 고려해 후보 순차 시도
-    createCandidates.push_back({
-        m_env.value("SUNAPI_EXPORT_CREATE_CGI", "recording.cgi").trimmed(),
-        m_env.value("SUNAPI_EXPORT_CREATE_SUBMENU", "export").trimmed(),
-        m_env.value("SUNAPI_EXPORT_CREATE_ACTION", "create").trimmed(),
-        m_env.value("SUNAPI_EXPORT_CREATE_QUERY").trimmed()
-    });
-    createCandidates.push_back({"recording.cgi", "backup", "create", ""});
-    createCandidates.push_back({"recording.cgi", "export", "start", ""});
-
-    auto buildUrl = [scheme, host, port](const QString &cgi,
-                                         const QString &submenu,
-                                         const QString &action,
-                                         const QMap<QString, QString> &params,
-                                         const QString &extraQuery = QString()) {
-        QUrl url;
-        url.setScheme(scheme);
-        url.setHost(host);
-        if (port > 0) url.setPort(port);
-        url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgi));
-        QUrlQuery q;
-        q.addQueryItem("msubmenu", submenu);
-        q.addQueryItem("action", action);
-        for (auto it = params.constBegin(); it != params.constEnd(); ++it) {
-            q.addQueryItem(it.key(), it.value());
-        }
-        const QString eq = extraQuery.trimmed();
-        if (!eq.isEmpty()) {
-            const QStringList pairs = eq.split('&', Qt::SkipEmptyParts);
-            for (const QString &pair : pairs) {
-                const int sep = pair.indexOf('=');
-                if (sep > 0) q.addQueryItem(pair.left(sep), pair.mid(sep + 1));
-                else q.addQueryItem(pair, QString());
-            }
-        }
-        url.setQuery(q);
-        return url;
-    };
+    const QStringList createModes = {"default", "backup", "start"};
 
     m_playbackExportCancelRequested = false;
     m_playbackExportInProgress = true;
@@ -129,7 +78,7 @@ void Backend::requestPlaybackExport(int channelIndex,
             m_playbackExportInProgress = false;
             return;
         }
-        if (idx < 0 || idx >= createCandidates.size()) {
+        if (idx < 0 || idx >= createModes.size()) {
             // 608(Not Supported)인 경우 RTSP-over-WS 경로로 폴백
             if (lastCreateReason->contains("Error Code: 608", Qt::CaseInsensitive)) {
                 qInfo() << "[SUNAPI][EXPORT] fallback to RTSP-over-WS backup.smp path (Error 608)";
@@ -169,25 +118,28 @@ void Backend::requestPlaybackExport(int channelIndex,
             return;
         }
 
-        const Candidate c = createCandidates.at(idx);
-        QMap<QString, QString> params;
-        params.insert("Channel", QString::number(channelIndex));
-        params.insert("ChannelIDList", QString::number(channelIndex));
-        params.insert("StartTime", startDt);
-        params.insert("EndTime", endDt);
-        params.insert("FromDate", startDt);
-        params.insert("ToDate", endDt);
-        params.insert("Type", format);
-        params.insert("FileType", format);
-
-        const QUrl url = buildUrl(c.cgi, c.submenu, c.action, params, c.extraQuery);
+        const QString mode = createModes.at(idx);
+        const QUrl url = buildApiUrl("/api/sunapi/export/create", {
+            {"channel", QString::number(channelIndex)},
+            {"start_time", startDt},
+            {"end_time", endDt},
+            {"format", format},
+            {"mode", mode}
+        });
         qInfo() << "[SUNAPI][EXPORT] create request url=" << url;
         QNetworkRequest req(url);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         applySslIfNeeded(req);
+        applyAuthIfNeeded(req);
         QNetworkReply *reply = m_manager->get(req);
         attachIgnoreSslErrors(reply, "SUNAPI_EXPORT_CREATE");
 
         connect(reply, &QNetworkReply::finished, this, [=]() {
+            if (m_playbackExportCancelRequested) {
+                reply->deleteLater();
+                m_playbackExportInProgress = false;
+                return;
+            }
             const QByteArray body = reply->readAll();
             if (reply->error() != QNetworkReply::NoError) {
                 *lastCreateReason = reply->errorString();
@@ -212,11 +164,17 @@ void Backend::requestPlaybackExport(int channelIndex,
             reply->deleteLater();
 
             if (!downloadUrlText.isEmpty()) {
-                // create 응답에 다운로드 URL이 바로 있으면 즉시 다운로드
-                QUrl dl = QUrl(downloadUrlText);
-                if (dl.isRelative()) {
-                    dl = url.resolved(dl);
+                // download URL이 있어도 Crow 고정 API를 우선 사용한다.
+                if (!jobId.isEmpty()) {
+                    const QUrl dlUrl = buildApiUrl("/api/sunapi/export/download", {
+                        {"job_id", jobId},
+                        {"mode", mode}
+                    });
+                    playbackExportStartDownload(dlUrl, outPath);
+                    return;
                 }
+                QUrl dl = QUrl(downloadUrlText);
+                if (dl.isRelative()) dl = url.resolved(dl);
                 playbackExportStartDownload(dl, outPath);
                 return;
             }
@@ -227,17 +185,16 @@ void Backend::requestPlaybackExport(int channelIndex,
                 return;
             }
             emit playbackExportProgress(5, QString("내보내기 작업 생성 완료 (JobID=%1)").arg(jobId));
-            const QString pollCgi = m_env.value("SUNAPI_EXPORT_POLL_CGI", c.cgi).trimmed();
-            const QString pollSubmenu = m_env.value("SUNAPI_EXPORT_POLL_SUBMENU", c.submenu).trimmed().isEmpty()
-                    ? c.submenu : m_env.value("SUNAPI_EXPORT_POLL_SUBMENU", c.submenu).trimmed();
-            const QString pollAction = m_env.value("SUNAPI_EXPORT_POLL_ACTION", "status").trimmed();
-            const QString pollExtra = m_env.value("SUNAPI_EXPORT_POLL_QUERY").trimmed();
             const int pollMs = qMax(500, m_env.value("SUNAPI_EXPORT_POLL_INTERVAL_MS", "1500").toInt());
             const int timeoutMs = qMax(5000, m_env.value("SUNAPI_EXPORT_POLL_TIMEOUT_MS", "120000").toInt());
             const qint64 startMs = QDateTime::currentMSecsSinceEpoch();
 
             const auto pollOnce = std::make_shared<std::function<void()>>();
             *pollOnce = [=]() {
+                if (m_playbackExportCancelRequested) {
+                    m_playbackExportInProgress = false;
+                    return;
+                }
                 // 장시간 대기 시 무한 폴링 방지
                 const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startMs;
                 if (elapsed > timeoutMs) {
@@ -246,16 +203,22 @@ void Backend::requestPlaybackExport(int channelIndex,
                     return;
                 }
 
-                QMap<QString, QString> pollParams;
-                pollParams.insert("JobID", jobId);
-                pollParams.insert("ExportID", jobId);
-                const QUrl pollUrl = buildUrl(pollCgi, pollSubmenu, pollAction, pollParams, pollExtra);
+                const QUrl pollUrl = buildApiUrl("/api/sunapi/export/status", {
+                    {"job_id", jobId},
+                    {"mode", mode}
+                });
                 QNetworkRequest pollReq(pollUrl);
                 applySslIfNeeded(pollReq);
+                applyAuthIfNeeded(pollReq);
                 QNetworkReply *pollReply = m_manager->get(pollReq);
                 attachIgnoreSslErrors(pollReply, "SUNAPI_EXPORT_POLL");
 
                 connect(pollReply, &QNetworkReply::finished, this, [=]() {
+                    if (m_playbackExportCancelRequested) {
+                        pollReply->deleteLater();
+                        m_playbackExportInProgress = false;
+                        return;
+                    }
                     const QByteArray pollBody = pollReply->readAll();
                     if (pollReply->error() != QNetworkReply::NoError) {
                         // 상태 조회 실패는 다음 주기로 재시도
@@ -282,26 +245,10 @@ void Backend::requestPlaybackExport(int channelIndex,
                     }
 
                     if (done) {
-                        // 완료 시 다운로드 URL을 만들거나 응답 값을 사용해 파일 요청
-                        if (dlUrlText.isEmpty()) {
-                            const QString dlCgi = m_env.value("SUNAPI_EXPORT_DOWNLOAD_CGI", c.cgi).trimmed();
-                            const QString dlSubmenu = m_env.value("SUNAPI_EXPORT_DOWNLOAD_SUBMENU", c.submenu).trimmed().isEmpty()
-                                    ? c.submenu : m_env.value("SUNAPI_EXPORT_DOWNLOAD_SUBMENU", c.submenu).trimmed();
-                            const QString dlAction = m_env.value("SUNAPI_EXPORT_DOWNLOAD_ACTION", "download").trimmed();
-                            const QString dlExtra = m_env.value("SUNAPI_EXPORT_DOWNLOAD_QUERY").trimmed();
-                            QMap<QString, QString> dlParams;
-                            dlParams.insert("JobID", jobId);
-                            dlParams.insert("ExportID", jobId);
-                            const QUrl dlUrl = buildUrl(dlCgi, dlSubmenu, dlAction, dlParams, dlExtra);
-                            pollReply->deleteLater();
-                            playbackExportStartDownload(dlUrl, outPath);
-                            return;
-                        }
-
-                        QUrl dlUrl = QUrl(dlUrlText);
-                        if (dlUrl.isRelative()) {
-                            dlUrl = pollUrl.resolved(dlUrl);
-                        }
+                        const QUrl dlUrl = buildApiUrl("/api/sunapi/export/download", {
+                            {"job_id", jobId},
+                            {"mode", mode}
+                        });
                         pollReply->deleteLater();
                         playbackExportStartDownload(dlUrl, outPath);
                         return;

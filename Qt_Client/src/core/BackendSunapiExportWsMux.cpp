@@ -190,7 +190,12 @@ bool Backend::playbackExportConsumeInterleaved(const QByteArray &bytes,
 }
 
 void Backend::cancelPlaybackExport() {
-    if (!m_playbackExportInProgress) {
+    const bool hasAnyRuntime =
+            m_playbackExportInProgress
+            || m_playbackExportWs
+            || m_playbackExportFfmpegProc
+            || m_playbackExportDownloadReply;
+    if (!hasAnyRuntime) {
         return;
     }
 

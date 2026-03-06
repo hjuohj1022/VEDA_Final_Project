@@ -263,6 +263,10 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         };
 
         auto parseRtspResponse = [this, st, sendRtsp, finishWith](const QString &text) {
+            if (m_playbackExportCancelRequested) {
+                finishWith(false, "내보내기 취소됨");
+                return;
+            }
             playbackExportHandleRtspResponse(
                 text,
                 st->setupCseqTrack,
@@ -280,6 +284,10 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
                 [finishWith](const QString &err) { finishWith(false, err); });
         };
         auto processInterleaved = [this, st, finishWith](const QByteArray &bytes) {
+            if (m_playbackExportCancelRequested) {
+                finishWith(false, "내보내기 취소됨");
+                return;
+            }
             if (playbackExportConsumeInterleaved(bytes,
                                                  st->h264RtpChannel,
                                                  st->interleavedBuf,
@@ -305,7 +313,11 @@ void Backend::requestPlaybackExportViaWs(int channelIndex,
         st->hardTimeoutTimer->setSingleShot(true);
         st->hardTimeoutTimer->setInterval(qMax(120000, durationSec * 2000));
 
-        connect(st->hardTimeoutTimer, &QTimer::timeout, this, [finishWith, st]() {
+        connect(st->hardTimeoutTimer, &QTimer::timeout, this, [this, finishWith, st]() {
+            if (m_playbackExportCancelRequested) {
+                finishWith(false, "내보내기 취소됨");
+                return;
+            }
             // 데이터가 일정 시간 멈춘 경우 타임아웃 처리
             if (!st->gotRtp || st->writtenBytes <= 0) {
                 finishWith(false, "내보내기 실패: 데이터 수신 시간 초과");
