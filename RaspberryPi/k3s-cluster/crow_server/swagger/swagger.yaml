@@ -225,6 +225,44 @@ paths:
           description: Server config error
         '502':
           description: Upstream error
+  /api/sunapi/playback/challenge:
+    get:
+      summary: Get RTSP digest challenge (realm/nonce) for playback
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uri
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "rtsp://192.168.55.16/0/recording/20260306071236/play.smp"
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: Challenge resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '500':
+          description: Server config error
+        '502':
+          description: Upstream error
   /sunapi/stw-cgi/{tail}:
     get:
       summary: Proxy SUNAPI GET request
