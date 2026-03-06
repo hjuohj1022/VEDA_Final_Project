@@ -176,6 +176,33 @@ paths:
           description: Unauthorized
         '502':
           description: Upstream error
+  /api/sunapi/ptz/focus:
+    post:
+      summary: PTZ Focus/Zoom control via fixed command
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: command
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [zoom_in, zoom_out, zoom_stop, focus_near, focus_far, focus_stop, autofocus]
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
   /api/sunapi/playback/digestauth:
     get:
       summary: Build digest response for playback RTSP over WS

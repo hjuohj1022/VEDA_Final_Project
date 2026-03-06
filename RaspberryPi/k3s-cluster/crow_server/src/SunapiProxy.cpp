@@ -392,7 +392,53 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
     });
 
-    // Crow 고정 스펙: Playback RTSP challenge 조회
+    // Crow fixed spec: PTZ/Focus control
+    CROW_ROUTE(app, "/api/sunapi/ptz/focus")
+        .methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req) {
+        const char* ch = req.url_params.get("channel");
+        const char* command = req.url_params.get("command");
+        if (!ch || !command) {
+            return crow::response(400, "missing query: channel, command");
+        }
+
+        std::string key;
+        std::string value;
+        const std::string cmd(command);
+        if (cmd == "zoom_in") {
+            key = "ZoomContinuous";
+            value = "In";
+        } else if (cmd == "zoom_out") {
+            key = "ZoomContinuous";
+            value = "Out";
+        } else if (cmd == "zoom_stop") {
+            key = "ZoomContinuous";
+            value = "Stop";
+        } else if (cmd == "focus_near") {
+            key = "FocusContinuous";
+            value = "Near";
+        } else if (cmd == "focus_far") {
+            key = "FocusContinuous";
+            value = "Far";
+        } else if (cmd == "focus_stop") {
+            key = "FocusContinuous";
+            value = "Stop";
+        } else if (cmd == "autofocus") {
+            key = "Mode";
+            value = "SimpleFocus";
+        } else {
+            return crow::response(400, "invalid command");
+        }
+
+        const std::string q = makeQuery({
+            {"msubmenu", "focus"},
+            {"action", "control"},
+            {"Channel", ch},
+            {key, value}
+        });
+        return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
+    });
+
     CROW_ROUTE(app, "/api/sunapi/playback/challenge")
         .methods(crow::HTTPMethod::Get)
     ([](const crow::request& req) {
@@ -421,7 +467,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         std::string rtspHost = envOrDefault("SUNAPI_RTSP_HOST", "");
         if (rtspHost.empty()) {
             const std::string base = trimTrailingSlash(envOrDefault("SUNAPI_BASE_URL", ""));
-            static const std::regex baseRe("^(https?)://([^/:]+)(?::([0-9]+))?$", std::regex_constants::icase);            
+            static const std::regex baseRe("^(https?)://([^/:]+)(?::([0-9]+))?$", std::regex_constants::icase);
             std::smatch m;
             if (std::regex_match(base, m, baseRe) && m.size() > 2) {
                 rtspHost = m[2].str();
