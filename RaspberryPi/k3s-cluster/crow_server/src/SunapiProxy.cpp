@@ -327,4 +327,44 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         });
         return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
     });
+
+    // Crow 고정 스펙: Playback digestauth response 생성
+    CROW_ROUTE(app, "/api/sunapi/playback/digestauth")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        const char* method = req.url_params.get("method");
+        const char* realm = req.url_params.get("realm");
+        const char* nonce = req.url_params.get("nonce");
+        const char* uri = req.url_params.get("uri");
+        const char* cnonce = req.url_params.get("cnonce");
+        const char* nc = req.url_params.get("nc");
+
+        if (!method || !realm || !nonce || !uri || !cnonce || !nc) {
+            return crow::response(400, "missing query: method, realm, nonce, uri, cnonce, nc");
+        }
+
+        const std::string username = envOrDefault("SUNAPI_USER", "");
+        if (username.empty()) {
+            return crow::response(500, "SUNAPI_USER is not configured");
+        }
+
+        const std::string q = makeQuery({
+            {"msubmenu", "digestauth"},
+            {"action", "view"},
+            {"Method", method},
+            {"Realm", realm},
+            {"Nonce", nonce},
+            {"Uri", uri},
+            {"username", username},
+            {"password", ""},
+            {"Nc", nc},
+            {"Cnonce", cnonce}
+        });
+
+        crow::response res = forwardToSunapi(req, "/stw-cgi/security.cgi?" + q);
+        if (res.code >= 200 && res.code < 300) {
+            res.set_header("X-SUNAPI-USER", username);
+        }
+        return res;
+    });
 }
