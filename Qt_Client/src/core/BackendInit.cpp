@@ -22,21 +22,15 @@ Backend::Backend(QObject *parent) : QObject(parent)
     loadEnv();
     setupSslConfiguration();
 
-    // SUNAPI Digest 인증 콜백 연결
+    // Qt에서는 카메라 Digest 계정을 직접 주입하지 않는다.
+    // 인증은 Crow 고정 API + Bearer 흐름으로 처리한다.
     connect(m_manager, &QNetworkAccessManager::authenticationRequired,
             this,
             [this](QNetworkReply *reply, QAuthenticator *authenticator) {
-                const QString user = m_env.value("SUNAPI_USER").trimmed();
-                const QString pass = m_env.value("SUNAPI_PASSWORD").trimmed();
-                const QString sunapiHost = m_env.value("SUNAPI_IP").trimmed();
                 const QString host = reply ? reply->url().host() : QString();
                 qInfo() << "[SUNAPI][AUTH] challenge host=" << host
-                        << "realm=" << authenticator->realm()
-                        << "userConfigured=" << !user.isEmpty();
-                if (!user.isEmpty() && !sunapiHost.isEmpty() && host.compare(sunapiHost, Qt::CaseInsensitive) == 0) {
-                    authenticator->setUser(user);
-                    authenticator->setPassword(pass);
-                }
+                        << "realm=" << authenticator->realm();
+                Q_UNUSED(authenticator);
     });
     setupMqtt();
 

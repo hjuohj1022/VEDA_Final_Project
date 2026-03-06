@@ -49,8 +49,8 @@ bool Backend::startPlaybackExportViaFfmpegBackup(int channelIndex,
     const QString host = m_env.value("SUNAPI_RTSP_HOST",
                           m_env.value("RTSP_IP",
                           m_env.value("SUNAPI_IP"))).trimmed();
-    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : m_env.value("SUNAPI_USER").trimmed();
-    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : m_env.value("SUNAPI_PASSWORD").trimmed();
+    const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : QString();
+    const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : QString();
     if (host.isEmpty() || user.isEmpty()) {
         return false;
     }

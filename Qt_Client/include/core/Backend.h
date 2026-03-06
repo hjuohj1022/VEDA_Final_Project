@@ -206,11 +206,7 @@ private:
     QUrl buildApiUrl(const QString &path, const QMap<QString, QString> &query = {}) const;
     QNetworkRequest makeApiJsonRequest(const QString &path, const QMap<QString, QString> &query = {}) const;
 
-    // SUNAPI 공통 URL/에러 유틸
-    QUrl buildSunapiUrl(const QString &cgiName,
-                        const QMap<QString, QString> &params,
-                        int cameraIndex,
-                        bool includeChannelParam) const;
+    // SUNAPI 공통 에러 유틸
     bool isSunapiBodyError(const QString &body, QString *reason = nullptr) const;
 
     // Core 초기화

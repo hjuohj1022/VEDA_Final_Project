@@ -55,51 +55,6 @@ QNetworkRequest Backend::makeApiJsonRequest(const QString &path, const QMap<QStr
     return req;
 }
 
-QUrl Backend::buildSunapiUrl(const QString &cgiName,
-                             const QMap<QString, QString> &params,
-                             int cameraIndex,
-                             bool includeChannelParam) const {
-    // SUNAPI_SCHEME/SUNAPI_PORT 기준으로 카메라 CGI 엔드포인트 구성
-    const QString schemeRaw = m_env.value("SUNAPI_SCHEME", "http").trimmed().toLower();
-    const QString scheme = (schemeRaw == "https") ? QString("https") : QString("http");
-    const int defaultPort = (scheme == "https") ? 443 : 80;
-    const int port = m_env.value("SUNAPI_PORT", QString::number(defaultPort)).toInt();
-
-    QUrl url;
-    url.setScheme(scheme);
-    url.setHost(m_env.value("SUNAPI_IP").trimmed());
-    if (port > 0) {
-        url.setPort(port);
-    }
-    url.setPath(QString("/sunapi/stw-cgi/%1").arg(cgiName));
-
-    QUrlQuery query;
-    if (params.contains("msubmenu")) {
-        query.addQueryItem("msubmenu", params.value("msubmenu"));
-    }
-    if (params.contains("action")) {
-        query.addQueryItem("action", params.value("action"));
-    }
-
-    // Channel 키가 없으면 현재 선택 카메라 인덱스를 기본 채널로 주입
-    if (params.contains("Channel")) {
-        query.addQueryItem("Channel", params.value("Channel"));
-    } else if (params.contains("channel")) {
-        query.addQueryItem("channel", params.value("channel"));
-    } else if (includeChannelParam) {
-        query.addQueryItem("Channel", QString::number(cameraIndex));
-    }
-
-    for (auto it = params.constBegin(); it != params.constEnd(); ++it) {
-        if (it.key() == "msubmenu" || it.key() == "action" || it.key() == "Channel" || it.key() == "channel") {
-            continue;
-        }
-        query.addQueryItem(it.key(), it.value());
-    }
-    url.setQuery(query);
-    return url;
-}
-
 bool Backend::isSunapiBodyError(const QString &body, QString *reason) const {
     const QString trimmed = body.trimmed();
     if (trimmed.isEmpty()) {
