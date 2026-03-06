@@ -176,6 +176,102 @@ paths:
           description: Unauthorized
         '502':
           description: Upstream error
+  /api/sunapi/export/create:
+    get:
+      summary: Create playback export job
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: start_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "2026-03-06 08:36:41"
+        - name: end_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "2026-03-06 08:41:41"
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            example: AVI
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
+  /api/sunapi/export/status:
+    get:
+      summary: Poll playback export job status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
+  /api/sunapi/export/download:
+    get:
+      summary: Download playback export by job id
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: Forwarded export binary payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
   /api/sunapi/ptz/focus:
     post:
       summary: PTZ Focus/Zoom control via fixed command
