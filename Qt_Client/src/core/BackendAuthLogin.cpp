@@ -54,11 +54,18 @@ void Backend::login(QString id, QString pw) {
         if (loginTimeout) {
             loginTimeout->stop();
         }
-        qWarning() << "[LOGIN] status=" << statusCode
-                   << "netError=" << static_cast<int>(netError)
-                   << "timedOut=" << timedOut
-                   << "timeoutMs=" << timeoutMs
-                   << "errorString=" << reply->errorString();
+        if (netError == QNetworkReply::NoError) {
+            qWarning() << "[LOGIN] status=" << statusCode
+                       << "netError=" << static_cast<int>(netError)
+                       << "timedOut=" << timedOut
+                       << "timeoutMs=" << timeoutMs;
+        } else {
+            qWarning() << "[LOGIN] status=" << statusCode
+                       << "netError=" << static_cast<int>(netError)
+                       << "timedOut=" << timedOut
+                       << "timeoutMs=" << timeoutMs
+                       << "errorString=" << reply->errorString();
+        }
 
         // 정상 로그인 시 세션 타이머 초기화 및 잠금 상태 해제
         if (reply->error() == QNetworkReply::NoError) {

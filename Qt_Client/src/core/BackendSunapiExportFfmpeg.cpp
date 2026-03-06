@@ -2,7 +2,12 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QProcess>
 #include <QTimer>
 #include <QUrl>
@@ -45,13 +50,9 @@ bool Backend::startPlaybackExportViaFfmpegBackup(int channelIndex,
                                                  const QString &endTimeText,
                                                  const QString &outPath,
                                                  const std::function<void()> &onFailedFallback) {
-    // HTTP SUNAPI 프록시 호스트와 RTSP 원본 호스트를 분리
-    const QString host = m_env.value("SUNAPI_RTSP_HOST",
-                          m_env.value("RTSP_IP",
-                          m_env.value("SUNAPI_IP"))).trimmed();
     const QString user = m_useCustomRtspAuth ? m_rtspUsernameOverride : QString();
     const QString pass = m_useCustomRtspAuth ? m_rtspPasswordOverride : QString();
-    if (host.isEmpty() || user.isEmpty()) {
+    if (user.isEmpty()) {
         return false;
     }
 
@@ -70,23 +71,58 @@ bool Backend::startPlaybackExportViaFfmpegBackup(int channelIndex,
     m_playbackExportOutPath = ffOutPath;
     m_playbackExportFinalPath = ffOutPath;
 
-    const QString startCompact = dateText.trimmed().remove('-') + startTimeText.trimmed().remove(':');
-    const QString endCompact = dateText.trimmed().remove('-') + endTimeText.trimmed().remove(':');
+    QNetworkRequest sessionReq = makeApiJsonRequest("/api/sunapi/export/session", {
+        {"channel", QString::number(channelIndex)},
+        {"date", dateText.trimmed()},
+        {"start_time", startTimeText.trimmed()},
+        {"end_time", endTimeText.trimmed()},
+        {"rtsp_port", m_env.value("SUNAPI_RTSP_PORT", "554").trimmed()}
+    });
+    applyAuthIfNeeded(sessionReq);
+    sessionReq.setRawHeader("Accept", "application/json");
+    sessionReq.setRawHeader("X-Secure-Session", "Normal");
 
-    bool rtspPortOk = false;
-    const int rtspPort = m_env.value("SUNAPI_RTSP_PORT", "554").trimmed().toInt(&rtspPortOk);
-    const int rtspPortFinal = rtspPortOk ? rtspPort : 554;
+    QNetworkReply *sessionReply = m_manager->get(sessionReq);
+    attachIgnoreSslErrors(sessionReply, "SUNAPI_EXPORT_FFMPEG_SESSION");
+    QEventLoop loop;
+    QObject::connect(sessionReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(4000);
+    loop.exec();
+    if (timer.isActive()) {
+        timer.stop();
+    } else if (sessionReply->isRunning()) {
+        sessionReply->abort();
+    }
 
-    const QString authUser = QString::fromUtf8(QUrl::toPercentEncoding(user));
-    const QString authPass = QString::fromUtf8(QUrl::toPercentEncoding(pass));
-    const QString rtspUrlBase = QString("rtsp://%1:%2@%3:%4/%5/recording/%6-%7/OverlappedID=0/backup.smp")
-                                .arg(authUser,
-                                     authPass,
-                                     host,
-                                     QString::number(rtspPortFinal),
-                                     QString::number(channelIndex),
-                                     startCompact,
-                                     endCompact);
+    if (sessionReply->error() != QNetworkReply::NoError) {
+        sessionReply->deleteLater();
+        return false;
+    }
+
+    QString rtspUrlBase;
+    const QJsonDocument sessionDoc = QJsonDocument::fromJson(sessionReply->readAll());
+    if (sessionDoc.isObject()) {
+        const QJsonObject obj = sessionDoc.object();
+        rtspUrlBase = obj.value("Uri").toString().trimmed();
+        if (rtspUrlBase.isEmpty()) {
+            rtspUrlBase = obj.value("uri").toString().trimmed();
+        }
+    }
+    sessionReply->deleteLater();
+    if (rtspUrlBase.isEmpty()) {
+        return false;
+    }
+
+    QUrl baseUri(rtspUrlBase);
+    if (!baseUri.isValid() || baseUri.host().trimmed().isEmpty()) {
+        return false;
+    }
+    baseUri.setUserName(user);
+    baseUri.setPassword(pass);
+    rtspUrlBase = baseUri.toString();
     const QString rtspUrlH264 = rtspUrlBase + "/trackID=H264";
 
     const QString ffmpegBin = resolveFfmpegBinary(m_env);
