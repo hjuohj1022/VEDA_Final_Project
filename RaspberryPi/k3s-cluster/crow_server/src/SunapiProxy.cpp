@@ -279,6 +279,113 @@ crow::response forwardToSunapi(const crow::request& req, const std::string& forw
     return res;
 }
 
+std::string buildExportForwardPath(const crow::request& req,
+                                   const std::string& phase,
+                                   std::string* error) {
+    const char* ch = req.url_params.get("channel");
+    const char* startTime = req.url_params.get("start_time");
+    const char* endTime = req.url_params.get("end_time");
+    const char* format = req.url_params.get("format");
+    const char* jobId = req.url_params.get("job_id");
+    const char* mode = req.url_params.get("mode");
+
+    const std::string modeText = mode ? std::string(mode) : std::string("default");
+    std::string cgi;
+    std::string submenu;
+    std::string action;
+    std::string extraQuery;
+
+    if (phase == "create") {
+        if (!ch || !startTime || !endTime) {
+            if (error) *error = "missing query: channel, start_time, end_time";
+            return {};
+        }
+        if (modeText == "backup") {
+            cgi = "recording.cgi";
+            submenu = "backup";
+            action = "create";
+        } else if (modeText == "start") {
+            cgi = "recording.cgi";
+            submenu = "export";
+            action = "start";
+        } else {
+            cgi = envOrDefault("SUNAPI_EXPORT_CREATE_CGI", "recording.cgi");
+            submenu = envOrDefault("SUNAPI_EXPORT_CREATE_SUBMENU", "export");
+            action = envOrDefault("SUNAPI_EXPORT_CREATE_ACTION", "create");
+            extraQuery = envOrDefault("SUNAPI_EXPORT_CREATE_QUERY", "");
+        }
+
+        const std::string fmt = (format && *format) ? std::string(format) : std::string("AVI");
+        std::string q = makeQuery({
+            {"msubmenu", submenu},
+            {"action", action},
+            {"Channel", ch},
+            {"ChannelIDList", ch},
+            {"StartTime", startTime},
+            {"EndTime", endTime},
+            {"FromDate", startTime},
+            {"ToDate", endTime},
+            {"Type", fmt},
+            {"FileType", fmt}
+        });
+        if (!extraQuery.empty()) {
+            q += "&" + extraQuery;
+        }
+        return "/stw-cgi/" + cgi + "?" + q;
+    }
+
+    if (!jobId || std::string(jobId).empty()) {
+        if (error) *error = "missing query: job_id";
+        return {};
+    }
+
+    if (phase == "status") {
+        if (modeText == "backup") {
+            cgi = "recording.cgi";
+            submenu = "backup";
+            action = "status";
+        } else if (modeText == "start") {
+            cgi = "recording.cgi";
+            submenu = "export";
+            action = "status";
+        } else {
+            cgi = envOrDefault("SUNAPI_EXPORT_POLL_CGI", "recording.cgi");
+            submenu = envOrDefault("SUNAPI_EXPORT_POLL_SUBMENU", "export");
+            action = envOrDefault("SUNAPI_EXPORT_POLL_ACTION", "status");
+            extraQuery = envOrDefault("SUNAPI_EXPORT_POLL_QUERY", "");
+        }
+    } else if (phase == "download") {
+        if (modeText == "backup") {
+            cgi = "recording.cgi";
+            submenu = "backup";
+            action = "download";
+        } else if (modeText == "start") {
+            cgi = "recording.cgi";
+            submenu = "export";
+            action = "download";
+        } else {
+            cgi = envOrDefault("SUNAPI_EXPORT_DOWNLOAD_CGI", "recording.cgi");
+            submenu = envOrDefault("SUNAPI_EXPORT_DOWNLOAD_SUBMENU", "export");
+            action = envOrDefault("SUNAPI_EXPORT_DOWNLOAD_ACTION", "download");
+            extraQuery = envOrDefault("SUNAPI_EXPORT_DOWNLOAD_QUERY", "");
+        }
+    } else {
+        if (error) *error = "invalid export phase";
+        return {};
+    }
+
+    std::string q = makeQuery({
+        {"msubmenu", submenu},
+        {"action", action},
+        {"JobID", jobId},
+        {"ExportID", jobId}
+    });
+    if (!extraQuery.empty()) {
+        q += "&" + extraQuery;
+    }
+    return "/stw-cgi/" + cgi + "?" + q;
+}
+
 } // namespace
 
 void registerSunapiProxyRoutes(crow::SimpleApp& app) {
@@ -390,6 +497,42 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
             {"OverlappedID", "0"}
         });
         return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
+    });
+
+    // Crow fixed spec: export create request
+    CROW_ROUTE(app, "/api/sunapi/export/create")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        std::string err;
+        const std::string path = buildExportForwardPath(req, "create", &err);
+        if (path.empty()) {
+            return crow::response(400, err.empty() ? "invalid export create query" : err);
+        }
+        return forwardToSunapi(req, path);
+    });
+
+    // Crow fixed spec: export status polling request
+    CROW_ROUTE(app, "/api/sunapi/export/status")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        std::string err;
+        const std::string path = buildExportForwardPath(req, "status", &err);
+        if (path.empty()) {
+            return crow::response(400, err.empty() ? "invalid export status query" : err);
+        }
+        return forwardToSunapi(req, path);
+    });
+
+    // Crow fixed spec: export download request
+    CROW_ROUTE(app, "/api/sunapi/export/download")
+        .methods(crow::HTTPMethod::Get)
+    ([](const crow::request& req) {
+        std::string err;
+        const std::string path = buildExportForwardPath(req, "download", &err);
+        if (path.empty()) {
+            return crow::response(400, err.empty() ? "invalid export download query" : err);
+        }
+        return forwardToSunapi(req, path);
     });
 
     // Crow fixed spec: PTZ/Focus control
