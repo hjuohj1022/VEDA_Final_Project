@@ -176,6 +176,55 @@ paths:
           description: Unauthorized
         '502':
           description: Upstream error
+  /api/sunapi/playback/digestauth:
+    get:
+      summary: Build digest response for playback RTSP over WS
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: method
+          in: query
+          required: true
+          schema:
+            type: string
+            example: OPTIONS
+        - name: realm
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: nonce
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: uri
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: cnonce
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: nc
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "00000001"
+      responses:
+        '200':
+          description: Forwarded SUNAPI digestauth payload (includes Response)
+        '400':
+          description: Missing query
+        '401':
+          description: Unauthorized
+        '500':
+          description: Server config error
+        '502':
+          description: Upstream error
   /sunapi/stw-cgi/{tail}:
     get:
       summary: Proxy SUNAPI GET request
