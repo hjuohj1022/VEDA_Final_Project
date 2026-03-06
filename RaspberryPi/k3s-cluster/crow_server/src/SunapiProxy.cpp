@@ -157,8 +157,8 @@ bool fetchRtspDigestChallenge(const std::string& host,
             if (resp.size() > 32768) break;
         }
 
-        static const std::regex realmRe(R"(realm\s*=\s*"([^"]+)")", std::regex::icase);
-        static const std::regex nonceRe(R"(nonce\s*=\s*"([^"]+)")", std::regex::icase);
+        static const std::regex realmRe("realm\\s*=\\s*\"([^\"]+)\"", std::regex_constants::icase);
+        static const std::regex nonceRe("nonce\\s*=\\s*\"([^\"]+)\"", std::regex_constants::icase);
         std::smatch m;
         std::string localRealm;
         std::string localNonce;
@@ -421,7 +421,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         std::string rtspHost = envOrDefault("SUNAPI_RTSP_HOST", "");
         if (rtspHost.empty()) {
             const std::string base = trimTrailingSlash(envOrDefault("SUNAPI_BASE_URL", ""));
-            static const std::regex baseRe(R"(^(https?)://([^/:]+)(?::([0-9]+))?$)", std::regex::icase);
+            static const std::regex baseRe("^(https?)://([^/:]+)(?::([0-9]+))?$", std::regex_constants::icase);            
             std::smatch m;
             if (std::regex_match(base, m, baseRe) && m.size() > 2) {
                 rtspHost = m[2].str();
