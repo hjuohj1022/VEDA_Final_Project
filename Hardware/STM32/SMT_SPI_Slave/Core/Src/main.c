@@ -83,12 +83,16 @@ int main(void)
     while (1)
     {
         /* USER CODE BEGIN WHILE */
+        Motor_Update();
+
         HAL_StatusTypeDef ret =
             HAL_SPI_TransmitReceive(&hspi1, spi_tx_buf, spi_rx_buf,
-                                    SPI_PKT_SIZE, 5000);
+                                    SPI_PKT_SIZE, 10);
         if (ret == HAL_OK) {
             processPacket();
             prepareResponse(STATUS_OK, NULL, 0);
+        } else if (ret == HAL_TIMEOUT) {
+            /* No data received within 10ms, just continue */
         }
         /* USER CODE END WHILE */
     }
@@ -120,9 +124,12 @@ static void processPacket(void)
         /* "motor1/2/3 left/right/set <deg>" */
         int result = Motor_ParseAndRun(cmd_str);
         if (result == 0) {
-            /* 명령에서 모터 번호 추출해서 로그 출력 */
-            uint8_t mid = (uint8_t)(cmd_str[5] - '1');
-            printf("motor%d -> %d deg\r\n", mid + 1, Motor_GetAngle(mid));
+            /* 명령에서 모터 번호 추출 (로그용) */
+            int mid_log = 0;
+            sscanf(cmd_str, " motor%d", &mid_log);
+            if (mid_log >= 1 && mid_log <= MOTOR_NUM) {
+                printf("motor%d -> %d deg\r\n", mid_log, Motor_GetAngle((uint8_t)(mid_log - 1)));
+            }
             prepareResponse(STATUS_OK, NULL, 0);
         } else {
             printf("Unknown cmd\r\n");

@@ -95,11 +95,30 @@ void    Motor_MoveRelative(uint8_t motor_id, int16_t delta);
 int16_t Motor_GetAngle(uint8_t motor_id);
 
 /**
+ * @brief  모터 상태 업데이트 (메인 루프에서 주기적 호출)
+ *         연속 이동 상태일 때 각도를 점진적으로 변경
+ */
+void    Motor_Update(void);
+
+/**
+ * @brief  모터 연속 이동 시작
+ * @param  motor_id  MOTOR_1 / MOTOR_2 / MOTOR_3
+ * @param  dir       -1: Left, 1: Right, 0: Stop
+ */
+void    Motor_StartMove(uint8_t motor_id, int8_t dir);
+
+/**
+ * @brief  모터 정지
+ */
+void    Motor_Stop(uint8_t motor_id);
+
+/**
  * @brief  SPI DATA 문자열 파싱 → 서보 제어
  *
- *  형식: "motor<N> left <deg>"    예) "motor1 left 90"
- *        "motor<N> right <deg>"   예) "motor2 right 45"
- *        "motor<N> set <deg>"     예) "motor3 set 120"
+ *  형식: "motor<N> left press"    → 왼쪽으로 계속 이동 시작
+ *        "motor<N> right press"   → 오른쪽으로 계속 이동 시작
+ *        "motor<N> release"       → 이동 정지
+ *        "motor<N> set <deg>"     → 특정 각도로 이동
  *
  * @return 0=성공, -1=파싱 실패
  */
