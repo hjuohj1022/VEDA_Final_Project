@@ -5,7 +5,7 @@ CERT_DIR="./certs"
 mkdir -p $CERT_DIR
 DAYS=3650 # 10년 유효
 SERVER_DNS="${SERVER_DNS:-api.myproject.com}"
-SERVER_IP="${SERVER_IP:-192.168.55.200}"
+SERVER_IP="${SERVER_IP:-서버-ip}"
 SERVER_EXT="$CERT_DIR/server_ext.cnf"
 
 echo "🔐 [1/3] Root CA (마스터 키) 생성 중..."
