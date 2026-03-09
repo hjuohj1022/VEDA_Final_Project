@@ -41,6 +41,7 @@ qt_add_executable(Team3VideoReceiver
     src/core/BackendRtspPlayback.cpp
     src/core/BackendRtspProbe.cpp
     src/core/BackendSunapiPtz.cpp
+    src/core/BackendSunapiDisplay.cpp
     src/core/BackendSunapiTimeline.cpp
     src/core/BackendSunapiTimelineMonth.cpp
     src/core/BackendSunapiExportHttp.cpp

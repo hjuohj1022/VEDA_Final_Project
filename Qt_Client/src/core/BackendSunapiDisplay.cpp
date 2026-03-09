@@ -1,0 +1,238 @@
+﻿#include "Backend.h"
+
+#include <QDebug>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QRegularExpression>
+
+namespace {
+int clampInt(int value, int minValue, int maxValue) {
+    return qMax(minValue, qMin(maxValue, value));
+}
+
+QString extractValue(const QString &body, const QStringList &keys) {
+    for (const QString &k : keys) {
+        const QRegularExpression jsonPattern(
+            QString("\"%1\"\\s*:\\s*(\"([^\"]*)\"|[-]?[0-9]+|true|false)").arg(QRegularExpression::escape(k)),
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch jm = jsonPattern.match(body);
+        if (jm.hasMatch()) {
+            QString raw = jm.captured(1).trimmed();
+            if (raw.startsWith('"') && raw.endsWith('"') && raw.size() >= 2) {
+                raw = raw.mid(1, raw.size() - 2);
+            }
+            return raw;
+        }
+
+        const QRegularExpression kvPattern(
+            QString("(^|\\n|\\r)\\s*%1\\s*=\\s*([^\\r\\n]+)").arg(QRegularExpression::escape(k)),
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch km = kvPattern.match(body);
+        if (km.hasMatch()) {
+            return km.captured(2).trimmed();
+        }
+    }
+    return {};
+}
+
+bool parseBoolString(const QString &text, bool fallback) {
+    const QString v = text.trimmed().toLower();
+    if (v == "1" || v == "true" || v == "yes" || v == "on") return true;
+    if (v == "0" || v == "false" || v == "no" || v == "off") return false;
+    return fallback;
+}
+} // namespace
+
+void Backend::sunapiLoadDisplaySettings(int cameraIndex) {
+    if (cameraIndex < 0) {
+        emit cameraControlMessage("Display settings load failed: invalid camera index", true);
+        return;
+    }
+    if (m_authToken.trimmed().isEmpty()) {
+        emit cameraControlMessage("Display settings load failed: login required", true);
+        return;
+    }
+
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/display/settings", {
+        {"channel", QString::number(cameraIndex)}
+    });
+    applyAuthIfNeeded(request);
+    qInfo() << "[SUNAPI] request: Display settings view url=" << request.url().toString();
+
+    QNetworkReply *reply = m_manager->get(request);
+    attachIgnoreSslErrors(reply, "SUNAPI_DISPLAY_VIEW");
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            const QString err = QString("Display settings load failed (HTTP %1): %2")
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(160);
+            emit cameraControlMessage(err, true);
+            reply->deleteLater();
+            return;
+        }
+
+        QString sunapiErrMsg;
+        if (isSunapiBodyError(body, &sunapiErrMsg)) {
+            const QString err = QString("Display settings load failed: device response error (%1)").arg(sunapiErrMsg);
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(200);
+            emit cameraControlMessage(err, true);
+            reply->deleteLater();
+            return;
+        }
+
+        const QString contrastText = extractValue(body, {"Contrast"});
+        const QString brightnessText = extractValue(body, {"Brightness"});
+        const QString sharpnessLevelText = extractValue(body, {"SharpnessLevel"});
+        const QString sharpnessEnableText = extractValue(body, {"SharpnessEnable"});
+        const QString colorLevelText = extractValue(body, {"Saturation", "ColorLevel"});
+
+        bool changed = false;
+        if (!contrastText.isEmpty()) {
+            const int next = clampInt(contrastText.toInt(), 1, 100);
+            if (m_displayContrast != next) { m_displayContrast = next; changed = true; }
+        }
+        if (!brightnessText.isEmpty()) {
+            const int next = clampInt(brightnessText.toInt(), 1, 100);
+            if (m_displayBrightness != next) { m_displayBrightness = next; changed = true; }
+        }
+        if (!sharpnessLevelText.isEmpty()) {
+            const int next = clampInt(sharpnessLevelText.toInt(), 1, 32);
+            if (m_displaySharpnessLevel != next) { m_displaySharpnessLevel = next; changed = true; }
+        }
+        if (!sharpnessEnableText.isEmpty()) {
+            const bool next = parseBoolString(sharpnessEnableText, m_displaySharpnessEnabled);
+            if (m_displaySharpnessEnabled != next) { m_displaySharpnessEnabled = next; changed = true; }
+        }
+        if (!colorLevelText.isEmpty()) {
+            const int next = clampInt(colorLevelText.toInt(), 1, 100);
+            if (m_displayColorLevel != next) { m_displayColorLevel = next; changed = true; }
+        }
+
+        if (changed) {
+            emit displaySettingsChanged();
+        }
+        reply->deleteLater();
+    });
+}
+
+bool Backend::sunapiSetDisplaySettings(int cameraIndex,
+                                       int contrast,
+                                       int brightness,
+                                       int sharpnessLevel,
+                                       int colorLevel,
+                                       bool sharpnessEnabled) {
+    if (cameraIndex < 0) {
+        emit cameraControlMessage("Display settings update failed: invalid camera index", true);
+        return false;
+    }
+    if (m_authToken.trimmed().isEmpty()) {
+        emit cameraControlMessage("Display settings update failed: login required", true);
+        return false;
+    }
+
+    const int c = clampInt(contrast, 1, 100);
+    const int b = clampInt(brightness, 1, 100);
+    const int s = clampInt(sharpnessLevel, 1, 32);
+    const int sat = clampInt(colorLevel, 1, 100);
+    const QString sharpEnabled = sharpnessEnabled ? "true" : "false";
+
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/display/settings", {
+        {"channel", QString::number(cameraIndex)},
+        {"contrast", QString::number(c)},
+        {"brightness", QString::number(b)},
+        {"sharpness_level", QString::number(s)},
+        {"color_level", QString::number(sat)},
+        {"sharpness_enable", sharpEnabled}
+    });
+    applyAuthIfNeeded(request);
+    qInfo() << "[SUNAPI] request: Display settings set url=" << request.url().toString();
+
+    QNetworkReply *reply = m_manager->post(request, QByteArray());
+    attachIgnoreSslErrors(reply, "SUNAPI_DISPLAY_SET");
+    connect(reply, &QNetworkReply::finished, this, [this, reply, c, b, s, sat, sharpnessEnabled]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            QString sunapiErrMsg;
+            if (isSunapiBodyError(body, &sunapiErrMsg)) {
+                const QString err = QString("Display settings update failed: device response error (%1)").arg(sunapiErrMsg);
+                qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(200);
+                emit cameraControlMessage(err, true);
+            } else {
+                bool changed = false;
+                if (m_displayContrast != c) { m_displayContrast = c; changed = true; }
+                if (m_displayBrightness != b) { m_displayBrightness = b; changed = true; }
+                if (m_displaySharpnessLevel != s) { m_displaySharpnessLevel = s; changed = true; }
+                if (m_displayColorLevel != sat) { m_displayColorLevel = sat; changed = true; }
+                if (m_displaySharpnessEnabled != sharpnessEnabled) { m_displaySharpnessEnabled = sharpnessEnabled; changed = true; }
+                if (changed) emit displaySettingsChanged();
+                emit cameraControlMessage("Display settings updated", false);
+            }
+        } else {
+            const QString err = QString("Display settings update failed (HTTP %1): %2")
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(160);
+            emit cameraControlMessage(err, true);
+        }
+        reply->deleteLater();
+    });
+
+    return true;
+}
+
+bool Backend::sunapiResetDisplaySettings(int cameraIndex) {
+    if (cameraIndex < 0) {
+        emit cameraControlMessage("Display reset failed: invalid camera index", true);
+        return false;
+    }
+    if (m_authToken.trimmed().isEmpty()) {
+        emit cameraControlMessage("Display reset failed: login required", true);
+        return false;
+    }
+
+    QNetworkRequest request = makeApiJsonRequest("/api/sunapi/display/reset", {
+        {"channel", QString::number(cameraIndex)}
+    });
+    applyAuthIfNeeded(request);
+    qInfo() << "[SUNAPI] request: Display reset url=" << request.url().toString();
+
+    QNetworkReply *reply = m_manager->post(request, QByteArray());
+    attachIgnoreSslErrors(reply, "SUNAPI_DISPLAY_RESET");
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            QString sunapiErrMsg;
+            if (isSunapiBodyError(body, &sunapiErrMsg)) {
+                const QString err = QString("Display reset failed: device response error (%1)").arg(sunapiErrMsg);
+                qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(200);
+                emit cameraControlMessage(err, true);
+            } else {
+                bool changed = false;
+                if (m_displayContrast != 50) { m_displayContrast = 50; changed = true; }
+                if (m_displayBrightness != 50) { m_displayBrightness = 50; changed = true; }
+                if (m_displaySharpnessLevel != 12) { m_displaySharpnessLevel = 12; changed = true; }
+                if (m_displayColorLevel != 50) { m_displayColorLevel = 50; changed = true; }
+                if (!m_displaySharpnessEnabled) { m_displaySharpnessEnabled = true; changed = true; }
+                if (changed) emit displaySettingsChanged();
+                emit cameraControlMessage("Display settings reset", false);
+            }
+        } else {
+            const QString err = QString("Display reset failed (HTTP %1): %2")
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[SUNAPI]" << err << "url=" << reply->request().url() << "body=" << body.left(160);
+            emit cameraControlMessage(err, true);
+        }
+        reply->deleteLater();
+    });
+
+    return true;
+}
