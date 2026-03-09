@@ -7,6 +7,41 @@
 
 #include <opencv2/core.hpp>
 
+namespace pointcloud_detail {
+constexpr float kDegreesToRadians = 0.01745329252f;
+constexpr float kProjectionPadding = 10.0f;
+constexpr float kDepthEpsilon = 1.0e-6f;
+constexpr float kDepthJumpRatio = 0.18f;
+
+inline float DegreesToRadians(float degrees) {
+    return degrees * kDegreesToRadians;
+}
+
+inline float ClampUnitInterval(float value) {
+    return std::max(0.0f, std::min(1.0f, value));
+}
+
+inline bool IsDepthClose(float lhs, float rhs) {
+    const float maxValue = std::max(lhs, rhs);
+    if (maxValue <= kDepthEpsilon) {
+        return false;
+    }
+    return (std::abs(lhs - rhs) / maxValue) <= kDepthJumpRatio;
+}
+
+inline cv::Scalar AverageColor(const cv::Vec3b& first, const cv::Vec3b& second) {
+    return cv::Scalar((first[0] + second[0]) * 0.5,
+                      (first[1] + second[1]) * 0.5,
+                      (first[2] + second[2]) * 0.5);
+}
+
+inline cv::Scalar AverageColor(const cv::Vec3b& first, const cv::Vec3b& second, const cv::Vec3b& third) {
+    return cv::Scalar((first[0] + second[0] + third[0]) / 3.0,
+                      (first[1] + second[1] + third[1]) / 3.0,
+                      (first[2] + second[2] + third[2]) / 3.0);
+}
+}  // namespace pointcloud_detail
+
 struct CameraIntrinsics {
     float fx = 0.0f;
     float fy = 0.0f;
@@ -15,8 +50,8 @@ struct CameraIntrinsics {
 };
 
 inline CameraIntrinsics MakeIntrinsicsFromFovDegrees(float hfovDeg, float vfovDeg, int width, int height) {
-    const float hfovRad = hfovDeg * 0.01745329252f;
-    const float vfovRad = vfovDeg * 0.01745329252f;
+    const float hfovRad = pointcloud_detail::DegreesToRadians(hfovDeg);
+    const float vfovRad = pointcloud_detail::DegreesToRadians(vfovDeg);
     CameraIntrinsics K;
     K.fx = (width * 0.5f) / std::tan(hfovRad * 0.5f);
     K.fy = (height * 0.5f) / std::tan(vfovRad * 0.5f);
@@ -91,8 +126,8 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
     DepthToPointCloud(depth, width, height, K, points, stride, minDepth, maxDepth);
     if (points.empty()) return canvas;
 
-    const float rx = rotXDeg * 0.01745329252f;
-    const float ry = rotYDeg * 0.01745329252f;
+    const float rx = pointcloud_detail::DegreesToRadians(rotXDeg);
+    const float ry = pointcloud_detail::DegreesToRadians(rotYDeg);
     const float cosY = std::cos(ry);
     const float sinY = std::sin(ry);
     const float cosX = std::cos(rx);
@@ -121,17 +156,18 @@ inline cv::Mat RenderPointCloudView(const float* depth, int width, int height,
         maxZ = std::max(maxZ, z2);
     }
 
-    const float pad = 10.0f;
-    const float scaleX = (outW - 2.0f * pad) / (maxX - minX + 1e-6f);
-    const float scaleY = (outH - 2.0f * pad) / (maxY - minY + 1e-6f);
+    const float pad = pointcloud_detail::kProjectionPadding;
+    const float scaleX = (outW - 2.0f * pad) / (maxX - minX + pointcloud_detail::kDepthEpsilon);
+    const float scaleY = (outH - 2.0f * pad) / (maxY - minY + pointcloud_detail::kDepthEpsilon);
     const float scale = std::min(scaleX, scaleY);
 
     auto depthColor = [&](float z) -> cv::Scalar {
-        float t = (z - minZ) / (maxZ - minZ + 1e-6f);
-        t = std::max(0.0f, std::min(1.0f, t));
-        int r = static_cast<int>(255.0f * std::min(1.0f, std::max(0.0f, 2.0f * (t - 0.5f))));
-        int g = static_cast<int>(255.0f * std::min(1.0f, std::max(0.0f, 2.0f * (0.5f - std::abs(t - 0.5f)))));
-        int b = static_cast<int>(255.0f * std::min(1.0f, std::max(0.0f, 1.0f - 2.0f * t)));
+        float t = (z - minZ) / (maxZ - minZ + pointcloud_detail::kDepthEpsilon);
+        t = pointcloud_detail::ClampUnitInterval(t);
+        const int r = static_cast<int>(255.0f * pointcloud_detail::ClampUnitInterval(2.0f * (t - 0.5f)));
+        const int g =
+            static_cast<int>(255.0f * pointcloud_detail::ClampUnitInterval(2.0f * (0.5f - std::abs(t - 0.5f))));
+        const int b = static_cast<int>(255.0f * pointcloud_detail::ClampUnitInterval(1.0f - 2.0f * t));
         return cv::Scalar(b, g, r);
     };
 
@@ -169,8 +205,8 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     }
     if (stride < 1) stride = 1;
 
-    const float rx = rotXDeg * 0.01745329252f;
-    const float ry = rotYDeg * 0.01745329252f;
+    const float rx = pointcloud_detail::DegreesToRadians(rotXDeg);
+    const float ry = pointcloud_detail::DegreesToRadians(rotYDeg);
     const float cosY = std::cos(ry);
     const float sinY = std::sin(ry);
     const float cosX = std::cos(rx);
@@ -208,9 +244,9 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     }
     if (first) return canvas;
 
-    const float pad = 10.0f;
-    const float scaleX = (outW - 2.0f * pad) / (maxX - minX + 1e-6f);
-    const float scaleY = (outH - 2.0f * pad) / (maxY - minY + 1e-6f);
+    const float pad = pointcloud_detail::kProjectionPadding;
+    const float scaleX = (outW - 2.0f * pad) / (maxX - minX + pointcloud_detail::kDepthEpsilon);
+    const float scaleY = (outH - 2.0f * pad) / (maxY - minY + pointcloud_detail::kDepthEpsilon);
     const float scale = std::min(scaleX, scaleY);
 
     struct ProjectedPoint {
@@ -257,13 +293,6 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     }
 
     if (meshfill) {
-        constexpr float kDepthJumpRatio = 0.18f;
-        auto depthClose = [&](float a, float b) -> bool {
-            const float m = std::max(a, b);
-            if (m <= 1e-6f) return false;
-            return std::abs(a - b) / m <= kDepthJumpRatio;
-        };
-
         for (int y = 0; y + 1 < gy; ++y) {
             for (int x = 0; x + 1 < gx; ++x) {
                 const auto& p00 = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
@@ -272,19 +301,19 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
                 const auto& p11 = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
 
                 if (p00.valid && p10.valid && p01.valid &&
-                    depthClose(p00.z, p10.z) && depthClose(p00.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    pointcloud_detail::IsDepthClose(p00.z, p10.z) &&
+                    pointcloud_detail::IsDepthClose(p00.z, p01.z) &&
+                    pointcloud_detail::IsDepthClose(p10.z, p01.z)) {
                     cv::Point tri1[3] = {cv::Point(p00.px, p00.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
-                    cv::Scalar c1((p00.color[0] + p10.color[0] + p01.color[0]) / 3.0,
-                                  (p00.color[1] + p10.color[1] + p01.color[1]) / 3.0,
-                                  (p00.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    const cv::Scalar c1 = pointcloud_detail::AverageColor(p00.color, p10.color, p01.color);
                     cv::fillConvexPoly(canvas, tri1, 3, c1, cv::LINE_AA);
                 }
                 if (p11.valid && p10.valid && p01.valid &&
-                    depthClose(p11.z, p10.z) && depthClose(p11.z, p01.z) && depthClose(p10.z, p01.z)) {
+                    pointcloud_detail::IsDepthClose(p11.z, p10.z) &&
+                    pointcloud_detail::IsDepthClose(p11.z, p01.z) &&
+                    pointcloud_detail::IsDepthClose(p10.z, p01.z)) {
                     cv::Point tri2[3] = {cv::Point(p11.px, p11.py), cv::Point(p10.px, p10.py), cv::Point(p01.px, p01.py)};
-                    cv::Scalar c2((p11.color[0] + p10.color[0] + p01.color[0]) / 3.0,
-                                  (p11.color[1] + p10.color[1] + p01.color[1]) / 3.0,
-                                  (p11.color[2] + p10.color[2] + p01.color[2]) / 3.0);
+                    const cv::Scalar c2 = pointcloud_detail::AverageColor(p11.color, p10.color, p01.color);
                     cv::fillConvexPoly(canvas, tri2, 3, c2, cv::LINE_AA);
                 }
             }
@@ -292,13 +321,6 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
     }
 
     if (wireframe) {
-        constexpr float kDepthJumpRatio = 0.18f;
-        auto depthClose = [&](float a, float b) -> bool {
-            const float m = std::max(a, b);
-            if (m <= 1e-6f) return false;
-            return std::abs(a - b) / m <= kDepthJumpRatio;
-        };
-
         for (int y = 0; y < gy; ++y) {
             for (int x = 0; x < gx; ++x) {
                 const auto& p = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
@@ -306,19 +328,15 @@ inline cv::Mat RenderPointCloudViewRgb(const float* depth, int width, int height
 
                 if (x + 1 < gx) {
                     const auto& q = grid[static_cast<size_t>(y) * static_cast<size_t>(gx) + static_cast<size_t>(x + 1)];
-                    if (q.valid && depthClose(p.z, q.z)) {
-                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
-                                     (p.color[1] + q.color[1]) * 0.5,
-                                     (p.color[2] + q.color[2]) * 0.5);
+                    if (q.valid && pointcloud_detail::IsDepthClose(p.z, q.z)) {
+                        const cv::Scalar c = pointcloud_detail::AverageColor(p.color, q.color);
                         cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
                     }
                 }
                 if (y + 1 < gy) {
                     const auto& q = grid[static_cast<size_t>(y + 1) * static_cast<size_t>(gx) + static_cast<size_t>(x)];
-                    if (q.valid && depthClose(p.z, q.z)) {
-                        cv::Scalar c((p.color[0] + q.color[0]) * 0.5,
-                                     (p.color[1] + q.color[1]) * 0.5,
-                                     (p.color[2] + q.color[2]) * 0.5);
+                    if (q.valid && pointcloud_detail::IsDepthClose(p.z, q.z)) {
+                        const cv::Scalar c = pointcloud_detail::AverageColor(p.color, q.color);
                         cv::line(canvas, cv::Point(p.px, p.py), cv::Point(q.px, q.py), c, 1, cv::LINE_AA);
                     }
                 }

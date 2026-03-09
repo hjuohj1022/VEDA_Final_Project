@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.10)
 project(DepthAnythingTRT LANGUAGES CXX)
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT ALL_BUILD)
 enable_testing()
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(ENABLE_CLANG_TIDY "Run clang-tidy during C++ compilation" OFF)
+option(ENABLE_MSVC_ANALYZE "Run MSVC /analyze static analysis during C++ compilation" OFF)
 
 # 1. C++ 표준
 set(CMAKE_CXX_STANDARD 17)
@@ -40,7 +44,8 @@ link_directories(${CUDA_PATH}/lib/x64)
 link_directories(${OPENCV_PATH}/x64/vc16/lib)
 
 # 5. CUDA 수동 컴파일 (CMake CUDA 언어 지원이 VS에서 꼬였을 때 사용하는 우회법)
-set(CUDA_DEPTH_WORKER_OBJ "${CMAKE_CURRENT_BINARY_DIR}/depth_worker_cu.obj")
+set(CUDA_DEPTH_WORKER_OBJ_DIR "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}")
+set(CUDA_DEPTH_WORKER_OBJ "${CUDA_DEPTH_WORKER_OBJ_DIR}/depth_worker_cu.obj")
 
 # OpenCV Include 경로 확보
 set(OPENCV_INCLUDE "${OPENCV_PATH}/include")
@@ -49,6 +54,7 @@ set(CUDA_INCLUDE "${CUDA_PATH}/include")
 
 add_custom_command(
     OUTPUT ${CUDA_DEPTH_WORKER_OBJ}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CUDA_DEPTH_WORKER_OBJ_DIR}"
     COMMAND "${NVCC_PATH}"
     ARGS -c "${CMAKE_CURRENT_SOURCE_DIR}/runtime/depth_worker.cu"
          -o "${CUDA_DEPTH_WORKER_OBJ}"
@@ -59,10 +65,10 @@ add_custom_command(
          -I"${OPENCV_INCLUDE}"
          -allow-unsupported-compiler
          -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
-         -Xcompiler "/MD"
-         -O3
+         -Xcompiler "$<IF:$<CONFIG:Debug>,/MDd,/MD>"
+         "$<IF:$<CONFIG:Debug>,-O0,-O3>"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/runtime/depth_worker.cu" "${CMAKE_CURRENT_SOURCE_DIR}/config/app_config.h"
-    COMMENT "Compiling CUDA source runtime/depth_worker.cu manually..."
+    COMMENT "Compiling CUDA source runtime/depth_worker.cu manually for ${CMAKE_CFG_INTDIR}..."
 )
 
 # 6. 실행 파일 (오브젝트 파일 링크 + 링커 유도용 dummy)
@@ -86,6 +92,36 @@ add_executable(request_parser_smoke
     runtime/request.cpp
     runtime/request_validator.cpp
 )
+
+if(ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE
+        NAMES clang-tidy clang-tidy.exe
+        PATHS
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/bin"
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/x64/bin"
+    )
+
+    if(NOT CLANG_TIDY_EXE)
+        message(FATAL_ERROR "ENABLE_CLANG_TIDY=ON but clang-tidy was not found.")
+    endif()
+
+    set(CLANG_TIDY_COMMAND
+        "${CLANG_TIDY_EXE}"
+        "--config-file=${CMAKE_CURRENT_SOURCE_DIR}/.clang-tidy"
+    )
+
+    set_target_properties(depth_trt PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
+    set_target_properties(request_parser_smoke PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
+endif()
+
+if(ENABLE_MSVC_ANALYZE)
+    if(NOT MSVC)
+        message(FATAL_ERROR "ENABLE_MSVC_ANALYZE=ON requires the MSVC compiler.")
+    endif()
+
+    target_compile_options(depth_trt PRIVATE /analyze)
+    target_compile_options(request_parser_smoke PRIVATE /analyze)
+endif()
 
 add_test(NAME request_parser_smoke COMMAND request_parser_smoke)
 

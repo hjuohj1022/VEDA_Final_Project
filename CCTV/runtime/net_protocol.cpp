@@ -1,4 +1,6 @@
 #include <atomic>
+#include <array>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -6,16 +8,28 @@
 #include "net_protocol.h"
 
 namespace {
+template <typename T>
+bool TryConvertSizeToInt(const T value, int& out) {
+    if (value > static_cast<T>((std::numeric_limits<int>::max)())) {
+        return false;
+    }
+
+    out = static_cast<int>(value);
+    return true;
+}
+
 std::string FormatIoFailure(const char* op) {
     const ClientIoErrorInfo ioErr = GetLastClientIoError();
-    if (ioErr.detail.empty()) return std::string(op) + " failed";
+    if (ioErr.detail.empty()) {
+        return std::string(op) + " failed";
+    }
     return std::string(op) + " failed: " + ioErr.detail;
 }
 
-bool SendAll(const ServerClient& client, const char* data, int bytes) {
+bool SendAll(const ServerClient& client, const char* data, const int bytes) {
     int offset = 0;
     while (offset < bytes) {
-        int n = ClientSend(client, data + offset, bytes - offset);
+        const int n = ClientSend(client, data + offset, bytes - offset);
         if (n <= 0) {
             LogWarn("[NET] " + FormatIoFailure("send"));
             return false;
@@ -37,12 +51,17 @@ void DepthStreamWorker(ServerClient client, DepthStreamBuffer* streamBuf, std::a
     }
 
     LogInfo("Depth stream client connected.");
-    if (active) active->store(true);
+    if (active) {
+        active->store(true);
+    }
     streamBuf->stop = false;
 
-    std::string ok = "OK depth_stream\n";
-    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
-        if (active) active->store(false);
+    const std::string ok = "OK depth_stream\n";
+    int okMessageSize = 0;
+    if (!TryConvertSizeToInt(ok.size(), okMessageSize) || !SendAll(client, ok.c_str(), okMessageSize)) {
+        if (active) {
+            active->store(false);
+        }
         CloseServerClient(client);
         return;
     }
@@ -63,13 +82,26 @@ void DepthStreamWorker(ServerClient client, DepthStreamBuffer* streamBuf, std::a
         }
 
         const uint32_t payloadBytes = static_cast<uint32_t>(local.size() * sizeof(float));
-        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
-        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
-        if (!SendAll(client, reinterpret_cast<const char*>(local.data()), static_cast<int>(payloadBytes))) break;
+        const std::array<uint32_t, 4U> header = {
+            frameIdx,
+            static_cast<uint32_t>(w),
+            static_cast<uint32_t>(h),
+            payloadBytes,
+        };
+        int headerSize = 0;
+        int payloadSize = 0;
+        if (!TryConvertSizeToInt(sizeof(header), headerSize) ||
+            !TryConvertSizeToInt(payloadBytes, payloadSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(header.data()), headerSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(local.data()), payloadSize)) {
+            break;
+        }
     }
 
     LogWarn("Depth stream client disconnected.");
-    if (active) active->store(false);
+    if (active) {
+        active->store(false);
+    }
     CloseServerClient(client);
 }
 
@@ -80,12 +112,17 @@ void RgbdStreamWorker(ServerClient client, RgbdStreamBuffer* streamBuf, std::ato
     }
 
     LogInfo("RGBD stream client connected.");
-    if (active) active->store(true);
+    if (active) {
+        active->store(true);
+    }
     streamBuf->stop = false;
 
-    std::string ok = "OK rgbd_stream fmt=depth32f+bgr24\n";
-    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
-        if (active) active->store(false);
+    const std::string ok = "OK rgbd_stream fmt=depth32f+bgr24\n";
+    int okMessageSize = 0;
+    if (!TryConvertSizeToInt(ok.size(), okMessageSize) || !SendAll(client, ok.c_str(), okMessageSize)) {
+        if (active) {
+            active->store(false);
+        }
         CloseServerClient(client);
         return;
     }
@@ -109,14 +146,30 @@ void RgbdStreamWorker(ServerClient client, RgbdStreamBuffer* streamBuf, std::ato
 
         const uint32_t depthBytes = static_cast<uint32_t>(localDepth.size() * sizeof(float));
         const uint32_t bgrBytes = static_cast<uint32_t>(localBgr.size());
-        uint32_t header[5] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), depthBytes, bgrBytes};
-        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
-        if (!SendAll(client, reinterpret_cast<const char*>(localDepth.data()), static_cast<int>(depthBytes))) break;
-        if (!SendAll(client, reinterpret_cast<const char*>(localBgr.data()), static_cast<int>(bgrBytes))) break;
+        const std::array<uint32_t, 5U> header = {
+            frameIdx,
+            static_cast<uint32_t>(w),
+            static_cast<uint32_t>(h),
+            depthBytes,
+            bgrBytes,
+        };
+        int headerSize = 0;
+        int depthPayloadSize = 0;
+        int bgrPayloadSize = 0;
+        if (!TryConvertSizeToInt(sizeof(header), headerSize) ||
+            !TryConvertSizeToInt(depthBytes, depthPayloadSize) ||
+            !TryConvertSizeToInt(bgrBytes, bgrPayloadSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(header.data()), headerSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(localDepth.data()), depthPayloadSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(localBgr.data()), bgrPayloadSize)) {
+            break;
+        }
     }
 
     LogWarn("RGBD stream client disconnected.");
-    if (active) active->store(false);
+    if (active) {
+        active->store(false);
+    }
     CloseServerClient(client);
 }
 
@@ -127,12 +180,17 @@ void PcImageStreamWorker(ServerClient client, ImageStreamBuffer* streamBuf, std:
     }
 
     LogInfo("PC image stream client connected.");
-    if (active) active->store(true);
+    if (active) {
+        active->store(true);
+    }
     streamBuf->stop = false;
 
-    std::string ok = "OK pc_stream fmt=png\n";
-    if (!SendAll(client, ok.c_str(), static_cast<int>(ok.size()))) {
-        if (active) active->store(false);
+    const std::string ok = "OK pc_stream fmt=png\n";
+    int okMessageSize = 0;
+    if (!TryConvertSizeToInt(ok.size(), okMessageSize) || !SendAll(client, ok.c_str(), okMessageSize)) {
+        if (active) {
+            active->store(false);
+        }
         CloseServerClient(client);
         return;
     }
@@ -153,12 +211,25 @@ void PcImageStreamWorker(ServerClient client, ImageStreamBuffer* streamBuf, std:
         }
 
         const uint32_t payloadBytes = static_cast<uint32_t>(local.size());
-        uint32_t header[4] = {frameIdx, static_cast<uint32_t>(w), static_cast<uint32_t>(h), payloadBytes};
-        if (!SendAll(client, reinterpret_cast<const char*>(header), static_cast<int>(sizeof(header)))) break;
-        if (!SendAll(client, reinterpret_cast<const char*>(local.data()), static_cast<int>(payloadBytes))) break;
+        const std::array<uint32_t, 4U> header = {
+            frameIdx,
+            static_cast<uint32_t>(w),
+            static_cast<uint32_t>(h),
+            payloadBytes,
+        };
+        int headerSize = 0;
+        int payloadSize = 0;
+        if (!TryConvertSizeToInt(sizeof(header), headerSize) ||
+            !TryConvertSizeToInt(payloadBytes, payloadSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(header.data()), headerSize) ||
+            !SendAll(client, reinterpret_cast<const char*>(local.data()), payloadSize)) {
+            break;
+        }
     }
 
     LogWarn("PC image stream client disconnected.");
-    if (active) active->store(false);
+    if (active) {
+        active->store(false);
+    }
     CloseServerClient(client);
 }

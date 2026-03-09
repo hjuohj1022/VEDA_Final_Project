@@ -1,8 +1,10 @@
-#include <iostream>
+#include <array>
+#include <cstddef>
 #include <string>
 #include <thread>
 #include <atomic>
 #include <filesystem>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -20,27 +22,69 @@
 #include "server_runtime.h"
 
 namespace {
+constexpr int kDefaultPort = 9090;
+constexpr int kMinPort = 1;
+constexpr int kMaxPort = 65535;
+constexpr std::size_t kClientBufferSize = 1024U;
+constexpr int kConfigSearchDepth = 6;
+
 std::string ResolveConfigPath(const std::string& configuredPath) {
     namespace fs = std::filesystem;
     fs::path p(configuredPath);
-    if (p.is_absolute()) return p.string();
+    if (p.is_absolute()) {
+        return p.string();
+    }
 
     std::error_code ec;
     fs::path cwdCandidate = fs::current_path() / p;
-    if (fs::exists(cwdCandidate, ec)) return cwdCandidate.string();
+    if (fs::exists(cwdCandidate, ec)) {
+        return cwdCandidate.string();
+    }
 
     fs::path base = fs::current_path();
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < kConfigSearchDepth; ++i) {
         fs::path candidate = base / p;
-        if (fs::exists(candidate, ec)) return candidate.string();
-        if (!base.has_parent_path()) break;
+        if (fs::exists(candidate, ec)) {
+            return candidate.string();
+        }
+        if (!base.has_parent_path()) {
+            break;
+        }
         base = base.parent_path();
     }
     return configuredPath;
 }
 
-bool ValidateStartupConfig(const RuntimeConfig& cfg, int port, const TlsServerConfig& tlsCfg, std::string& outErr) {
-    if (port <= 0 || port > 65535) {
+bool ParsePortArgument(const std::string& arg, int& outPort, std::string& outErr) {
+    constexpr std::string_view kPortPrefix = "--port=";
+    if (arg.rfind(kPortPrefix.data(), 0) != 0) {
+        return true;
+    }
+
+    int parsedPort = 0;
+    if (!ParseInt(arg.substr(kPortPrefix.size()), parsedPort)) {
+        outErr = "[CFG] invalid --port value: " + arg.substr(kPortPrefix.size());
+        return false;
+    }
+
+    outPort = parsedPort;
+    return true;
+}
+
+TlsServerConfig BuildTlsServerConfig(const RuntimeConfig& cfg) {
+    TlsServerConfig tlsCfg;
+    tlsCfg.enabled = cfg.control_tls.enabled;
+    tlsCfg.requireClientCert = cfg.control_tls.require_client_cert;
+    tlsCfg.caFile = cfg.control_tls.ca_file;
+    tlsCfg.certFile = cfg.control_tls.cert_file;
+    tlsCfg.keyFile = cfg.control_tls.key_file;
+    tlsCfg.sslDll = cfg.control_tls.ssl_dll;
+    tlsCfg.cryptoDll = cfg.control_tls.crypto_dll;
+    return tlsCfg;
+}
+
+bool ValidateStartupConfig(const RuntimeConfig& cfg, const int port, const TlsServerConfig& tlsCfg, std::string& outErr) {
+    if ((port < kMinPort) || (port > kMaxPort)) {
         outErr = "[CFG] invalid --port value: " + std::to_string(port) + " (expected 1..65535)";
         return false;
     }
@@ -49,7 +93,9 @@ bool ValidateStartupConfig(const RuntimeConfig& cfg, int port, const TlsServerCo
         return false;
     }
 
-    if (!tlsCfg.enabled) return true;
+    if (!tlsCfg.enabled) {
+        return true;
+    }
 
     const std::vector<std::pair<std::string, std::string>> requiredFiles = {
         {"control_tls.ca_file", tlsCfg.caFile},
@@ -70,26 +116,39 @@ bool ValidateStartupConfig(const RuntimeConfig& cfg, int port, const TlsServerCo
     }
     return true;
 }
+
+class RuntimeCleanupGuard {
+public:
+    RuntimeCleanupGuard(ServerRuntimeContext& runtimeCtx, ServerSocketContext& serverCtx)
+        : runtimeCtx_(runtimeCtx), serverCtx_(serverCtx) {}
+
+    ~RuntimeCleanupGuard() {
+        ShutdownRuntime(runtimeCtx_);
+        ShutdownServerSocket(serverCtx_);
+    }
+
+    RuntimeCleanupGuard(const RuntimeCleanupGuard&) = delete;
+    RuntimeCleanupGuard& operator=(const RuntimeCleanupGuard&) = delete;
+
+private:
+    ServerRuntimeContext& runtimeCtx_;
+    ServerSocketContext& serverCtx_;
+};
 }  // namespace
 
 int main(int argc, char** argv) {
     const RuntimeConfig& cfg = GetRuntimeConfig();
-    int port = 9090;
+    int port = kDefaultPort;
+    std::string argError;
     for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg.rfind("--port=", 0) == 0) {
-            port = std::stoi(arg.substr(7));
+        const std::string arg = argv[i];
+        if (!ParsePortArgument(arg, port, argError)) {
+            LogError(argError);
+            return 1;
         }
     }
 
-    TlsServerConfig tlsCfg;
-    tlsCfg.enabled = cfg.control_tls.enabled;
-    tlsCfg.requireClientCert = cfg.control_tls.require_client_cert;
-    tlsCfg.caFile = cfg.control_tls.ca_file;
-    tlsCfg.certFile = cfg.control_tls.cert_file;
-    tlsCfg.keyFile = cfg.control_tls.key_file;
-    tlsCfg.sslDll = cfg.control_tls.ssl_dll;
-    tlsCfg.cryptoDll = cfg.control_tls.crypto_dll;
+    const TlsServerConfig tlsCfg = BuildTlsServerConfig(cfg);
 
     std::string validationErr;
     if (!ValidateStartupConfig(cfg, port, tlsCfg, validationErr)) {
@@ -133,16 +192,19 @@ int main(int argc, char** argv) {
         pcStream,
         viewParams,
     };
+    RuntimeCleanupGuard cleanupGuard(runtimeCtx, serverCtx);
 
     while (true) {
         JoinFinishedStreamThreads(runtimeCtx);
         sockaddr_in clientAddr{};
-        int clientLen = sizeof(clientAddr);
+        int clientLen = static_cast<int>(sizeof(clientAddr));
         ServerClient client;
-        if (!AcceptServerClient(serverCtx, client, &clientAddr, &clientLen)) continue;
+        if (!AcceptServerClient(serverCtx, client, &clientAddr, &clientLen)) {
+            continue;
+        }
 
-        char buf[1024];
-        int len = ClientRecv(client, buf, sizeof(buf) - 1);
+        std::array<char, kClientBufferSize> buf{};
+        const int len = ClientRecv(client, buf.data(), static_cast<int>(buf.size() - 1U));
         if (len <= 0) {
             const ClientIoErrorInfo ioErr = GetLastClientIoError();
             if (ioErr.kind == ClientIoErrorKind::kClosed) {
@@ -153,9 +215,9 @@ int main(int argc, char** argv) {
             CloseServerClient(client);
             continue;
         }
-        buf[len] = '\0';
+        buf[static_cast<std::size_t>(len)] = '\0';
 
-        std::string line(buf);
+        const std::string line(buf.data(), static_cast<std::size_t>(len));
         {
             char ip[64] = {0};
             inet_ntop(AF_INET, &clientAddr.sin_addr, ip, sizeof(ip));
@@ -165,8 +227,4 @@ int main(int argc, char** argv) {
         Request req = ParseRequest(line);
         HandleClientRequest(client, req, runtimeCtx);
     }
-
-    ShutdownRuntime(runtimeCtx);
-    ShutdownServerSocket(serverCtx);
-    return 0;
 }
