@@ -15,7 +15,6 @@
 extern esp_mqtt_client_handle_t client;
 extern bool mqtt_connected;
 
-void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 esp_mqtt_client_handle_t mqttClient(void);
 void mqttFrameTask(void *arg);
 

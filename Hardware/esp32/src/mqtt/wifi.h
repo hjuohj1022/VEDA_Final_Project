@@ -5,7 +5,6 @@
 #include "esp_event.h"     // esp_event_base_t
 #include "esp_netif.h"
 
-void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
-esp_err_t wifiConnect(wifi_config_t *conf);
+esp_err_t wifiConnect(const wifi_config_t *conf);
 
 #endif
