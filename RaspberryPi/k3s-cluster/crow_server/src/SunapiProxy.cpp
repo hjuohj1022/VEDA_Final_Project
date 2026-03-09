@@ -814,8 +814,8 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
 
         const std::string q = makeQuery({
             {"msubmenu", "imageenhancements2"},
-            {"action", "set"},
-            {"control", "Reset=True"},
+            {"action", "control"},
+            {"Reset", "True"},
             {"Channel", ch}
         });
         return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
