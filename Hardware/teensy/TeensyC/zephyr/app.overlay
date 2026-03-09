@@ -1,0 +1,25 @@
+/ {
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+	};
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
+};
+
+&lpi2c1 {
+	status = "okay";
+};
+
+&lpspi4 {
+	status = "okay";
+};
+
+&lpuart6 {
+	status = "okay";
+	current-speed = <921600>;
+};

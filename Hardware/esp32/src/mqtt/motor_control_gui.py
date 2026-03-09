@@ -52,7 +52,8 @@ class MotorControlApp:
 
     def send_command(self, cmd):
         print(f"Sending: {cmd}")
-        self.client.publish(MQTT_TOPIC, cmd)
+        # QoS 1 ensures the broker receives the message at least once
+        self.client.publish(MQTT_TOPIC, cmd, qos=1)
 
     def on_press(self, motor_id, direction):
         # direction: 'left' or 'right'
