@@ -12,8 +12,9 @@ int clampInt(int value, int minValue, int maxValue) {
 
 QString extractValue(const QString &body, const QStringList &keys) {
     for (const QString &k : keys) {
+        const QString token = QString("(?:[A-Za-z0-9_\\-]+\\.)*%1").arg(QRegularExpression::escape(k));
         const QRegularExpression jsonPattern(
-            QString("\"%1\"\\s*:\\s*(\"([^\"]*)\"|[-]?[0-9]+|true|false)").arg(QRegularExpression::escape(k)),
+            QString("\"%1\"\\s*:\\s*(\"([^\"]*)\"|[-]?[0-9]+|true|false)").arg(token),
             QRegularExpression::CaseInsensitiveOption);
         const QRegularExpressionMatch jm = jsonPattern.match(body);
         if (jm.hasMatch()) {
@@ -25,11 +26,27 @@ QString extractValue(const QString &body, const QStringList &keys) {
         }
 
         const QRegularExpression kvPattern(
-            QString("(^|\\n|\\r)\\s*%1\\s*=\\s*([^\\r\\n]+)").arg(QRegularExpression::escape(k)),
+            QString("(^|\\n|\\r)\\s*%1\\s*=\\s*([^\\r\\n]+)").arg(token),
             QRegularExpression::CaseInsensitiveOption);
         const QRegularExpressionMatch km = kvPattern.match(body);
         if (km.hasMatch()) {
             return km.captured(2).trimmed();
+        }
+
+        const QRegularExpression kvColonPattern(
+            QString("(^|\\n|\\r)\\s*%1\\s*:\\s*([^\\r\\n]+)").arg(token),
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch kcm = kvColonPattern.match(body);
+        if (kcm.hasMatch()) {
+            return kcm.captured(2).trimmed();
+        }
+
+        const QRegularExpression xmlPattern(
+            QString("<\\s*%1\\s*>\\s*([^<]+)\\s*<\\s*/\\s*%1\\s*>").arg(token),
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch xm = xmlPattern.match(body);
+        if (xm.hasMatch()) {
+            return xm.captured(1).trimmed();
         }
     }
     return {};
@@ -64,6 +81,9 @@ void Backend::sunapiLoadDisplaySettings(int cameraIndex) {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+        qInfo() << "[SUNAPI][DISPLAY] view response status=" << statusCode
+                << "url=" << reply->request().url()
+                << "body(sample)=" << body.left(260);
 
         if (reply->error() != QNetworkReply::NoError) {
             const QString err = QString("Display settings load failed (HTTP %1): %2")
@@ -84,11 +104,11 @@ void Backend::sunapiLoadDisplaySettings(int cameraIndex) {
             return;
         }
 
-        const QString contrastText = extractValue(body, {"Contrast"});
-        const QString brightnessText = extractValue(body, {"Brightness"});
-        const QString sharpnessLevelText = extractValue(body, {"SharpnessLevel"});
-        const QString sharpnessEnableText = extractValue(body, {"SharpnessEnable"});
-        const QString colorLevelText = extractValue(body, {"Saturation", "ColorLevel"});
+        const QString contrastText = extractValue(body, {"Contrast", "contrast"});
+        const QString brightnessText = extractValue(body, {"Brightness", "brightness"});
+        const QString sharpnessLevelText = extractValue(body, {"SharpnessLevel", "sharpnessLevel", "sharpness_level"});
+        const QString sharpnessEnableText = extractValue(body, {"SharpnessEnable", "sharpnessEnable", "sharpness_enable"});
+        const QString colorLevelText = extractValue(body, {"Saturation", "ColorLevel", "colorLevel", "color_level"});
 
         bool changed = false;
         if (!contrastText.isEmpty()) {
