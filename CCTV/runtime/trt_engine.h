@@ -25,10 +25,10 @@ struct TrtContextData {
     const char* outputName = nullptr;
     nvinfer1::Dims inputDims{};
     nvinfer1::Dims outputDims{};
-    size_t inputSize = 0;
-    size_t outputElements = 0;
-    size_t outputSize = 0;
-    size_t rawInputSize = 0;
+    std::size_t inputSize = 0U;
+    std::size_t outputElements = 0U;
+    std::size_t outputSize = 0U;
+    std::size_t rawInputSize = 0U;
 };
 
 struct CudaResources {
@@ -37,7 +37,8 @@ struct CudaResources {
     void* d_raw_img = nullptr;
     cudaStream_t stream = nullptr;
 
-    ~CudaResources();
+    ~CudaResources() noexcept;
+    void Reset() noexcept;
 };
 
 bool InitTrt(TrtContextData& trt);

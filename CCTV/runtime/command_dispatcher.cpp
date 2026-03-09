@@ -28,40 +28,39 @@ private:
     ServerClient client_{};
 };
 
-void StopDepthStreamThread(ServerRuntimeContext& ctx) {
-    if (!ctx.depthStreamThread.joinable()) return;
-    {
-        std::unique_lock<std::mutex> lock(ctx.depthStream.mu);
-        ctx.depthStream.stop = true;
+template <typename StreamBuffer>
+void StopStreamThread(std::thread& streamThread, StreamBuffer& streamBuffer) {
+    if (!streamThread.joinable()) {
+        return;
     }
-    ctx.depthStream.cv.notify_all();
-    ctx.depthStreamThread.join();
+    {
+        std::unique_lock<std::mutex> lock(streamBuffer.mu);
+        streamBuffer.stop = true;
+    }
+    streamBuffer.cv.notify_all();
+    streamThread.join();
+}
+
+void StopDepthStreamThread(ServerRuntimeContext& ctx) {
+    StopStreamThread(ctx.depthStreamThread, ctx.depthStream);
 }
 
 void StopRgbdStreamThread(ServerRuntimeContext& ctx) {
-    if (!ctx.rgbdStreamThread.joinable()) return;
-    {
-        std::unique_lock<std::mutex> lock(ctx.rgbdStream.mu);
-        ctx.rgbdStream.stop = true;
-    }
-    ctx.rgbdStream.cv.notify_all();
-    ctx.rgbdStreamThread.join();
+    StopStreamThread(ctx.rgbdStreamThread, ctx.rgbdStream);
 }
 
 void StopPcStreamThread(ServerRuntimeContext& ctx) {
-    if (!ctx.pcStreamThread.joinable()) return;
-    {
-        std::unique_lock<std::mutex> lock(ctx.pcStream.mu);
-        ctx.pcStream.stop = true;
-    }
-    ctx.pcStream.cv.notify_all();
-    ctx.pcStreamThread.join();
+    StopStreamThread(ctx.pcStreamThread, ctx.pcStream);
 }
 
 void StopWorker(ServerRuntimeContext& ctx) {
-    if (!ctx.workerRunning) return;
+    if (!ctx.workerRunning) {
+        return;
+    }
     ctx.workerStop.store(true);
-    if (ctx.worker.joinable()) ctx.worker.join();
+    if (ctx.worker.joinable()) {
+        ctx.worker.join();
+    }
     ctx.workerRunning = false;
 }
 
@@ -135,7 +134,7 @@ void ShutdownRuntime(ServerRuntimeContext& ctx) {
 void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeContext& ctx) {
     ClientSocketHandle clientSocket(client);
 
-    RequestValidationResult valid = ValidateRequest(req);
+    const RequestValidationResult valid = ValidateRequest(req);
     if (!valid.ok) {
         LogWarn("Invalid request: " + valid.error);
         SendResponse(clientSocket.get(), valid.error);
@@ -186,18 +185,22 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
         return;
     }
 
-    int channel = req.channel >= 0 ? req.channel : RTSP_CHANNEL;
+    const int channel = (req.channel >= 0) ? req.channel : RTSP_CHANNEL;
     bool headless = req.headlessSet ? req.headless : false;
-    if (req.gui) headless = false;
+    if (req.gui) {
+        headless = false;
+    }
 
     ctx.workerStop.store(false);
     ctx.worker = std::thread([channel, headless, &ctx]() {
-        bool ok = RunDepthWorker(channel, headless, ctx.workerStop,
-                                 &ctx.depthStream, &ctx.rgbdStream, &ctx.pcStream, &ctx.viewParams);
-        if (!ok) LogError("Worker exited with errors.");
+        const bool ok = RunDepthWorker(channel, headless, ctx.workerStop,
+                                       &ctx.depthStream, &ctx.rgbdStream, &ctx.pcStream, &ctx.viewParams);
+        if (!ok) {
+            LogError("Worker exited with errors.");
+        }
     });
     ctx.workerRunning = true;
 
-    std::string modeStr = headless ? "headless" : "gui";
+    const std::string modeStr = headless ? "headless" : "gui";
     SendResponse(clientSocket.get(), "OK started channel=" + std::to_string(channel) + " mode=" + modeStr + "\n");
 }

@@ -25,7 +25,7 @@ struct RuntimeConfig {
     int grab_retry_sleep_ms = 5;
     int grab_fail_log_every = 30;
 
-    size_t metrics_window_frames = 120;
+    std::size_t metrics_window_frames = 120U;
     double metrics_log_interval_sec = 2.0;
 
     int preview_width = 640;

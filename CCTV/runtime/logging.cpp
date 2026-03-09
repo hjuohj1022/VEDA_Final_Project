@@ -3,14 +3,20 @@
 
 #include "logging.h"
 
+namespace {
+void LogTo(std::ostream& stream, const char* level, const std::string& msg) {
+    stream << level << msg << '\n';
+}
+}  // namespace
+
 void LogInfo(const std::string& msg) {
-    std::cout << "[INFO] " << msg << std::endl;
+    LogTo(std::cout, "[INFO] ", msg);
 }
 
 void LogWarn(const std::string& msg) {
-    std::cout << "[WARN] " << msg << std::endl;
+    LogTo(std::cout, "[WARN] ", msg);
 }
 
 void LogError(const std::string& msg) {
-    std::cerr << "[ERR] " << msg << std::endl;
+    LogTo(std::cerr, "[ERR] ", msg);
 }

@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 #include <winsock2.h>
 #include <windows.h>
@@ -7,9 +8,11 @@
 #include "tls_server.h"
 
 namespace {
-constexpr int SSL_FILETYPE_PEM = 1;
-constexpr int SSL_VERIFY_PEER = 0x01;
-constexpr int SSL_VERIFY_FAIL_IF_NO_PEER_CERT = 0x02;
+constexpr int kPemFileType = 1;
+constexpr int kVerifyPeer = 0x01;
+constexpr int kVerifyFailIfNoPeerCert = 0x02;
+constexpr int kPathSearchDepth = 6;
+constexpr std::string_view kGitBinPath = "C:\\Program Files\\Git\\mingw64\\bin\\";
 
 struct ssl_ctx_st;
 struct ssl_st;
@@ -59,29 +62,62 @@ bool LoadProc(HMODULE mod, const char* name, T& out) {
     return out != nullptr;
 }
 
+void ReleaseLoadedLibraries() {
+    if (gSsl.sslLib != nullptr) {
+        FreeLibrary(gSsl.sslLib);
+        gSsl.sslLib = nullptr;
+    }
+    if (gSsl.cryptoLib != nullptr) {
+        FreeLibrary(gSsl.cryptoLib);
+        gSsl.cryptoLib = nullptr;
+    }
+}
+
+void ResetOpenSslState() {
+    gSsl = OpenSslApi{};
+    gSslLoaded = false;
+}
+
+void CleanupOpenSslState() {
+    ReleaseLoadedLibraries();
+    ResetOpenSslState();
+}
+
 std::string ResolveRuntimePath(const std::string& configuredPath) {
     namespace fs = std::filesystem;
     fs::path p(configuredPath);
-    if (p.is_absolute()) return p.string();
+    if (p.is_absolute()) {
+        return p.string();
+    }
 
     std::error_code ec;
     fs::path cwdCandidate = fs::current_path() / p;
-    if (fs::exists(cwdCandidate, ec)) return cwdCandidate.string();
+    if (fs::exists(cwdCandidate, ec)) {
+        return cwdCandidate.string();
+    }
 
     fs::path base = fs::current_path();
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < kPathSearchDepth; ++i) {
         fs::path candidate = base / p;
-        if (fs::exists(candidate, ec)) return candidate.string();
-        if (!base.has_parent_path()) break;
+        if (fs::exists(candidate, ec)) {
+            return candidate.string();
+        }
+        if (!base.has_parent_path()) {
+            break;
+        }
         base = base.parent_path();
     }
     return configuredPath;
 }
 
 std::string GetOpenSslLastError() {
-    if (!gSsl.ERR_get_error || !gSsl.ERR_error_string_n) return "openssl error unavailable";
+    if (!gSsl.ERR_get_error || !gSsl.ERR_error_string_n) {
+        return "openssl error unavailable";
+    }
     const unsigned long e = gSsl.ERR_get_error();
-    if (e == 0) return "no openssl error";
+    if (e == 0UL) {
+        return "no openssl error";
+    }
     char buf[256] = {0};
     gSsl.ERR_error_string_n(e, buf, sizeof(buf));
     return std::string(buf);
@@ -92,17 +128,27 @@ bool TryLoadOpenSslDlls(const std::string& sslDll, const std::string& cryptoDll)
     gSsl.cryptoLib = LoadLibraryA(cryptoDll.c_str());
 
     if (!gSsl.sslLib || !gSsl.cryptoLib) {
-        const char* gitBin = "C:\\Program Files\\Git\\mingw64\\bin\\";
-        std::string sslFallback = std::string(gitBin) + sslDll;
-        std::string cryptoFallback = std::string(gitBin) + cryptoDll;
-        if (!gSsl.sslLib) gSsl.sslLib = LoadLibraryA(sslFallback.c_str());
-        if (!gSsl.cryptoLib) gSsl.cryptoLib = LoadLibraryA(cryptoFallback.c_str());
+        const std::string sslFallback = std::string(kGitBinPath) + sslDll;
+        const std::string cryptoFallback = std::string(kGitBinPath) + cryptoDll;
+        if (!gSsl.sslLib) {
+            gSsl.sslLib = LoadLibraryA(sslFallback.c_str());
+        }
+        if (!gSsl.cryptoLib) {
+            gSsl.cryptoLib = LoadLibraryA(cryptoFallback.c_str());
+        }
     }
-    return gSsl.sslLib && gSsl.cryptoLib;
+
+    const bool loaded = (gSsl.sslLib != nullptr) && (gSsl.cryptoLib != nullptr);
+    if (!loaded) {
+        ReleaseLoadedLibraries();
+    }
+    return loaded;
 }
 
 bool LoadOpenSsl(const TlsServerConfig& tlsCfg, std::string& outErr) {
-    if (gSslLoaded) return true;
+    if (gSslLoaded) {
+        return true;
+    }
     if (!TryLoadOpenSslDlls(tlsCfg.sslDll, tlsCfg.cryptoDll)) {
         outErr = MakeTlsError("load_dll", "ssl=" + tlsCfg.sslDll + ", crypto=" + tlsCfg.cryptoDll);
         return false;
@@ -145,14 +191,23 @@ bool LoadOpenSsl(const TlsServerConfig& tlsCfg, std::string& outErr) {
     needSsl("SSL_shutdown", gSsl.SSL_shutdown);
     needCrypto("ERR_get_error", gSsl.ERR_get_error);
     needCrypto("ERR_error_string_n", gSsl.ERR_error_string_n);
-    if (!ok) return false;
+    if (!ok) {
+        CleanupOpenSslState();
+        return false;
+    }
 
     if (gSsl.OPENSSL_init_ssl) {
         gSsl.OPENSSL_init_ssl(0, nullptr);
     } else {
-        if (gSsl.SSL_library_init) gSsl.SSL_library_init();
-        if (gSsl.SSL_load_error_strings) gSsl.SSL_load_error_strings();
-        if (gSsl.OpenSSL_add_all_algorithms) gSsl.OpenSSL_add_all_algorithms();
+        if (gSsl.SSL_library_init) {
+            gSsl.SSL_library_init();
+        }
+        if (gSsl.SSL_load_error_strings) {
+            gSsl.SSL_load_error_strings();
+        }
+        if (gSsl.OpenSSL_add_all_algorithms) {
+            gSsl.OpenSSL_add_all_algorithms();
+        }
     }
     gSslLoaded = true;
     return true;
@@ -160,10 +215,15 @@ bool LoadOpenSsl(const TlsServerConfig& tlsCfg, std::string& outErr) {
 }  // namespace
 
 bool TlsServerInit(const TlsServerConfig& cfg, void** outTlsCtx, std::string& outErr) {
-    if (!outTlsCtx) return false;
+    if (!outTlsCtx) {
+        outErr = MakeTlsError("tls_server_init", "output context pointer is null");
+        return false;
+    }
     *outTlsCtx = nullptr;
 
-    if (!LoadOpenSsl(cfg, outErr)) return false;
+    if (!LoadOpenSsl(cfg, outErr)) {
+        return false;
+    }
     SSL_CTX* sslCtx = gSsl.SSL_CTX_new(gSsl.TLS_server_method());
     if (!sslCtx) {
         outErr = MakeTlsError("ssl_ctx_new", "openssl_err=" + GetOpenSslLastError());
@@ -174,13 +234,13 @@ bool TlsServerInit(const TlsServerConfig& cfg, void** outTlsCtx, std::string& ou
     const std::string keyPath = ResolveRuntimePath(cfg.keyFile);
     const std::string caPath = ResolveRuntimePath(cfg.caFile);
 
-    if (gSsl.SSL_CTX_use_certificate_file(sslCtx, certPath.c_str(), SSL_FILETYPE_PEM) != 1) {
+    if (gSsl.SSL_CTX_use_certificate_file(sslCtx, certPath.c_str(), kPemFileType) != 1) {
         outErr =
             MakeTlsError("load_server_cert", "path=" + certPath + " openssl_err=" + GetOpenSslLastError());
         gSsl.SSL_CTX_free(sslCtx);
         return false;
     }
-    if (gSsl.SSL_CTX_use_PrivateKey_file(sslCtx, keyPath.c_str(), SSL_FILETYPE_PEM) != 1) {
+    if (gSsl.SSL_CTX_use_PrivateKey_file(sslCtx, keyPath.c_str(), kPemFileType) != 1) {
         outErr = MakeTlsError("load_server_key", "path=" + keyPath + " openssl_err=" + GetOpenSslLastError());
         gSsl.SSL_CTX_free(sslCtx);
         return false;
@@ -196,8 +256,10 @@ bool TlsServerInit(const TlsServerConfig& cfg, void** outTlsCtx, std::string& ou
         return false;
     }
 
-    int verifyMode = SSL_VERIFY_PEER;
-    if (cfg.requireClientCert) verifyMode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+    int verifyMode = kVerifyPeer;
+    if (cfg.requireClientCert) {
+        verifyMode |= kVerifyFailIfNoPeerCert;
+    }
     gSsl.SSL_CTX_set_verify(sslCtx, verifyMode, nullptr);
 
     *outTlsCtx = sslCtx;
@@ -205,7 +267,10 @@ bool TlsServerInit(const TlsServerConfig& cfg, void** outTlsCtx, std::string& ou
 }
 
 bool TlsServerAccept(void* tlsCtx, int socketFd, void** outSsl, std::string& outErr) {
-    if (!tlsCtx || !outSsl) return false;
+    if (!tlsCtx || !outSsl) {
+        outErr = MakeTlsError("tls_server_accept", "invalid input arguments");
+        return false;
+    }
     *outSsl = nullptr;
 
     SSL_CTX* sslCtx = reinterpret_cast<SSL_CTX*>(tlsCtx);
@@ -229,7 +294,12 @@ bool TlsServerAccept(void* tlsCtx, int socketFd, void** outSsl, std::string& out
 }
 
 int TlsServerRecv(void* ssl, char* buf, int len) {
-    int n = gSsl.SSL_read(reinterpret_cast<SSL*>(ssl), buf, len);
+    if (!ssl || !buf || (len <= 0) || !gSsl.SSL_read) {
+        gLastTlsIoError = "invalid tls recv arguments";
+        return -1;
+    }
+
+    const int n = gSsl.SSL_read(reinterpret_cast<SSL*>(ssl), buf, len);
     if (n <= 0) {
         gLastTlsIoError = GetOpenSslLastError();
     } else {
@@ -239,7 +309,12 @@ int TlsServerRecv(void* ssl, char* buf, int len) {
 }
 
 int TlsServerSend(void* ssl, const char* data, int len) {
-    int n = gSsl.SSL_write(reinterpret_cast<SSL*>(ssl), data, len);
+    if (!ssl || !data || (len <= 0) || !gSsl.SSL_write) {
+        gLastTlsIoError = "invalid tls send arguments";
+        return -1;
+    }
+
+    const int n = gSsl.SSL_write(reinterpret_cast<SSL*>(ssl), data, len);
     if (n <= 0) {
         gLastTlsIoError = GetOpenSslLastError();
     } else {
@@ -253,13 +328,21 @@ std::string TlsServerGetLastIoError() {
 }
 
 void TlsServerCloseClient(void* ssl) {
-    if (!ssl) return;
+    if (!ssl) {
+        return;
+    }
     SSL* s = reinterpret_cast<SSL*>(ssl);
-    gSsl.SSL_shutdown(s);
-    gSsl.SSL_free(s);
+    if (gSsl.SSL_shutdown) {
+        gSsl.SSL_shutdown(s);
+    }
+    if (gSsl.SSL_free) {
+        gSsl.SSL_free(s);
+    }
 }
 
 void TlsServerShutdown(void* tlsCtx) {
-    if (!tlsCtx || !gSsl.SSL_CTX_free) return;
-    gSsl.SSL_CTX_free(reinterpret_cast<SSL_CTX*>(tlsCtx));
+    if (tlsCtx && gSsl.SSL_CTX_free) {
+        gSsl.SSL_CTX_free(reinterpret_cast<SSL_CTX*>(tlsCtx));
+    }
+    CleanupOpenSslState();
 }
