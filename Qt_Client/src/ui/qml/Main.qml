@@ -685,9 +685,11 @@ ApplicationWindow {
                     pendingExportDate = dateText
                     pendingExportStart = startTimeText
                     pendingExportEnd = endTimeText
-                    thermalViewerVisible = true
-                    thermalViewer.open()
-                    backend.startThermalStream()
+                    playbackExportSaveDialog.currentFile = "playback_" + dateText + "_" + startTimeText.replace(/:/g, "-")
+                    playbackExportSaveDialog.open()
+                    // thermalViewerVisible = true
+                    // thermalViewer.open()
+                    // backend.startThermalStream()
                 }
             }
         }

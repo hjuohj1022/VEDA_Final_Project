@@ -55,6 +55,11 @@ class Backend : public QObject
     Q_PROPERTY(int thermalAutoRangeWindowPercent READ thermalAutoRangeWindowPercent NOTIFY thermalAutoRangeWindowPercentChanged)
     Q_PROPERTY(int thermalManualMin READ thermalManualMin NOTIFY thermalManualRangeChanged)
     Q_PROPERTY(int thermalManualMax READ thermalManualMax NOTIFY thermalManualRangeChanged)
+    Q_PROPERTY(int displayContrast READ displayContrast NOTIFY displaySettingsChanged)
+    Q_PROPERTY(int displayBrightness READ displayBrightness NOTIFY displaySettingsChanged)
+    Q_PROPERTY(int displaySharpnessLevel READ displaySharpnessLevel NOTIFY displaySettingsChanged)
+    Q_PROPERTY(bool displaySharpnessEnabled READ displaySharpnessEnabled NOTIFY displaySettingsChanged)
+    Q_PROPERTY(int displayColorLevel READ displayColorLevel NOTIFY displaySettingsChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -94,6 +99,11 @@ public:
     int thermalAutoRangeWindowPercent() const { return m_thermalAutoRangeWindowPercent; }
     int thermalManualMin() const { return m_thermalManualMin; }
     int thermalManualMax() const { return m_thermalManualMax; }
+    int displayContrast() const { return m_displayContrast; }
+    int displayBrightness() const { return m_displayBrightness; }
+    int displaySharpnessLevel() const { return m_displaySharpnessLevel; }
+    bool displaySharpnessEnabled() const { return m_displaySharpnessEnabled; }
+    int displayColorLevel() const { return m_displayColorLevel; }
 
     // QML 호출 가능 인터페이스
     // 인증/세션
@@ -152,6 +162,14 @@ public:
     Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
     Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
     Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
+    Q_INVOKABLE void sunapiLoadDisplaySettings(int cameraIndex);
+    Q_INVOKABLE bool sunapiSetDisplaySettings(int cameraIndex,
+                                              int contrast,
+                                              int brightness,
+                                              int sharpnessLevel,
+                                              int colorLevel,
+                                              bool sharpnessEnabled);
+    Q_INVOKABLE bool sunapiResetDisplaySettings(int cameraIndex);
 
 signals:
     // 상태 변경(Property NOTIFY)
@@ -218,6 +236,7 @@ signals:
     void thermalAutoRangeChanged();
     void thermalAutoRangeWindowPercentChanged();
     void thermalManualRangeChanged();
+    void displaySettingsChanged();
 
 private slots:
     void checkStorage();
@@ -430,6 +449,11 @@ private:
     QMap<int, QByteArray> m_thermalFrameChunks;
     quint16 m_thermalHeaderMin = 0;
     quint16 m_thermalHeaderMax = 0;
+    int m_displayContrast = 50;
+    int m_displayBrightness = 50;
+    int m_displaySharpnessLevel = 12;
+    bool m_displaySharpnessEnabled = true;
+    int m_displayColorLevel = 50;
 };
 
 #endif // BACKEND_H

@@ -28,6 +28,16 @@
 - `/stream?file=` 재생/다운로드
 - 카메라 SUNAPI 응답 기반 SD 저장소 용량 표시
 
+### 3-1. 카메라 표시(Image Enhancements) 제어
+- Camera Controls 패널에서 채널별 표시값 제어
+  - 대비(1~100), 밝기(1~100), 윤곽 레벨(1~32), 컬러 레벨(1~100)
+  - 윤곽 활성화(SharpnessEnable) on/off
+  - 초기화 버튼(기본값 50/50/12/50)
+- Qt는 Crow 고정 API만 호출
+  - `GET /api/sunapi/display/settings`
+  - `POST /api/sunapi/display/settings`
+  - `POST /api/sunapi/display/reset`
+
 ### 4. 인증 (Login / Sign Up)
 - 로그인 화면에서 `Sign In`/`Sign Up` 모드 전환 지원
 - Sign Up 전용 입력 폼(`ID`, `Password`, `Confirm Password`) 제공
@@ -131,6 +141,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `SUNAPI_RTSP_PORT`
   - `SUNAPI_STREAMING_WS_PATH` (세션 API 응답 WsPath가 없을 때 fallback)
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
+  - 표시 설정 제어는 `GET/POST /api/sunapi/display/settings`, `POST /api/sunapi/display/reset` 고정 API 사용
   - Storage 조회는 Crow 고정 API `GET /api/sunapi/storage` 사용
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
   - `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP` (608 장비에서 ffmpeg 백업 사용 여부)
@@ -159,6 +170,9 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
 | `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |
 | `POST` | `/api/sunapi/ptz/focus` | PTZ/Focus 제어 (`zoom_*`, `focus_*`, `autofocus`) |
+| `GET` | `/api/sunapi/display/settings` | 표시 설정 조회 (대비/밝기/윤곽/컬러) |
+| `POST` | `/api/sunapi/display/settings` | 표시 설정 적용 (채널별) |
+| `POST` | `/api/sunapi/display/reset` | 표시 설정 초기화 (50/50/12/50) |
 | `GET` | `/api/sunapi/export/create` | Playback Export 작업 생성 |
 | `GET` | `/api/sunapi/export/status` | Playback Export 상태 조회 |
 | `GET` | `/api/sunapi/export/download` | Playback Export 파일 다운로드 |
@@ -175,6 +189,7 @@ ffmpeg 배치/버전 관리:
   - Playback WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/playback/session`
   - Export WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/export/session`
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
+  - 표시 설정(대비/밝기/윤곽/컬러): Qt direct CGI -> Crow `/api/sunapi/display/*`
   - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
 
