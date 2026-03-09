@@ -282,6 +282,12 @@ Rectangle {
                     displaySharpnessEnabled)
     }
 
+    function refreshDisplaySettings() {
+        if (!showCameraControls || selectedCameraIndex < 0)
+            return
+        backend.sunapiLoadDisplaySettings(selectedCameraIndex)
+    }
+
     Connections {
         target: backend
         function onCameraControlMessage(message, isError) {
@@ -297,6 +303,10 @@ Rectangle {
             root.displaySharpnessLevel = backend.displaySharpnessLevel
             root.displaySharpnessEnabled = backend.displaySharpnessEnabled
             root.displayColorLevel = backend.displayColorLevel
+            if (contrastValueField) contrastValueField.text = String(root.displayContrast)
+            if (brightnessValueField) brightnessValueField.text = String(root.displayBrightness)
+            if (sharpnessValueField) sharpnessValueField.text = String(root.displaySharpnessLevel)
+            if (colorValueField) colorValueField.text = String(root.displayColorLevel)
         }
     }
 
@@ -308,6 +318,13 @@ Rectangle {
             root.cameraControlStatus = ""
             root.cameraControlError = false
         }
+    }
+
+    Timer {
+        id: displaySettingsRefreshTimer
+        interval: 80
+        repeat: false
+        onTriggered: root.refreshDisplaySettings()
     }
 
     component ControlButton: Button {
@@ -352,7 +369,34 @@ Rectangle {
     onShowCameraControlsChanged: {
         if (showCameraControls && selectedCameraIndex >= 0) {
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
-            backend.sunapiLoadDisplaySettings(selectedCameraIndex)
+            root.refreshDisplaySettings()
+            displaySettingsRefreshTimer.restart()
+        }
+    }
+
+    component DisplaySlider: Slider {
+        id: displaySlider
+        implicitHeight: 22
+        signal stepped()
+        background: Rectangle {
+            x: parent.leftPadding
+            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+            width: parent.availableWidth
+            height: 6
+            radius: 3
+            color: theme ? theme.border : "#3f3f46"
+        }
+        handle: Rectangle {
+            x: parent.leftPadding + parent.visualPosition * (parent.availableWidth - width)
+            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+            implicitWidth: 8
+            implicitHeight: 8
+            width: 8
+            height: 8
+            radius: 4
+            color: parent.pressed ? (theme ? theme.accent : "#f97316") : (theme ? theme.textSecondary : "#a1a1aa")
+            border.width: 1
+            border.color: theme ? theme.border : "#27272a"
         }
     }
 
@@ -369,7 +413,8 @@ Rectangle {
             supportZoom = true
             supportFocus = true
             cameraNameField.text = (selectedCameraIndex < cameraNames.length) ? cameraNames[selectedCameraIndex] : ""
-            backend.sunapiLoadDisplaySettings(selectedCameraIndex)
+            root.refreshDisplaySettings()
+            displaySettingsRefreshTimer.restart()
         }
     }
     onShowPlaybackControlsChanged: {
@@ -1271,164 +1316,14 @@ Rectangle {
                     color: theme ? theme.border : "#27272a"
                 }
 
-                Label {
-                    text: "표시"
-                    color: theme ? theme.textPrimary : "white"
-                    font.bold: true
-                    font.pixelSize: 12
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 6
-                    columnSpacing: 6
-                    rowSpacing: 4
-
-                    Label { text: "대비"; color: theme ? theme.textSecondary : "#a1a1aa"; Layout.preferredWidth: 42; font.pixelSize: 11 }
-                    ControlButton {
-                        text: "-"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayContrast = Math.max(1, root.displayContrast - 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Slider {
-                        Layout.fillWidth: true
-                        from: 1
-                        to: 100
-                        stepSize: 1
-                        value: root.displayContrast
-                        onMoved: root.displayContrast = Math.round(value)
-                        onPressedChanged: if (!pressed) root.applyDisplaySettings()
-                    }
-                    ControlButton {
-                        text: "+"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayContrast = Math.min(100, root.displayContrast + 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Label { text: String(root.displayContrast); color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignHCenter }
-                    Label { text: "(1~100)"; color: theme ? theme.textSecondary : "#71717a"; font.pixelSize: 10 }
-
-                    Label { text: "밝기"; color: theme ? theme.textSecondary : "#a1a1aa"; Layout.preferredWidth: 42; font.pixelSize: 11 }
-                    ControlButton {
-                        text: "-"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayBrightness = Math.max(1, root.displayBrightness - 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Slider {
-                        Layout.fillWidth: true
-                        from: 1
-                        to: 100
-                        stepSize: 1
-                        value: root.displayBrightness
-                        onMoved: root.displayBrightness = Math.round(value)
-                        onPressedChanged: if (!pressed) root.applyDisplaySettings()
-                    }
-                    ControlButton {
-                        text: "+"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayBrightness = Math.min(100, root.displayBrightness + 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Label { text: String(root.displayBrightness); color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignHCenter }
-                    Label { text: "(1~100)"; color: theme ? theme.textSecondary : "#71717a"; font.pixelSize: 10 }
-
-                    CheckBox {
-                        text: "윤곽"
-                        font.pixelSize: 11
-                        Layout.preferredWidth: 42
-                        checked: root.displaySharpnessEnabled
-                        enabled: root.selectedCameraIndex >= 0
-                        onToggled: {
-                            root.displaySharpnessEnabled = checked
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    ControlButton {
-                        text: "-"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displaySharpnessLevel = Math.max(1, root.displaySharpnessLevel - 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Slider {
-                        Layout.fillWidth: true
-                        from: 1
-                        to: 32
-                        stepSize: 1
-                        value: root.displaySharpnessLevel
-                        onMoved: root.displaySharpnessLevel = Math.round(value)
-                        onPressedChanged: if (!pressed) root.applyDisplaySettings()
-                    }
-                    ControlButton {
-                        text: "+"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displaySharpnessLevel = Math.min(32, root.displaySharpnessLevel + 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Label { text: String(root.displaySharpnessLevel); color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignHCenter }
-                    Label { text: "(1~32)"; color: theme ? theme.textSecondary : "#71717a"; font.pixelSize: 10 }
-
-                    Label { text: "컬러 레벨"; color: theme ? theme.textSecondary : "#a1a1aa"; Layout.preferredWidth: 42; font.pixelSize: 11 }
-                    ControlButton {
-                        text: "-"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayColorLevel = Math.max(1, root.displayColorLevel - 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Slider {
-                        Layout.fillWidth: true
-                        from: 1
-                        to: 100
-                        stepSize: 1
-                        value: root.displayColorLevel
-                        onMoved: root.displayColorLevel = Math.round(value)
-                        onPressedChanged: if (!pressed) root.applyDisplaySettings()
-                    }
-                    ControlButton {
-                        text: "+"
-                        compact: true
-                        Layout.preferredWidth: 32
-                        enabled: root.selectedCameraIndex >= 0
-                        onClicked: {
-                            root.displayColorLevel = Math.min(100, root.displayColorLevel + 1)
-                            root.applyDisplaySettings()
-                        }
-                    }
-                    Label { text: String(root.displayColorLevel); color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignHCenter }
-                    Label { text: "(1~100)"; color: theme ? theme.textSecondary : "#71717a"; font.pixelSize: 10 }
-                }
-
                 RowLayout {
                     Layout.fillWidth: true
+                    Label {
+                        text: "표시"
+                        color: theme ? theme.textPrimary : "white"
+                        font.bold: true
+                        font.pixelSize: 12
+                    }
                     Item { Layout.fillWidth: true }
                     ControlButton {
                         text: "초기화"
@@ -1438,23 +1333,324 @@ Rectangle {
                     }
                 }
 
-                Rectangle {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    height: 1
-                    color: theme ? theme.border : "#27272a"
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+                        Label { text: "대비"; color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 34; font.pixelSize: 11 }
+                        ControlButton {
+                            text: "-"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayContrast = Math.max(1, root.displayContrast - 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        DisplaySlider {
+                            id: contrastSlider
+                            Layout.fillWidth: true
+                            from: 1
+                            to: 100
+                            stepSize: 1
+                            value: root.displayContrast
+                            property bool dragged: false
+                            onMoved: {
+                                root.displayContrast = Math.round(value)
+                                contrastValueField.text = String(root.displayContrast)
+                            }
+                            onStepped: root.applyDisplaySettings()
+                            onPressedChanged: {
+                                if (pressed) {
+                                    dragged = true
+                                } else if (dragged) {
+                                    dragged = false
+                                    root.applyDisplaySettings()
+                                }
+                            }
+                        }
+                        ControlButton {
+                            text: "+"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayContrast = Math.min(100, root.displayContrast + 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        TextField {
+                            id: contrastValueField
+                            Layout.preferredWidth: 38
+                            text: String(root.displayContrast)
+                            horizontalAlignment: Text.AlignHCenter
+                            color: theme ? theme.textPrimary : "white"
+                            validator: IntValidator { bottom: 1; top: 100 }
+                            background: Rectangle {
+                                color: theme ? theme.bgSecondary : "#09090b"
+                                border.color: theme ? theme.border : "#27272a"
+                                radius: 4
+                            }
+                            onEditingFinished: {
+                                var n = parseInt(text, 10)
+                                if (isNaN(n)) n = root.displayContrast
+                                root.displayContrast = Math.max(1, Math.min(100, n))
+                                text = String(root.displayContrast)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+                        Label { text: "밝기"; color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 34; font.pixelSize: 11 }
+                        ControlButton {
+                            text: "-"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayBrightness = Math.max(1, root.displayBrightness - 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        DisplaySlider {
+                            id: brightnessSlider
+                            Layout.fillWidth: true
+                            from: 1
+                            to: 100
+                            stepSize: 1
+                            value: root.displayBrightness
+                            property bool dragged: false
+                            onMoved: {
+                                root.displayBrightness = Math.round(value)
+                                brightnessValueField.text = String(root.displayBrightness)
+                            }
+                            onStepped: root.applyDisplaySettings()
+                            onPressedChanged: {
+                                if (pressed) {
+                                    dragged = true
+                                } else if (dragged) {
+                                    dragged = false
+                                    root.applyDisplaySettings()
+                                }
+                            }
+                        }
+                        ControlButton {
+                            text: "+"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayBrightness = Math.min(100, root.displayBrightness + 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        TextField {
+                            id: brightnessValueField
+                            Layout.preferredWidth: 38
+                            text: String(root.displayBrightness)
+                            horizontalAlignment: Text.AlignHCenter
+                            color: theme ? theme.textPrimary : "white"
+                            validator: IntValidator { bottom: 1; top: 100 }
+                            background: Rectangle {
+                                color: theme ? theme.bgSecondary : "#09090b"
+                                border.color: theme ? theme.border : "#27272a"
+                                radius: 4
+                            }
+                            onEditingFinished: {
+                                var n = parseInt(text, 10)
+                                if (isNaN(n)) n = root.displayBrightness
+                                root.displayBrightness = Math.max(1, Math.min(100, n))
+                                text = String(root.displayBrightness)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+                        RowLayout {
+                            Layout.preferredWidth: 40
+                            spacing: 1
+                            Label {
+                                text: "윤곽 조정"
+                                color: theme ? theme.textPrimary : "white"
+                                font.pixelSize: 11
+                                Layout.fillWidth: true
+                            }
+                            CheckBox {
+                                scale: 0.55
+                                checked: root.displaySharpnessEnabled
+                                enabled: root.selectedCameraIndex >= 0
+                                onToggled: {
+                                    root.displaySharpnessEnabled = checked
+                                    root.applyDisplaySettings()
+                                }
+                            }
+                        }
+                        ControlButton {
+                            text: "-"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displaySharpnessLevel = Math.max(1, root.displaySharpnessLevel - 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        DisplaySlider {
+                            id: sharpnessSlider
+                            Layout.fillWidth: true
+                            from: 1
+                            to: 32
+                            stepSize: 1
+                            value: root.displaySharpnessLevel
+                            property bool dragged: false
+                            onMoved: {
+                                root.displaySharpnessLevel = Math.round(value)
+                                sharpnessValueField.text = String(root.displaySharpnessLevel)
+                            }
+                            onStepped: root.applyDisplaySettings()
+                            onPressedChanged: {
+                                if (pressed) {
+                                    dragged = true
+                                } else if (dragged) {
+                                    dragged = false
+                                    root.applyDisplaySettings()
+                                }
+                            }
+                        }
+                        ControlButton {
+                            text: "+"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displaySharpnessLevel = Math.min(32, root.displaySharpnessLevel + 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        TextField {
+                            id: sharpnessValueField
+                            Layout.preferredWidth: 38
+                            text: String(root.displaySharpnessLevel)
+                            horizontalAlignment: Text.AlignHCenter
+                            color: theme ? theme.textPrimary : "white"
+                            validator: IntValidator { bottom: 1; top: 32 }
+                            background: Rectangle {
+                                color: theme ? theme.bgSecondary : "#09090b"
+                                border.color: theme ? theme.border : "#27272a"
+                                radius: 4
+                            }
+                            onEditingFinished: {
+                                var n = parseInt(text, 10)
+                                if (isNaN(n)) n = root.displaySharpnessLevel
+                                root.displaySharpnessLevel = Math.max(1, Math.min(32, n))
+                                text = String(root.displaySharpnessLevel)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+                        Label {
+                            text: "컬러 레벨"
+                            color: theme ? theme.textPrimary : "white"
+                            font.pixelSize: 11
+                            Layout.preferredWidth: 52
+                            Layout.minimumWidth: 52
+                        }
+                        ControlButton {
+                            text: "-"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayColorLevel = Math.max(1, root.displayColorLevel - 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        DisplaySlider {
+                            id: colorSlider
+                            Layout.fillWidth: true
+                            from: 1
+                            to: 100
+                            stepSize: 1
+                            value: root.displayColorLevel
+                            property bool dragged: false
+                            onMoved: {
+                                root.displayColorLevel = Math.round(value)
+                                colorValueField.text = String(root.displayColorLevel)
+                            }
+                            onStepped: root.applyDisplaySettings()
+                            onPressedChanged: {
+                                if (pressed) {
+                                    dragged = true
+                                } else if (dragged) {
+                                    dragged = false
+                                    root.applyDisplaySettings()
+                                }
+                            }
+                        }
+                        ControlButton {
+                            text: "+"
+                            compact: true
+                            Layout.preferredWidth: 16
+                            enabled: root.selectedCameraIndex >= 0
+                            onClicked: {
+                                root.displayColorLevel = Math.min(100, root.displayColorLevel + 1)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                        TextField {
+                            id: colorValueField
+                            Layout.preferredWidth: 38
+                            text: String(root.displayColorLevel)
+                            horizontalAlignment: Text.AlignHCenter
+                            color: theme ? theme.textPrimary : "white"
+                            validator: IntValidator { bottom: 1; top: 100 }
+                            background: Rectangle {
+                                color: theme ? theme.bgSecondary : "#09090b"
+                                border.color: theme ? theme.border : "#27272a"
+                                radius: 4
+                            }
+                            onEditingFinished: {
+                                var n = parseInt(text, 10)
+                                if (isNaN(n)) n = root.displayColorLevel
+                                root.displayColorLevel = Math.max(1, Math.min(100, n))
+                                text = String(root.displayColorLevel)
+                                root.applyDisplaySettings()
+                            }
+                        }
+                    }
                 }
 
                 Text {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 14
-                    Layout.minimumHeight: 14
-                    Layout.maximumHeight: 14
+                    Layout.preferredHeight: 18
+                    Layout.minimumHeight: 18
+                    Layout.maximumHeight: 18
                     text: root.cameraControlStatus.length > 0 ? root.cameraControlStatus : " "
                     color: root.cameraControlError ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 10
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                     opacity: root.cameraControlStatus.length > 0 ? 1.0 : 0.0
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: theme ? theme.border : "#27272a"
                 }
 
             }

@@ -463,34 +463,100 @@ Item {
 
                     RowLayout {
                         visible: root.dptzEnabled
-                        spacing: 4
+                        spacing: 6
 
-                        Button {
-                            text: "-"
-                            Layout.preferredWidth: 28
-                            Layout.preferredHeight: 22
-                            onClicked: {
-                                var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
-                                var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
-                                root.dptzZoomAt(-0.2, fx, fy)
-                            }
-                        }
+                        Rectangle {
+                            Layout.preferredWidth: 116
+                            Layout.preferredHeight: 24
+                            radius: 6
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.width: 1
+                            border.color: theme ? theme.border : "#27272a"
 
-                        Button {
-                            text: Number(root.dptzScale).toFixed(1) + "x"
-                            Layout.preferredWidth: 42
-                            Layout.preferredHeight: 22
-                            onClicked: root.dptzReset()
-                        }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 2
+                                anchors.rightMargin: 2
+                                spacing: 2
 
-                        Button {
-                            text: "+"
-                            Layout.preferredWidth: 28
-                            Layout.preferredHeight: 22
-                            onClicked: {
-                                var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
-                                var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
-                                root.dptzZoomAt(0.2, fx, fy)
+                                Rectangle {
+                                    Layout.preferredWidth: 24
+                                    Layout.preferredHeight: 20
+                                    radius: 4
+                                    color: minusMouse.pressed
+                                           ? (theme ? theme.bgSecondary : "#09090b")
+                                           : (minusMouse.containsMouse ? (theme ? theme.border : "#3f3f46") : "transparent")
+                                    border.width: 1
+                                    border.color: theme ? theme.border : "#27272a"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "-"
+                                        color: theme ? theme.textPrimary : "white"
+                                        font.bold: true
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea {
+                                        id: minusMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                                            var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                                            root.dptzZoomAt(-0.2, fx, fy)
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 20
+                                    radius: 4
+                                    color: theme ? theme.bgSecondary : "#09090b"
+                                    border.width: 1
+                                    border.color: theme ? theme.border : "#27272a"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: Number(root.dptzScale).toFixed(1) + "x"
+                                        color: theme ? theme.textPrimary : "white"
+                                        font.bold: true
+                                        font.pixelSize: 11
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.dptzReset()
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 24
+                                    Layout.preferredHeight: 20
+                                    radius: 4
+                                    color: plusMouse.pressed
+                                           ? (theme ? theme.bgSecondary : "#09090b")
+                                           : (plusMouse.containsMouse ? (theme ? theme.border : "#3f3f46") : "transparent")
+                                    border.width: 1
+                                    border.color: theme ? theme.border : "#27272a"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "+"
+                                        color: theme ? theme.textPrimary : "white"
+                                        font.bold: true
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea {
+                                        id: plusMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
+                                            var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
+                                            root.dptzZoomAt(0.2, fx, fy)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

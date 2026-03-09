@@ -1,7 +1,7 @@
 ﻿# Qt CCTV Client (Live + Playback VMS)
 
 이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
-실시간 Live(4채널), 녹화 목록 API, 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색)을 제공합니다.
+실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색)을 제공합니다.
 
 ## 주요 기능
 
@@ -22,15 +22,14 @@
   - 장비가 `Error 608`(미지원)일 경우 RTSP `backup.smp` + ffmpeg fallback
   - 결과물 저장: 기본 AVI(실패 시 원인 로그 출력)
 
-### 3. 녹화 관리 API 연동
-- `/recordings` 목록 조회
-- `/recordings?file=` 삭제
-- `/stream?file=` 재생/다운로드
+### 3. 저장소/상태 정보
 - 카메라 SUNAPI 응답 기반 SD 저장소 용량 표시
+- 참고: `/recordings`, `/stream` 계열은 현재 UI에서 사용하지 않음(레거시)
 
 ### 3-1. 카메라 표시(Image Enhancements) 제어
 - Camera Controls 패널에서 채널별 표시값 제어
-  - 대비(1~100), 밝기(1~100), 윤곽 레벨(1~32), 컬러 레벨(1~100)
+  - 대비(1~100), 밝기(1~100), 윤곽 조정(Enable + Level 1~32), 컬러 레벨(1~100)
+  - 각 항목 값은 3자리 입력칸으로 직접 수정 가능(예: `100`)
   - 윤곽 활성화(SharpnessEnable) on/off
   - 초기화 버튼(기본값 50/50/12/50)
 - Qt는 Crow 고정 API만 호출
@@ -38,7 +37,13 @@
   - `POST /api/sunapi/display/settings`
   - `POST /api/sunapi/display/reset`
 
-### 4. 인증 (Login / Sign Up)
+### 4. Thermal 모니터링
+- 상단 탭의 `Thermal` 진입 시 열화상 스트림 시작, 이탈 시 자동 중지
+- MQTT 청크 프레임(160x120, 16-bit) 재조립 후 QML `Image`로 표시
+- 팔레트(`Jet`/`Gray`/`Iron`) 및 Auto/Manual range 제어 지원
+- 관련 구현: `src/core/BackendThermal.cpp`, `src/ui/qml/ThermalViewer.qml`
+
+### 5. 인증 (Login / Sign Up)
 - 로그인 화면에서 `Sign In`/`Sign Up` 모드 전환 지원
 - Sign Up 전용 입력 폼(`ID`, `Password`, `Confirm Password`) 제공
 - 비밀번호 확인 불일치/빈 입력값 클라이언트 검증
@@ -75,7 +80,7 @@
                              v                                              v
           +------------------+--------------------+          +--------------+-------------------+
           | Crow API Gateway (외부)               |          | Media Endpoints (외부)           |
-          | /login /recordings /api/sunapi/*      |          | MediaMTX / Camera StreamingServer|
+          | /login /api/sunapi/*                  |          | MediaMTX / Camera StreamingServer|
           +---------------------------------------+          +----------------------------------+
 ```
 
@@ -139,16 +144,19 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `RTSP_MAIN_PATH_TEMPLATE`, `RTSP_SUB_PATH_TEMPLATE`
 - SUNAPI/Playback
   - `SUNAPI_RTSP_PORT`
-  - `SUNAPI_STREAMING_WS_PATH` (세션 API 응답 WsPath가 없을 때 fallback)
+  - `SUNAPI_STREAMING_WS_PATH` (세션 API 응답 `WsPath`가 없거나 비어 있을 때 fallback)
+    - `example.env` 기본값: `/sunapi/StreamingServer`
+    - 코드 내부 최종 fallback: `/StreamingServer`
   - PTZ/Focus 제어는 `POST /api/sunapi/ptz/focus` 고정 API 사용(클라이언트 CGI 조합 제거)
   - 표시 설정 제어는 `GET/POST /api/sunapi/display/settings`, `POST /api/sunapi/display/reset` 고정 API 사용
   - Storage 조회는 Crow 고정 API `GET /api/sunapi/storage` 사용
   - `SUNAPI_EXPORT_TYPE`, `SUNAPI_EXPORT_POLL_INTERVAL_MS`, `SUNAPI_EXPORT_POLL_TIMEOUT_MS`
   - `PLAYBACK_EXPORT_USE_FFMPEG_BACKUP` (608 장비에서 ffmpeg 백업 사용 여부)
   - `PLAYBACK_WS_AUTO_CONNECT`, `PLAYBACK_WS_SEND_DESCRIBE`
-  - `SUNAPI_STREAMING_WS_PATH`, `PLAYBACK_WS_DIGEST_RESPONSE`
+  - `PLAYBACK_WS_DIGEST_RESPONSE`
   - `PLAYBACK_WS_SDP_FILE_PROTOCOL`
   - `PLAYBACK_EXPORT_FFMPEG_PATH` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
+  - `THERMAL_DEBUG` (1이면 열화상 청크 조립 디버그 로그 활성화)
 
 ffmpeg 배치/버전 관리:
 - 저장소에는 `tools/ffmpeg.exe`를 커밋하지 않습니다(`.gitignore` 제외).
@@ -163,9 +171,6 @@ ffmpeg 배치/버전 관리:
 | :--- | :--- | :--- |
 | `POST` | `/login` | 로그인 |
 | `POST` | `/register` | 회원가입 |
-| `GET` | `/recordings` | 녹화 목록 조회 |
-| `DELETE` | `/recordings?file={name}` | 녹화 파일 삭제 |
-| `GET` | `/stream?file={name}` | 녹화 파일 스트리밍 |
 | `GET` | `/api/sunapi/storage` | 카메라 SD 저장소 조회 (Crow 프록시) |
 | `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
 | `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |
@@ -230,6 +235,7 @@ Team3VideoReceiver/
 │  │  ├─ BackendRtspPlayback.cpp
 │  │  ├─ BackendRtspProbe.cpp
 │  │  ├─ BackendStreamingWs.cpp
+│  │  ├─ BackendSunapiDisplay.cpp
 │  │  ├─ BackendSunapiExportDownload.cpp
 │  │  ├─ BackendSunapiExportFfmpeg.cpp
 │  │  ├─ BackendSunapiExportHttp.cpp
@@ -240,7 +246,8 @@ Team3VideoReceiver/
 │  │  ├─ BackendSunapiExportWsSession.cpp
 │  │  ├─ BackendSunapiPtz.cpp
 │  │  ├─ BackendSunapiTimeline.cpp
-│  │  └─ BackendSunapiTimelineMonth.cpp
+│  │  ├─ BackendSunapiTimelineMonth.cpp
+│  │  └─ BackendThermal.cpp
 │  └─ ui/
 │     └─ qml/
 │        ├─ Header.qml
@@ -266,6 +273,8 @@ Team3VideoReceiver/
 - `BackendCore.cpp` -> `BackendCoreEnv.cpp`, `BackendCoreSsl.cpp`, `BackendCoreMqtt.cpp`, `BackendCoreApi.cpp`, `BackendCoreState.cpp`
 - `BackendMedia.cpp` -> `BackendMediaRecordings.cpp`, `BackendMediaStorage.cpp`
 - `BackendRtsp.cpp` -> `BackendRtspConfig.cpp`, `BackendRtspPlayback.cpp`, `BackendRtspProbe.cpp`
+- `BackendSunapiDisplay.cpp` 분리로 표시 설정 API 처리 책임 분리
+- `BackendThermal.cpp` 분리로 열화상 MQTT 프레임 처리/팔레트 렌더링 분리
 - `BackendSunapiExport.cpp` ->
   `BackendSunapiExportHttp.cpp`,
   `BackendSunapiExportParse.cpp`,
@@ -320,7 +329,7 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - `http.request.uri contains "recording.cgi" || http.request.uri contains "security.cgi"`
   - `tcp.stream eq <N>`
 - 확인 포인트
-  - `GET /StreamingServer` -> `101 Switching Protocols`
+  - `GET <SUNAPI_STREAMING_WS_PATH>` -> `101 Switching Protocols`
   - WS Binary payload 내부 RTSP 메시지 확인
   - `OPTIONS 401` -> Digest 포함 재시도 `200`
   - `SETUP` 다중 트랙 `200`
