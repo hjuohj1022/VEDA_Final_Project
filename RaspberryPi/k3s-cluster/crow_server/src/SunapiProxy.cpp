@@ -84,6 +84,60 @@ std::string makeQuery(const std::initializer_list<std::pair<std::string, std::st
     return oss.str();
 }
 
+bool parseIntParam(const crow::request& req,
+                   const char* key,
+                   int minValue,
+                   int maxValue,
+                   int* out,
+                   std::string* err) {
+    const char* raw = req.url_params.get(key);
+    if (!raw) {
+        if (err) *err = std::string("missing query: ") + key;
+        return false;
+    }
+    try {
+        const int v = std::stoi(raw);
+        if (v < minValue || v > maxValue) {
+            if (err) {
+                std::ostringstream oss;
+                oss << "invalid " << key << " range (" << minValue << "~" << maxValue << ")";
+                *err = oss.str();
+            }
+            return false;
+        }
+        if (out) *out = v;
+        return true;
+    } catch (...) {
+        if (err) *err = std::string("invalid query integer: ") + key;
+        return false;
+    }
+}
+
+bool parseBoolParam(const crow::request& req,
+                    const char* key,
+                    bool* out,
+                    std::string* err) {
+    const char* raw = req.url_params.get(key);
+    if (!raw) {
+        if (err) *err = std::string("missing query: ") + key;
+        return false;
+    }
+    std::string v(raw);
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (v == "1" || v == "true" || v == "yes" || v == "on") {
+        if (out) *out = true;
+        return true;
+    }
+    if (v == "0" || v == "false" || v == "no" || v == "off") {
+        if (out) *out = false;
+        return true;
+    }
+    if (err) *err = std::string("invalid query bool: ") + key;
+    return false;
+}
+
 std::string normalizeWsPath(std::string path) {
     if (path.empty()) {
         path = "/StreamingServer";
@@ -254,6 +308,9 @@ crow::response forwardToSunapi(const crow::request& req, const std::string& forw
 
     if (baseUrl.empty()) {
         return crow::response(500, "SUNAPI_BASE_URL is not configured");
+    }
+    if (baseUrl.rfind("https://", 0) != 0) {
+        return crow::response(500, "SUNAPI_BASE_URL must use https:// scheme");
     }
 
     if (username.empty() || password.empty()) {
@@ -696,6 +753,70 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
             {"action", "control"},
             {"Channel", ch},
             {key, value}
+        });
+        return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
+    });
+
+    // Crow fixed spec: display settings view
+    CROW_ROUTE(app, "/api/sunapi/display/settings")
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)
+    ([](const crow::request& req) {
+        const char* ch = req.url_params.get("channel");
+        if (!ch) {
+            return crow::response(400, "missing query: channel");
+        }
+
+        if (req.method == crow::HTTPMethod::Get) {
+            const std::string q = makeQuery({
+                {"msubmenu", "imageenhancements2"},
+                {"action", "view"},
+                {"Channel", ch}
+            });
+            return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
+        }
+
+        int contrast = 50;
+        int brightness = 50;
+        int sharpnessLevel = 12;
+        int colorLevel = 50;
+        bool sharpnessEnable = true;
+        std::string err;
+        if (!parseIntParam(req, "contrast", 1, 100, &contrast, &err)
+            || !parseIntParam(req, "brightness", 1, 100, &brightness, &err)
+            || !parseIntParam(req, "sharpness_level", 1, 32, &sharpnessLevel, &err)
+            || !parseIntParam(req, "color_level", 1, 100, &colorLevel, &err)
+            || !parseBoolParam(req, "sharpness_enable", &sharpnessEnable, &err)) {
+            return crow::response(400, err.empty() ? "invalid display settings query" : err);
+        }
+
+        const std::string q = makeQuery({
+            {"msubmenu", "imageenhancements2"},
+            {"action", "set"},
+            {"Channel", ch},
+            {"ImagePresetMode", "UserPreset1"},
+            {"Contrast", std::to_string(contrast)},
+            {"Brightness", std::to_string(brightness)},
+            {"SharpnessLevel", std::to_string(sharpnessLevel)},
+            {"SharpnessEnable", sharpnessEnable ? "True" : "False"},
+            {"Saturation", std::to_string(colorLevel)}
+        });
+        return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
+    });
+
+    // Crow fixed spec: display settings reset (50,50,12,50)
+    CROW_ROUTE(app, "/api/sunapi/display/reset")
+        .methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req) {
+        const char* ch = req.url_params.get("channel");
+        if (!ch) {
+            return crow::response(400, "missing query: channel");
+        }
+
+        const std::string q = makeQuery({
+            {"msubmenu", "imageenhancements2"},
+            {"action", "set"},
+            {"control", "Reset=True"},
+            {"Channel", ch}
         });
         return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
     });

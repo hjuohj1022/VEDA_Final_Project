@@ -299,6 +299,101 @@ paths:
           description: Unauthorized
         '502':
           description: Upstream error
+  /api/sunapi/display/settings:
+    get:
+      summary: View image display settings (contrast/brightness/sharpness/saturation)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
+    post:
+      summary: Set image display settings (UserPreset1)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: contrast
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: brightness
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: sharpness_level
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 32
+        - name: sharpness_enable
+          in: query
+          required: true
+          schema:
+            type: boolean
+        - name: color_level
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
+  /api/sunapi/display/reset:
+    post:
+      summary: Reset image display settings to device default (50/50/12/50)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: Forwarded SUNAPI payload
+        '400':
+          description: Missing or invalid query
+        '401':
+          description: Unauthorized
+        '502':
+          description: Upstream error
   /api/sunapi/playback/session:
     get:
       summary: Create playback RTSP-over-WS session payload
