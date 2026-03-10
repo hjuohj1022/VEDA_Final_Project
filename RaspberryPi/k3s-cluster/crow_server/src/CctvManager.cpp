@@ -75,14 +75,18 @@ bool CctvManager::setSocketRecvTimeoutMs(int timeout_ms) {
 
 bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
     if (!out_ssl || !out_socket_fd || !ssl_ctx_) {
+        std::cerr << "[CCTV] TLS connection setup skipped: SSL context is not ready" << std::endl;
         return false;
     }
 
     *out_ssl = nullptr;
     *out_socket_fd = -1;
 
+    std::cout << "[CCTV] Opening TLS connection to " << host_ << ":" << port_ << std::endl;
+
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
+        std::cerr << "[CCTV] Failed to create socket for " << host_ << ":" << port_ << std::endl;
         return false;
     }
 
@@ -91,17 +95,20 @@ bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_);
     if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) != 1) {
+        std::cerr << "[CCTV] Invalid backend IPv4 address: " << host_ << std::endl;
         close(fd);
         return false;
     }
 
     if (::connect(fd, reinterpret_cast<struct sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
+        std::cerr << "[CCTV] TCP connect failed to " << host_ << ":" << port_ << std::endl;
         close(fd);
         return false;
     }
 
     SSL* ssl = SSL_new(ssl_ctx_);
     if (!ssl) {
+        std::cerr << "[CCTV] Failed to allocate SSL object" << std::endl;
         close(fd);
         return false;
     }
@@ -115,11 +122,13 @@ bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
 
     SSL_set_fd(ssl, fd);
     if (SSL_connect(ssl) <= 0) {
+        std::cerr << "[CCTV] TLS handshake failed for " << host_ << ":" << port_ << std::endl;
         SSL_free(ssl);
         close(fd);
         return false;
     }
 
+    std::cout << "[CCTV] TLS connection established to " << host_ << ":" << port_ << std::endl;
     *out_ssl = ssl;
     *out_socket_fd = fd;
     return true;
@@ -206,9 +215,11 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
     tv.tv_usec = (kCommandResponseTimeoutMs % 1000) * 1000;
     setsockopt(control_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
+    std::cout << "[CCTV] Sending control command: " << command << std::endl;
     const int write_result = SSL_write(control_ssl, command.c_str(), static_cast<int>(command.length()));
     if (write_result <= 0) {
         closeTlsConnection(control_ssl, control_fd);
+        std::cerr << "[CCTV] Failed to write control command: " << command << std::endl;
         return "Error: Failed to send CCTV command";
     }
 
@@ -218,9 +229,11 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
 
     if (n > 0) {
         buf[n] = '\0';
+        std::cout << "[CCTV] Control response for [" << command << "]: " << buf << std::endl;
         return std::string(buf);
     }
 
+    std::cerr << "[CCTV] Timed out waiting for control response: " << command << std::endl;
     return "Error: Timed out or failed while waiting for CCTV response";
 }
 
@@ -231,9 +244,11 @@ std::string CctvManager::startStreamCommand(const std::string& command) {
 
     std::lock_guard<std::mutex> lock(socket_mutex_);
     const std::string full_cmd = command + "\n";
+    std::cout << "[CCTV] Sending stream command: " << command << std::endl;
     const int write_result = SSL_write(ssl_, full_cmd.c_str(), static_cast<int>(full_cmd.length()));
     if (write_result <= 0) {
         connected_ = false;
+        std::cerr << "[CCTV] Failed to write stream command: " << command << std::endl;
         return "Error: Failed to send stream command";
     }
 
@@ -257,8 +272,10 @@ std::string CctvManager::startStreamCommand(const std::string& command) {
 
     if (ack.empty()) {
         connected_ = false;
+        std::cerr << "[CCTV] Failed to receive stream ACK for: " << command << std::endl;
         return "Error: Failed to read stream ACK";
     }
+    std::cout << "[CCTV] Stream ACK for [" << command << "]: " << ack;
     connected_ = true;
     return ack;
 }
