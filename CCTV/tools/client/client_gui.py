@@ -9,6 +9,9 @@ import base64
 import time
 import math
 
+CONTROL_CONNECT_TIMEOUT_SEC = 8.0
+STREAM_CONNECT_TIMEOUT_SEC = 8.0
+
 
 def _resolve_file_path(p: str) -> str:
     raw = Path(p)
@@ -27,23 +30,76 @@ def _resolve_file_path(p: str) -> str:
     return str(raw)
 
 
+def _require_existing_file(label: str, p: str) -> str:
+    resolved = _resolve_file_path(p)
+    if not Path(resolved).exists():
+        raise FileNotFoundError(f"{label} file not found: {p} (resolved: {resolved})")
+    return resolved
+
+
+def _socket_family_name(family: int) -> str:
+    if family == socket.AF_INET:
+        return "AF_INET"
+    if family == socket.AF_INET6:
+        return "AF_INET6"
+    return str(family)
+
+
 def connect_socket(host: str, port: int, timeout_sec: float,
                    use_mtls: bool, ca_file: str, client_cert: str, client_key: str):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout_sec)
+    if not host:
+        raise ValueError("Server host is empty")
+
+    tls_context = None
     if use_mtls:
-        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=_resolve_file_path(ca_file))
-        ctx.check_hostname = False
-        ctx.load_cert_chain(certfile=_resolve_file_path(client_cert), keyfile=_resolve_file_path(client_key))
-        s = ctx.wrap_socket(s, server_hostname=host)
-    s.connect((host, port))
-    return s
+        ca_path = _require_existing_file("CA", ca_file)
+        cert_path = _require_existing_file("Client certificate", client_cert)
+        key_path = _require_existing_file("Client key", client_key)
+        tls_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_path)
+        tls_context.check_hostname = False
+        tls_context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+
+    try:
+        addr_infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ConnectionError(f"Failed to resolve host {host}:{port}: {exc}") from exc
+
+    if not addr_infos:
+        raise ConnectionError(f"No TCP address candidates found for {host}:{port}")
+
+    errors = []
+    for family, socktype, proto, _canonname, sockaddr in addr_infos:
+        sock = None
+        tls_sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout_sec)
+            sock.connect(sockaddr)
+            if tls_context is None:
+                return sock
+
+            tls_sock = tls_context.wrap_socket(sock, server_hostname=host)
+            tls_sock.settimeout(timeout_sec)
+            return tls_sock
+        except Exception as exc:
+            errors.append(f"{_socket_family_name(family)} {sockaddr}: {exc}")
+            if tls_sock is not None:
+                tls_sock.close()
+            elif sock is not None:
+                sock.close()
+
+    joined_errors = "; ".join(errors)
+    prefix = "mTLS" if use_mtls else "TCP"
+    raise ConnectionError(
+        f"{prefix} connection to {host}:{port} failed after trying {len(addr_infos)} address(es): {joined_errors}"
+    )
 
 
 def send_command(host: str, port: int, command: str,
                  use_mtls: bool, ca_file: str, client_cert: str, client_key: str) -> str:
-    with connect_socket(host, port, 3.0, use_mtls, ca_file, client_cert, client_key) as s:
-        s.sendall(command.encode("utf-8"))
+    payload = command.rstrip("\r\n") + "\n"
+    with connect_socket(host, port, CONTROL_CONNECT_TIMEOUT_SEC, use_mtls, ca_file, client_cert, client_key) as s:
+        s.sendall(payload.encode("utf-8"))
         data = s.recv(4096)
     return data.decode("utf-8", errors="replace").strip()
 
@@ -304,7 +360,7 @@ class ClientGui(tk.Tk):
 
         def stream_loop():
             try:
-                with connect_socket(host, port, 5.0,
+                with connect_socket(host, port, STREAM_CONNECT_TIMEOUT_SEC,
                                     self.use_mtls_var.get(),
                                     self.ca_file_var.get().strip(),
                                     self.client_cert_var.get().strip(),
@@ -597,7 +653,7 @@ class ClientGui(tk.Tk):
 
         def stream_loop():
             try:
-                with connect_socket(host, port, 5.0,
+                with connect_socket(host, port, STREAM_CONNECT_TIMEOUT_SEC,
                                     self.use_mtls_var.get(),
                                     self.ca_file_var.get().strip(),
                                     self.client_cert_var.get().strip(),
