@@ -31,7 +31,8 @@ struct RgbdHeader {
 enum class CctvStreamMode {
     NONE,
     PC_IMAGE, // 16B Header
-    RGBD_RAW  // 20B Header
+    RGBD_RAW, // 20B Header
+    DEPTH_RAW // 16B Header
 };
 
 class CctvManager {
@@ -59,6 +60,7 @@ private:
     void initSsl();
     void cleanupSsl();
     bool readExact(void* buf, size_t len);
+    std::string readLine();
 
     std::string host_;
     int port_;

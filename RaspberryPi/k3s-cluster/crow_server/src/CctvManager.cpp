@@ -62,6 +62,22 @@ bool CctvManager::readExact(void* buf, size_t len) {
     return total_read == len;
 }
 
+std::string CctvManager::readLine() {
+    std::string line;
+    char ch = '\0';
+    while (!stop_thread_) {
+        int r = SSL_read(ssl_, &ch, 1);
+        if (r <= 0) {
+            break;
+        }
+        line.push_back(ch);
+        if (ch == '\n') {
+            break;
+        }
+    }
+    return line;
+}
+
 bool CctvManager::connect() {
     std::lock_guard<std::mutex> lock(socket_mutex_);
     if (connected_) return true;
@@ -122,12 +138,22 @@ std::string CctvManager::sendCommand(const std::string& command) {
     std::string full_cmd = command + "\n";
     SSL_write(ssl_, full_cmd.c_str(), full_cmd.length());
 
-    if (command == "pc_stream") {
-        stream_mode_ = CctvStreamMode::PC_IMAGE;
-        return "OK pc_stream";
-    } else if (command == "rgbd_stream") {
-        stream_mode_ = CctvStreamMode::RGBD_RAW;
-        return "OK rgbd_stream";
+    if ((command == "pc_stream") || (command == "rgbd_stream") || (command == "depth_stream")) {
+        const std::string ack = readLine();
+        if (command == "pc_stream") {
+            if (ack.rfind("OK pc_stream", 0) == 0) {
+                stream_mode_ = CctvStreamMode::PC_IMAGE;
+            }
+        } else if (command == "rgbd_stream") {
+            if (ack.rfind("OK rgbd_stream", 0) == 0) {
+                stream_mode_ = CctvStreamMode::RGBD_RAW;
+            }
+        } else if (command == "depth_stream") {
+            if (ack.rfind("OK depth_stream", 0) == 0) {
+                stream_mode_ = CctvStreamMode::DEPTH_RAW;
+            }
+        }
+        return ack.empty() ? "Error: Failed to read stream ACK" : ack;
     }
 
     char buf[1024];
@@ -144,7 +170,10 @@ void CctvManager::streamLoop() {
         }
 
         std::vector<uint8_t> full_data;
-        size_t header_size = (stream_mode_ == CctvStreamMode::PC_IMAGE) ? sizeof(FrameHeader) : sizeof(RgbdHeader);
+        size_t header_size = sizeof(RgbdHeader);
+        if ((stream_mode_ == CctvStreamMode::PC_IMAGE) || (stream_mode_ == CctvStreamMode::DEPTH_RAW)) {
+            header_size = sizeof(FrameHeader);
+        }
         full_data.resize(header_size);
 
         // 1. 헤더 읽기
@@ -154,7 +183,7 @@ void CctvManager::streamLoop() {
 
         // 2. 페이로드 크기 계산
         size_t payload_total = 0;
-        if (stream_mode_ == CctvStreamMode::PC_IMAGE) {
+        if ((stream_mode_ == CctvStreamMode::PC_IMAGE) || (stream_mode_ == CctvStreamMode::DEPTH_RAW)) {
             payload_total = reinterpret_cast<FrameHeader*>(full_data.data())->payload_size;
         } else {
             auto h = reinterpret_cast<RgbdHeader*>(full_data.data());
