@@ -61,6 +61,11 @@ private:
     void cleanupSsl();
     bool readExact(void* buf, size_t len);
     std::string readLine();
+    bool setSocketRecvTimeoutMs(int timeout_ms);
+    bool openTlsConnection(SSL** out_ssl, int* out_socket_fd);
+    void closeTlsConnection(SSL* ssl, int socket_fd);
+    std::string sendControlCommand(const std::string& command);
+    std::string startStreamCommand(const std::string& command);
 
     std::string host_;
     int port_;
