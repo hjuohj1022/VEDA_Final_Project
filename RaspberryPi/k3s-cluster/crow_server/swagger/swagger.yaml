@@ -702,9 +702,52 @@ paths:
           description: OK
         '400':
           description: Invalid request
+  /cctv/control/command:
+    post:
+      summary: Send raw CCTV control command
+      description: |
+        Pass through a raw command string to the CCTV backend.
+        Examples:
+        - `pause`
+        - `resume`
+        - `stop`
+        - `channel=0 headless`
+        - `channel=1 gui`
+        - `pc_view rx=-20 ry=35 flipx=0 flipy=0 flipz=0 wire=1 mesh=0`
+        - `depth_stream`
+        - `rgbd_stream`
+        - `pc_stream`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Invalid request
   /cctv/control/stop:
     post:
       summary: Stop CCTV Processing
+      responses:
+        '200':
+          description: OK
+  /cctv/control/pause:
+    post:
+      summary: Pause CCTV Processing
+      responses:
+        '200':
+          description: OK
+  /cctv/control/resume:
+    post:
+      summary: Resume CCTV Processing
       responses:
         '200':
           description: OK
@@ -736,6 +779,46 @@ paths:
       responses:
         '200':
           description: OK
+  /cctv/control/stream:
+    post:
+      summary: Start CCTV stream mode
+      description: |
+        Select exactly one backend stream command before consuming `/cctv/stream`.
+        Choose one of:
+        - `pc_stream`: server-rendered PNG stream
+        - `rgbd_stream`: depth32f + bgr24 raw stream
+        - `depth_stream`: depth32f-only raw stream
+        Do not mix multiple stream commands at the same time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - stream
+              properties:
+                stream:
+                  type: string
+                  enum: [pc_stream, rgbd_stream, depth_stream]
+            examples:
+              pcStream:
+                summary: Server-rendered point cloud stream
+                value:
+                  stream: pc_stream
+              rgbdStream:
+                summary: Raw RGBD stream
+                value:
+                  stream: rgbd_stream
+              depthStream:
+                summary: Depth-only raw stream
+                value:
+                  stream: depth_stream
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Invalid request
   /cctv/status:
     get:
       summary: Get CCTV Status
@@ -751,7 +834,7 @@ paths:
                     type: boolean
                   stream_mode:
                     type: integer
-                    description: 0 (NONE), 1 (IMAGE), 2 (RAW)
+                    description: 0 (NONE), 1 (PC_IMAGE), 2 (RGBD_RAW), 3 (DEPTH_RAW)
   /cctv/stream:
     get:
       summary: Point Cloud Stream (WebSocket)
