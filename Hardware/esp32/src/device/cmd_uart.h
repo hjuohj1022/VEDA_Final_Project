@@ -23,5 +23,6 @@ extern QueueHandle_t g_cmd_uart_queue;
 esp_err_t cmdUartInit(void);
 void cmdUartTask(void *arg);
 void cmdUartFlushInput(void);
+uint32_t cmdUartGetQueueDepth(void);
 
 #endif

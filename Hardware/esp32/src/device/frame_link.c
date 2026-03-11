@@ -128,6 +128,24 @@ void frameLinkReleaseReadyFrame(int buffer_idx)
     }
 }
 
+void frameLinkGetStats(frame_link_stats_t *stats)
+{
+    if (stats == NULL) {
+        return;
+    }
+
+    stats->total_packets = s_total_packets;
+    stats->completed_frames = s_completed_frames;
+    stats->spi_timeouts = s_spi_timeouts;
+    stats->spi_errors = s_spi_errors;
+    stats->bad_magic = s_bad_magic;
+    stats->bad_checksum = s_bad_checksum;
+    stats->bad_payload_len = s_bad_payload_len;
+    stats->seq_errors = s_seq_errors;
+    stats->queue_full_drops = s_queue_full_drops;
+    stats->frame_ready = s_frame_ready;
+}
+
 void frameLinkInit(void)
 {
     for (uint8_t i = 0U; i < NUM_BUFFERS; i++) {

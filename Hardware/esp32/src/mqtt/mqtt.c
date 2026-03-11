@@ -2,6 +2,8 @@
 #include "../device/frame_link.h"
 #include "../device/cmd_uart.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -218,5 +220,51 @@ void mqttFrameTask(void *arg)
 
         frameLinkReleaseReadyFrame(buffer_idx);
         vTaskDelay(pdMS_TO_TICKS(20U));
+    }
+}
+
+void mqttHealthTask(void *arg)
+{
+    char payload[320];
+    (void)arg;
+
+    for (;;) {
+        frame_link_stats_t stats = {0};
+        wifi_ap_record_t ap_info = {0};
+        const bool wifi_ok = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
+        const int rssi = wifi_ok ? (int)ap_info.rssi : -127;
+        const uint32_t cmd_depth = cmdUartGetQueueDepth();
+
+        frameLinkGetStats(&stats);
+
+        (void)snprintf(payload,
+                       sizeof(payload),
+                       "{\"uptime_sec\":%lu,\"wifi_connected\":%s,\"wifi_rssi\":%d,"
+                       "\"mqtt_connected\":%s,\"free_heap\":%lu,\"min_heap\":%lu,"
+                       "\"cmd_queue_depth\":%lu,\"frame_packets\":%lu,\"frame_completed\":%lu,"
+                       "\"frame_timeouts\":%lu,\"frame_errors\":%lu,\"bad_magic\":%lu,"
+                       "\"bad_checksum\":%lu,\"bad_len\":%lu,\"seq_errors\":%lu,"
+                       "\"queue_full_drops\":%lu,\"frame_ready\":%u}",
+                       (unsigned long)(esp_timer_get_time() / 1000000ULL),
+                       wifi_ok ? "true" : "false",
+                       rssi,
+                       s_mqtt_connected ? "true" : "false",
+                       (unsigned long)esp_get_free_heap_size(),
+                       (unsigned long)esp_get_minimum_free_heap_size(),
+                       (unsigned long)cmd_depth,
+                       (unsigned long)stats.total_packets,
+                       (unsigned long)stats.completed_frames,
+                       (unsigned long)stats.spi_timeouts,
+                       (unsigned long)stats.spi_errors,
+                       (unsigned long)stats.bad_magic,
+                       (unsigned long)stats.bad_checksum,
+                       (unsigned long)stats.bad_payload_len,
+                       (unsigned long)stats.seq_errors,
+                       (unsigned long)stats.queue_full_drops,
+                       (unsigned int)stats.frame_ready);
+
+        mqttPublishText(HEALTH_TOPIC, payload, 0);
+        (void)printf("Health publish: %s\n", payload);
+        vTaskDelay(pdMS_TO_TICKS(5000U));
     }
 }

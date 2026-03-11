@@ -28,9 +28,10 @@ void app_main(void)
     ESP_ERROR_CHECK(cmdUartInit());
     (void)xTaskCreate(frameLinkTask, "frame_link", 8192U, NULL, 5U, NULL);
     (void)xTaskCreate(mqttFrameTask, "mqtt_frame", 8192U, NULL, 5U, NULL);
+    (void)xTaskCreate(mqttHealthTask, "mqtt_health", 4096U, NULL, 4U, NULL);
     (void)xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, 5U, NULL);
 
-    (void)printf("STM32 command bridge enabled: UART1(GPIO21/20) -> USART2(PA2/PA3)\n");
+    (void)printf("STM32 command bridge enabled: UART1(GPIO21/20) -> USART1(PA9/PA10)\n");
 
     wifi_config_t wifi_config = {
         .sta = {

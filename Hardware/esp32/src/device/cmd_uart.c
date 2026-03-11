@@ -46,6 +46,15 @@ void cmdUartFlushInput(void)
     (void)uart_flush_input(CMD_UART_NUM);
 }
 
+uint32_t cmdUartGetQueueDepth(void)
+{
+    if (g_cmd_uart_queue == NULL) {
+        return 0U;
+    }
+
+    return (uint32_t)uxQueueMessagesWaiting(g_cmd_uart_queue);
+}
+
 void cmdUartTask(void *arg)
 {
     cmd_uart_msg_t msg;
