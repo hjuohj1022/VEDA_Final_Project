@@ -163,6 +163,15 @@ void Backend::setThermalManualRange(int minValue, int maxValue) {
 void Backend::handleThermalChunkMessage(const QByteArray &message) {
     const bool debugThermal = (m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");
     if (!m_thermalStreaming) {
+        if (debugThermal) {
+            static int droppedWhileStopped = 0;
+            droppedWhileStopped++;
+            if (droppedWhileStopped <= 5 || (droppedWhileStopped % 100) == 0) {
+                qInfo() << "[THERMAL] chunk received while stream inactive:"
+                        << "count=" << droppedWhileStopped
+                        << "bytes=" << message.size();
+            }
+        }
         return;
     }
     if (message.size() < kThermalHeaderLegacyBytes) {

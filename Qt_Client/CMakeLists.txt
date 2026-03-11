@@ -69,13 +69,26 @@ qt_add_qml_module(Team3VideoReceiver
     QML_FILES
         src/ui/qml/Main.qml
         src/ui/qml/Sidebar.qml
+        src/ui/qml/SidebarStore.qml
         src/ui/qml/Header.qml
         src/ui/qml/VideoGrid.qml
         src/ui/qml/LoginScreen.qml
         src/ui/qml/PlaybackScreen.qml
         src/ui/qml/VideoPlayer.qml
         src/ui/qml/ThermalViewer.qml
+        src/ui/qml/ViewGridContent.qml
+        src/ui/qml/PlaybackContent.qml
+        src/ui/qml/ThermalContent.qml
+        src/ui/qml/InlineMainViewContent.qml
+        src/ui/qml/PlaybackExportSaveDialog.qml
+        src/ui/qml/RtspSettingsDialog.qml
+        src/ui/qml/StatusDialog.qml
+        src/ui/qml/SidebarPlaybackControlsPanel.qml
+        src/ui/qml/SidebarCameraControlsPanel.qml
+        src/ui/qml/SidebarSystemMetricsPanel.qml
         src/ui/qml/components/IconButton.qml
+        src/ui/qml/components/SidebarControlButton.qml
+        src/ui/qml/components/SidebarDisplaySlider.qml
     RESOURCES
         src/ui/assets/icons/README.txt
         src/ui/assets/icons/tooltip_dark.svg

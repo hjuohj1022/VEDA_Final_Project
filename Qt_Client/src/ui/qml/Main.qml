@@ -1,8 +1,7 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
-import QtQuick.Dialogs
 
 ApplicationWindow {
     id: window
@@ -16,36 +15,68 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     property bool isDarkMode: true
     property alias appTheme: theme
-    property real lastMoveX: -1
-    property real lastMoveY: -1
-    property double lastMoveResetMs: 0
-    property string rtspConfigError: ""
-    property bool rtspConfigIsError: false
-    property bool rtspConnecting: false
-    property int rtspConnectTimeoutMs: 8000
-    property int rtspConnectSuccessStreak: 0
-    property int rtspConnectStartedMs: 0
-    property int rtspConnectMinCheckMs: 800
-    property string pendingRtspIp: ""
-    property string pendingRtspPort: ""
-    property bool pendingRtspUseCustomAuth: false
-    property string pendingRtspUser: ""
-    property string pendingRtspPass: ""
-    property bool streamPrewarmEnabled: true
-    property int inlineMainCameraIndex: -1
-    property bool inlineMainViewVisible: false
-    property int lastStackIndex: -1
-    property string playbackSourceUrl: ""
-    property string playbackTitleText: "Playback Stream"
-    property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
-    property int pendingExportChannel: -1
-    property string pendingExportDate: ""
-    property string pendingExportStart: ""
-    property string pendingExportEnd: ""
-    property bool exportProgressVisible: false
-    property int exportProgressPercent: 0
-    property string exportProgressText: ""
-    property bool thermalViewerVisible: false
+    property alias lastMoveX: uiStore.lastMoveX
+    property alias lastMoveY: uiStore.lastMoveY
+    property alias lastMoveResetMs: uiStore.lastMoveResetMs
+    property alias rtspConfigError: uiStore.rtspConfigError
+    property alias rtspConfigIsError: uiStore.rtspConfigIsError
+    property alias rtspConnecting: uiStore.rtspConnecting
+    property alias rtspConnectTimeoutMs: uiStore.rtspConnectTimeoutMs
+    property alias rtspConnectSuccessStreak: uiStore.rtspConnectSuccessStreak
+    property alias rtspConnectStartedMs: uiStore.rtspConnectStartedMs
+    property alias rtspConnectMinCheckMs: uiStore.rtspConnectMinCheckMs
+    property alias pendingRtspIp: uiStore.pendingRtspIp
+    property alias pendingRtspPort: uiStore.pendingRtspPort
+    property alias pendingRtspUseCustomAuth: uiStore.pendingRtspUseCustomAuth
+    property alias pendingRtspUser: uiStore.pendingRtspUser
+    property alias pendingRtspPass: uiStore.pendingRtspPass
+    property alias streamPrewarmEnabled: uiStore.streamPrewarmEnabled
+    property alias inlineMainCameraIndex: uiStore.inlineMainCameraIndex
+    property alias inlineMainViewVisible: uiStore.inlineMainViewVisible
+    property alias lastStackIndex: uiStore.lastStackIndex
+    property alias playbackSourceUrl: uiStore.playbackSourceUrl
+    property alias playbackTitleText: uiStore.playbackTitleText
+    property alias cameraNames: uiStore.cameraNames
+    property alias pendingExportChannel: uiStore.pendingExportChannel
+    property alias pendingExportDate: uiStore.pendingExportDate
+    property alias pendingExportStart: uiStore.pendingExportStart
+    property alias pendingExportEnd: uiStore.pendingExportEnd
+    property alias exportProgressVisible: uiStore.exportProgressVisible
+    property alias exportProgressPercent: uiStore.exportProgressPercent
+    property alias exportProgressText: uiStore.exportProgressText
+
+    QtObject {
+        id: uiStore
+        property real lastMoveX: -1
+        property real lastMoveY: -1
+        property double lastMoveResetMs: 0
+        property string rtspConfigError: ""
+        property bool rtspConfigIsError: false
+        property bool rtspConnecting: false
+        property int rtspConnectTimeoutMs: 8000
+        property int rtspConnectSuccessStreak: 0
+        property int rtspConnectStartedMs: 0
+        property int rtspConnectMinCheckMs: 800
+        property string pendingRtspIp: ""
+        property string pendingRtspPort: ""
+        property bool pendingRtspUseCustomAuth: false
+        property string pendingRtspUser: ""
+        property string pendingRtspPass: ""
+        property bool streamPrewarmEnabled: true
+        property int inlineMainCameraIndex: -1
+        property bool inlineMainViewVisible: false
+        property int lastStackIndex: -1
+        property string playbackSourceUrl: ""
+        property string playbackTitleText: "Playback Stream"
+        property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
+        property int pendingExportChannel: -1
+        property string pendingExportDate: ""
+        property string pendingExportStart: ""
+        property string pendingExportEnd: ""
+        property bool exportProgressVisible: false
+        property int exportProgressPercent: 0
+        property string exportProgressText: ""
+    }
 
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
@@ -75,9 +106,65 @@ ApplicationWindow {
             backend.playbackWsPause()
             backend.streamingWsDisconnect()
         }
-        rightSidebar.playbackRunning = false
-        rightSidebar.playbackPending = false
+        setSidebarPlaybackState(false, false)
         playbackSourceUrl = ""
+    }
+
+    function setSidebarPlaybackState(running, pending) {
+        if (!rightSidebar)
+            return
+        rightSidebar.playbackRunning = running
+        rightSidebar.playbackPending = pending
+    }
+
+    function applyPlaybackSeek(seconds) {
+        if (!rightSidebar)
+            return
+        rightSidebar.syncTimeFromSeconds(seconds)
+        rightSidebar.applyExportRangeFromSecond(seconds)
+        if (rightSidebar.playbackRunning && !rightSidebar.playbackPending) {
+            var d = rightSidebar.formatPlaybackDate()
+            var t = rightSidebar.formatPlaybackTime()
+            rightSidebar.playbackPending = true
+            window.playbackTitleText = "CH " + (rightSidebar.playbackChannelIndex + 1) + " - " + d + " " + t
+            window.playbackSourceUrl = ""
+            backend.preparePlaybackRtsp(rightSidebar.playbackChannelIndex, d, t)
+        }
+    }
+
+    function canApplyPlaybackChannel(channelIndex) {
+        if (!rightSidebar || !rightSidebar.showPlaybackControls)
+            return false
+        return channelIndex === rightSidebar.playbackChannelIndex
+    }
+
+    function applyPlaybackTimelineSegments(channelIndex, segments) {
+        if (!canApplyPlaybackChannel(channelIndex))
+            return false
+        rightSidebar.playbackSegments = segments
+        return true
+    }
+
+    function clearPlaybackTimelineSegments() {
+        if (!rightSidebar || !rightSidebar.showPlaybackControls)
+            return
+        rightSidebar.playbackSegments = []
+    }
+
+    function applyPlaybackRecordedDays(channelIndex, yearMonth, days) {
+        if (!canApplyPlaybackChannel(channelIndex))
+            return false
+        var ym = rightSidebar.playbackViewYear + "-" + (rightSidebar.playbackViewMonth + 1 < 10 ? "0" : "") + (rightSidebar.playbackViewMonth + 1)
+        if (yearMonth !== ym)
+            return false
+        rightSidebar.playbackRecordedDays = days
+        return true
+    }
+
+    function clearPlaybackRecordedDays() {
+        if (!rightSidebar || !rightSidebar.showPlaybackControls)
+            return
+        rightSidebar.playbackRecordedDays = []
     }
 
     function startRtspConnectCheck(resetStats) {
@@ -113,7 +200,7 @@ ApplicationWindow {
         rtspConfigError = ""
         rtspConfigIsError = false
         if (rtspSettingsPopup && rtspSettingsPopup.visible) {
-            rtspSettingsPopup.visible = false
+            rtspSettingsPopup.closeDialog()
         }
     }
 
@@ -339,15 +426,7 @@ ApplicationWindow {
             }
             onRequestHome: stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
             onRequestRtspSettings: {
-                stopRtspConnectCheck()
-                rtspIpField.text = ""
-                rtspPortField.text = ""
-                rtspAdvancedToggle.checked = false
-                rtspUserField.text = ""
-                rtspPassField.text = ""
-                rtspConfigError = ""
-                rtspConfigIsError = false
-                rtspSettingsPopup.visible = true
+                rtspSettingsPopup.prepareAndShow()
             }
             onRequestExportCancel: {
                 backend.cancelPlaybackExport()
@@ -521,7 +600,7 @@ ApplicationWindow {
                                         }
 
                                         ToolTip.visible: exportMouseArea.containsMouse
-                                        ToolTip.text: "열화상 모니터링/제어 패널"
+                                        ToolTip.text: "열화상 모니터링/제어 화면"
                                         ToolTip.delay: 250
                                         ToolTip.timeout: 1800
                                     }
@@ -545,7 +624,7 @@ ApplicationWindow {
                                     window.lastStackIndex = currentIndex
                                 }
 
-                                VideoGrid {
+                                ViewGridContent {
                                     id: videoGrid
                                     theme: window.appTheme
                                     cameraNames: window.cameraNames
@@ -559,7 +638,7 @@ ApplicationWindow {
                                     }
                                 }
 
-                                LoginScreen {
+                                ThermalContent {
                                     id: loginScreen
                                     theme: window.appTheme
                                     onRequestReturnLiveView: {
@@ -568,7 +647,7 @@ ApplicationWindow {
                                     }
                                 }
 
-                                PlaybackScreen {
+                                PlaybackContent {
                                     id: playbackScreen
                                     theme: window.appTheme
                                     playbackSource: window.playbackSourceUrl
@@ -577,62 +656,21 @@ ApplicationWindow {
                                     playbackSegments: rightSidebar.playbackSegments
                                     playbackTimelineInfoText: rightSidebar.playbackTimelineInfoText
                                     onSeekRequested: function(seconds) {
-                                        rightSidebar.syncTimeFromSeconds(seconds)
-                                        rightSidebar.applyExportRangeFromSecond(seconds)
-                                        if (rightSidebar.playbackRunning && !rightSidebar.playbackPending) {
-                                            var d = rightSidebar.formatPlaybackDate()
-                                            var t = rightSidebar.formatPlaybackTime()
-                                            rightSidebar.playbackPending = true
-                                            window.playbackTitleText = "CH " + (rightSidebar.playbackChannelIndex + 1) + " - " + d + " " + t
-                                            window.playbackSourceUrl = ""
-                                            backend.preparePlaybackRtsp(rightSidebar.playbackChannelIndex, d, t)
-                                        }
+                                        window.applyPlaybackSeek(seconds)
                                     }
                                 }
 
-                                Item {
+                                InlineMainViewContent {
                                     id: inlineMainView
                                     visible: stackLayout.currentIndex === 3
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        color: window.appTheme.bgSecondary
-
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            spacing: 0
-
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-                                                    Layout.fillHeight: true
-                                                    spacing: 0
-
-                                                VideoPlayer {
-                                                    id: inlineMainPlayer
-                                                    Layout.fillWidth: true
-                                                    Layout.fillHeight: true
-                                                    theme: window.appTheme
-                                                    tileIndex: window.inlineMainCameraIndex
-                                                    titleText: window.inlineMainCameraIndex >= 0
-                                                               ? ("Cam " + (window.inlineMainCameraIndex + 1) + " - Main Stream")
-                                                               : "Main Stream"
-                                                    cameraIndex: window.inlineMainCameraIndex
-                                                    dptzEnabled: true
-                                                    locationName: window.cameraLocationName(window.inlineMainCameraIndex)
-                                                    startDelayMs: 0
-                                                    source: (backend.isLoggedIn && window.inlineMainCameraIndex >= 0)
-                                                            ? ((backend.rtspIp, backend.rtspPort),
-                                                               backend.buildRtspUrl(window.inlineMainCameraIndex, false))
-                                                            : ""
-                                                    onDoubleClicked: {
-                                                        window.inlineMainViewVisible = false
-                                                        window.inlineMainCameraIndex = -1
-                                                        stackLayout.currentIndex = 0
-                                                    }
-                                                }
-                                            }
-                                        }
+                                    theme: window.appTheme
+                                    isLoggedIn: backend.isLoggedIn
+                                    cameraIndex: window.inlineMainCameraIndex
+                                    locationName: window.cameraLocationName(window.inlineMainCameraIndex)
+                                    onRequestClose: {
+                                        window.inlineMainViewVisible = false
+                                        window.inlineMainCameraIndex = -1
+                                        stackLayout.currentIndex = 0
                                     }
                                 }
                             }
@@ -643,6 +681,7 @@ ApplicationWindow {
 
             Sidebar {
                 id: rightSidebar
+                backendObject: backend
                 Layout.preferredWidth: backend.isLoggedIn ? 256 : 0
                 Layout.fillHeight: true
                 theme: window.appTheme
@@ -687,9 +726,6 @@ ApplicationWindow {
                     pendingExportEnd = endTimeText
                     playbackExportSaveDialog.currentFile = "playback_" + dateText + "_" + startTimeText.replace(/:/g, "-")
                     playbackExportSaveDialog.open()
-                    // thermalViewerVisible = true
-                    // thermalViewer.open()
-                    // backend.startThermalStream()
                 }
             }
         }
@@ -778,42 +814,25 @@ ApplicationWindow {
         }
         function onPlaybackPrepared(url) {
             window.playbackSourceUrl = url
-            rightSidebar.playbackRunning = true
-            rightSidebar.playbackPending = false
+            window.setSidebarPlaybackState(true, false)
             console.log("[PLAYBACK] source:", window.playbackSourceUrl)
         }
         function onPlaybackPrepareFailed(error) {
-            rightSidebar.playbackRunning = false
-            rightSidebar.playbackPending = false
+            window.setSidebarPlaybackState(false, false)
             console.warn("[PLAYBACK] prepare failed:", error)
         }
         function onPlaybackTimelineLoaded(channelIndex, dateText, segments) {
-            if (!rightSidebar.showPlaybackControls)
-                return
-            if (channelIndex !== rightSidebar.playbackChannelIndex)
-                return
-            rightSidebar.playbackSegments = segments
+            window.applyPlaybackTimelineSegments(channelIndex, segments)
         }
         function onPlaybackTimelineFailed(error) {
-            if (rightSidebar.showPlaybackControls) {
-                rightSidebar.playbackSegments = []
-            }
+            window.clearPlaybackTimelineSegments()
             console.warn("[PLAYBACK][TIMELINE]", error)
         }
         function onPlaybackMonthRecordedDaysLoaded(channelIndex, yearMonth, days) {
-            if (!rightSidebar.showPlaybackControls)
-                return
-            if (channelIndex !== rightSidebar.playbackChannelIndex)
-                return
-            var ym = rightSidebar.playbackViewYear + "-" + (rightSidebar.playbackViewMonth + 1 < 10 ? "0" : "") + (rightSidebar.playbackViewMonth + 1)
-            if (yearMonth !== ym)
-                return
-            rightSidebar.playbackRecordedDays = days
+            window.applyPlaybackRecordedDays(channelIndex, yearMonth, days)
         }
         function onPlaybackMonthRecordedDaysFailed(error) {
-            if (rightSidebar.showPlaybackControls) {
-                rightSidebar.playbackRecordedDays = []
-            }
+            window.clearPlaybackRecordedDays()
             console.warn("[PLAYBACK][MONTH_DAYS]", error)
         }
         function onStreamingWsStateChanged(state) {
@@ -861,40 +880,15 @@ ApplicationWindow {
             exportProgressHideTimer.restart()
         }
     }
-
-    FileDialog {
+    PlaybackExportSaveDialog {
         id: playbackExportSaveDialog
-        title: "Playback 내보내기 저장 경로 선택"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["Video files (*.avi *.zip)", "All files (*)"]
-        onAccepted: {
-            var savePath = window.urlToLocalPath(selectedFile)
-            if (!savePath || savePath.length === 0)
-                return
+        hostWindow: window
+        onSaveConfirmed: function(savePath) {
             backend.requestPlaybackExport(window.pendingExportChannel,
                                           window.pendingExportDate,
                                           window.pendingExportStart,
                                           window.pendingExportEnd,
                                           savePath)
-        }
-    }
-
-    ThermalViewer {
-        id: thermalViewer
-        x: (window.width - width) / 2
-        y: (window.height - height) / 2
-        frameSource: backend.thermalFrameDataUrl
-        infoText: backend.thermalInfoText
-        onCloseRequested: {
-            close()
-            window.thermalViewerVisible = false
-            backend.stopThermalStream()
-        }
-        onClosed: {
-            if (window.thermalViewerVisible) {
-                window.thermalViewerVisible = false
-                backend.stopThermalStream()
-            }
         }
     }
 
@@ -928,7 +922,7 @@ ApplicationWindow {
                 if (window.rtspConnectSuccessStreak >= 2) {
                     window.stopRtspConnectCheck()
                     window.rtspConfigError = ""
-                    rtspSettingsPopup.visible = false
+                    rtspSettingsPopup.closeDialog()
                 }
             } else {
                 window.rtspConnectSuccessStreak = 0
@@ -950,342 +944,10 @@ ApplicationWindow {
             window.rtspConfigError = "연결 시간 초과. IP/포트를 확인 후 다시 시도해 주세요."
         }
     }
-
-    Window {
+    RtspSettingsDialog {
         id: rtspSettingsPopup
-        transientParent: window
-        width: 380
-        height: rtspAdvancedToggle.checked ? 330 : 230
-        visible: false
-        modality: Qt.NonModal
-        flags: Qt.Dialog | Qt.FramelessWindowHint
-        color: "transparent"
-
-        onVisibleChanged: {
-            if (!visible) {
-                stopRtspConnectCheck()
-                return
-            }
-            backend.resetSessionTimer()
-            x = window.x + (window.width - width) / 2
-            y = window.y + (window.height - height) / 2
-            rtspIpField.forceActiveFocus()
-            rtspIpField.selectAll()
-        }
-
-        TapHandler {
-            acceptedButtons: Qt.AllButtons
-            onTapped: backend.resetSessionTimer()
-        }
-
-        HoverHandler {
-            onPointChanged: {
-                var p = point.position
-                resetSessionFromMove(p.x, p.y)
-            }
-        }
-
-        WheelHandler {
-            onWheel: (event) => {
-                backend.resetSessionTimer()
-                event.accepted = false
-            }
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: theme.bgComponent
-            border.color: theme.border
-            border.width: 1
-            radius: 10
-
-            Keys.onPressed: backend.resetSessionTimer()
-
-            MouseArea {
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.AllButtons
-                propagateComposedEvents: true
-                onPressed: (mouse) => {
-                    backend.resetSessionTimer()
-                    mouse.accepted = false
-                }
-                onPositionChanged: (mouse) => {
-                    backend.resetSessionTimer()
-                    mouse.accepted = false
-                }
-                onWheel: (wheel) => {
-                    backend.resetSessionTimer()
-                    wheel.accepted = false
-                }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
-
-                Text {
-                    text: "RTSP IP 설정"
-                    color: theme.textPrimary
-                    font.bold: true
-                    font.pixelSize: 15
-                }
-
-                TextField {
-                    id: rtspIpField
-                    Layout.fillWidth: true
-                    placeholderText: "IP 입력"
-                    color: theme.textPrimary
-                    placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
-                    onTextEdited: {
-                        backend.resetSessionTimer()
-                        var sanitized = sanitizeIpv4Input(text)
-                        if (sanitized !== text) {
-                            text = sanitized
-                            cursorPosition = text.length
-                        }
-                    }
-                    background: Rectangle {
-                        color: theme.bgSecondary
-                        border.color: rtspIpField.activeFocus ? theme.accent : theme.border
-                        radius: 6
-                    }
-                }
-
-                TextField {
-                    id: rtspPortField
-                    Layout.fillWidth: true
-                    placeholderText: "포트 입력"
-                    inputMethodHints: Qt.ImhDigitsOnly
-                    color: theme.textPrimary
-                    placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
-                    onTextEdited: {
-                        backend.resetSessionTimer()
-                        var sanitized = sanitizePortInput(text)
-                        if (sanitized !== text) {
-                            text = sanitized
-                            cursorPosition = text.length
-                        }
-                    }
-                    background: Rectangle {
-                        color: theme.bgSecondary
-                        border.color: rtspPortField.activeFocus ? theme.accent : theme.border
-                        radius: 6
-                    }
-                    onAccepted: {
-                        backend.resetSessionTimer()
-                        saveRtspButton.clicked()
-                    }
-                }
-
-                CheckBox {
-                    id: rtspAdvancedToggle
-                    Layout.fillWidth: true
-                    text: "고급 설정 (RTSP 계정 직접 입력)"
-                    checked: false
-                    enabled: !window.rtspConnecting
-                    onToggled: {
-                        backend.resetSessionTimer()
-                        if (!checked) {
-                            rtspUserField.text = ""
-                            rtspPassField.text = ""
-                        }
-                    }
-                    indicator: Rectangle {
-                        implicitWidth: 14
-                        implicitHeight: 14
-                        radius: 3
-                        border.color: rtspAdvancedToggle.checked ? theme.accent : theme.border
-                        color: rtspAdvancedToggle.checked ? theme.accent : "transparent"
-                    }
-                    contentItem: Text {
-                        text: rtspAdvancedToggle.text
-                        color: theme.textSecondary
-                        font.pixelSize: 12
-                        leftPadding: 20
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    visible: rtspAdvancedToggle.checked
-
-                    TextField {
-                        id: rtspUserField
-                        Layout.fillWidth: true
-                        placeholderText: "RTSP 아이디"
-                        color: theme.textPrimary
-                        placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
-                        background: Rectangle {
-                            color: theme.bgSecondary
-                            border.color: rtspUserField.activeFocus ? theme.accent : theme.border
-                            radius: 6
-                        }
-                        onTextEdited: backend.resetSessionTimer()
-                    }
-
-                    TextField {
-                        id: rtspPassField
-                        Layout.fillWidth: true
-                        placeholderText: "RTSP 비밀번호"
-                        echoMode: TextInput.Password
-                        color: theme.textPrimary
-                        placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
-                        background: Rectangle {
-                            color: theme.bgSecondary
-                            border.color: rtspPassField.activeFocus ? theme.accent : theme.border
-                            radius: 6
-                        }
-                        onTextEdited: backend.resetSessionTimer()
-                        onAccepted: {
-                            backend.resetSessionTimer()
-                            if (!window.rtspConnecting) {
-                                saveRtspButton.clicked()
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: rtspConfigError.length > 0
-                    text: rtspConfigError
-                    color: rtspConfigIsError ? "#ef4444" : theme.textSecondary
-                    font.pixelSize: 12
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "초기화"
-                        Layout.preferredWidth: 96
-                        enabled: !window.rtspConnecting
-                        onClicked: {
-                            backend.resetSessionTimer()
-                            var changed = backend.resetRtspConfigToEnv()
-                            rtspIpField.text = backend.rtspIp
-                            rtspPortField.text = backend.rtspPort
-                            rtspAdvancedToggle.checked = false
-                            rtspUserField.text = ""
-                            rtspPassField.text = ""
-                            if (changed) {
-                                startRtspConnectCheck(true)
-                            } else {
-                                rtspConfigIsError = false
-                                rtspConfigError = "이미 기본 RTSP 설정입니다."
-                            }
-                        }
-                        background: Rectangle {
-                            color: parent.down ? theme.border : "transparent"
-                            border.color: theme.border
-                            radius: 6
-                        }
-                        contentItem: Text {
-                            text: parent.text
-                            color: theme.textSecondary
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-
-                    Button {
-                        text: "취소"
-                        Layout.preferredWidth: 96
-                        enabled: true
-                        onClicked: {
-                            backend.resetSessionTimer()
-                            if (window.rtspConnecting) {
-                                window.stopRtspConnectCheck()
-                                rtspConfigIsError = false
-                                rtspConfigError = "연결이 취소되었습니다."
-                            } else {
-                                window.stopRtspConnectCheck()
-                                rtspConfigError = ""
-                                rtspConfigIsError = false
-                                rtspSettingsPopup.visible = false
-                            }
-                        }
-                        background: Rectangle {
-                            color: parent.down ? theme.border : "transparent"
-                            border.color: theme.border
-                            radius: 6
-                        }
-                        contentItem: Text {
-                            text: parent.text
-                            color: theme.textSecondary
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-
-                    Button {
-                        id: saveRtspButton
-                        text: window.rtspConnecting ? "연결 시도 중..." : "연결"
-                        Layout.preferredWidth: 96
-                        enabled: !window.rtspConnecting
-                        onClicked: {
-                            backend.resetSessionTimer()
-                            var ip = rtspIpField.text.trim()
-                            var portText = rtspPortField.text.trim()
-                            var useCustomAuth = rtspAdvancedToggle.checked
-                            var authUser = rtspUserField.text.trim()
-                            var authPass = rtspPassField.text
-
-                            if (ip.length === 0) {
-                                rtspConfigIsError = true
-                                rtspConfigError = "IP를 입력해 주세요."
-                                return
-                            }
-
-                            if (!isValidIpv4(ip)) {
-                                rtspConfigIsError = true
-                                rtspConfigError = "IP 형식이 올바르지 않습니다. (예: 192.168.55.203)"
-                                return
-                            }
-
-                            if (!isPrivateIpv4(ip)) {
-                                rtspConfigIsError = true
-                                rtspConfigError = "사설망 IP만 허용됩니다. (10.x / 172.16~31.x / 192.168.x)"
-                                return
-                            }
-
-                            if (portText.length > 0) {
-                                var portNum = parseInt(portText, 10)
-                                if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-                                    rtspConfigIsError = true
-                                    rtspConfigError = "포트는 1~65535 범위로 입력해 주세요."
-                                    return
-                                }
-                            }
-
-                            if (useCustomAuth && authUser.length === 0) {
-                                rtspConfigIsError = true
-                                rtspConfigError = "고급 설정 사용 시 RTSP 아이디를 입력해 주세요."
-                                return
-                            }
-
-                            startRtspProbe(ip, portText, useCustomAuth, authUser, authPass)
-                        }
-                        background: Rectangle {
-                            color: parent.down ? "#ea580c" : theme.accent
-                            radius: 6
-                        }
-                        contentItem: Text {
-                            text: parent.text
-                            color: "white"
-                            font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                }
-            }
-        }
+        theme: window.appTheme
+        hostWindow: window
     }
 
     Rectangle {
@@ -1296,9 +958,3 @@ ApplicationWindow {
         z: 1000
     }
 }
-
-
-
-
-
-
