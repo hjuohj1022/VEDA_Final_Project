@@ -79,7 +79,6 @@
 `nginx/nginx.conf` 기준 주요 역할:
 - HTTP 80 포트를 443으로 리다이렉트
 - `/` 요청을 `crow-server-service:8080`으로 프록시
-- `/thermal-stream` 웹소켓 요청을 Crow Server로 프록시
 - `/sunapi/` 및 `/sunapi/StreamingServer` 요청을 Crow Server로 프록시
 - `/hls/` 요청을 `mediamtx-service:8888`로 프록시
 - `8554` RTSP 트래픽을 MediaMTX로 포워딩

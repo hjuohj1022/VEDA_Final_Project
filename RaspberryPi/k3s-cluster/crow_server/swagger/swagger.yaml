@@ -850,17 +850,6 @@ paths:
       responses:
         '101':
           description: Switching Protocols
-  /thermal-stream:
-    get:
-      summary: Real-time Thermal Image Streaming (WebSocket)
-      description: |
-        Provides 160x120 raw thermal data (38400 bytes) via WebSocket.
-        Requires mTLS authentication for secure connection.
-      responses:
-        '101':
-          description: Switching Protocols to WebSocket
-        '403':
-          description: Forbidden (mTLS failed)
 components:
   securitySchemes:
     bearerAuth:
