@@ -8,22 +8,24 @@ struct RuntimeConfig {
     struct ControlTlsConfig {
         bool enabled = true;
         bool require_client_cert = true;
-        std::string ca_file = "certs/rootCA.crt";
-        std::string cert_file = "certs/cctv.crt";
-        std::string key_file = "certs/cctv.key";
+        std::string ca_file = "certs/mTLS/rootCA.crt";
+        // Control-channel TLS cert/key pair.
+        std::string cert_file = "certs/mTLS/server.crt";
+        std::string key_file = "certs/mTLS/server.key";
         std::string ssl_dll = "libssl-1_1-x64.dll";
         std::string crypto_dll = "libcrypto-1_1-x64.dll";
     };
 
-    int capture_buffer_size = 1;
-    int open_timeout_ms = 3000;
-    int read_timeout_ms = 3000;
+    int capture_buffer_size = 4;
+    int open_timeout_ms = 10000;
+    int read_timeout_ms = 10000;
+    // RTSPS camera input keeps using the camera/client cert pair.
     std::string ffmpeg_capture_options =
-        "rtsp_transport;tcp|tls_verify;1|ca_file;certs/rootCA.crt|cert_file;certs/cctv.crt|key_file;certs/cctv.key|stimeout;5000000|rw_timeout;5000000";
+        "rtsp_transport;tcp|tls_verify;1|ca_file;certs/RTSP/rootCA.crt|cert_file;certs/RTSP/cctv.crt|key_file;certs/RTSP/cctv.key|stimeout;10000000|rw_timeout;10000000";
 
     int pause_loop_sleep_ms = 15;
-    int grab_retry_sleep_ms = 5;
-    int grab_fail_log_every = 30;
+    int grab_retry_sleep_ms = 20;
+    int grab_fail_log_every = 100;
 
     std::size_t metrics_window_frames = 120U;
     double metrics_log_interval_sec = 2.0;

@@ -11,6 +11,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "app_config.h"
+#include "ffmpeg_capture.h"
 #include "logging.h"
 #include "pointcloud.h"
 #include "runner.h"
@@ -68,14 +69,11 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     CudaResources cudaRes;
     if (!InitCudaResources(trt, cudaRes)) return false;
 
-    _putenv_s("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.ffmpeg_capture_options.c_str());
     const std::string& rtspUrl = RTSP_URLS[channel];
-    VideoCapture cap(rtspUrl, CAP_FFMPEG);
-    cap.set(CAP_PROP_BUFFERSIZE, cfg.capture_buffer_size);
-    cap.set(CAP_PROP_OPEN_TIMEOUT_MSEC, cfg.open_timeout_ms);
-    cap.set(CAP_PROP_READ_TIMEOUT_MSEC, cfg.read_timeout_ms);
-    if (!cap.isOpened()) {
-        LogError("Cannot open RTSP stream: " + rtspUrl);
+    FfmpegRtspCapture cap;
+    std::string captureError;
+    if (!cap.Open(rtspUrl, cfg, captureError)) {
+        LogError("Cannot open RTSP stream: " + rtspUrl + " reason=" + captureError);
         return false;
     }
 
@@ -100,8 +98,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     std::string perfOverlay2 = "";
 
     int grabFailCount = 0;
-    uint64_t totalGrabFail = 0;
-    uint64_t totalRetrieveFail = 0;
+    uint64_t totalReadFail = 0;
     uint64_t totalInvalidFrame = 0;
     uint64_t processedFrames = 0;
     uint64_t processedFramesAtLastLog = 0;
@@ -244,18 +241,14 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             continue;
         }
 
-        if (!cap.grab()) {
+        if (!cap.Read(frame, captureError)) {
             grabFailCount++;
-            totalGrabFail++;
+            totalReadFail++;
             if (grabFailCount % cfg.grab_fail_log_every == 1) {
-                LogWarn("RTSP grab failed (" + std::to_string(grabFailCount) +
-                        "x). url=" + rtspUrl);
+                LogWarn("RTSP read failed (" + std::to_string(grabFailCount) +
+                        "x). url=" + rtspUrl + " reason=" + captureError);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(cfg.grab_retry_sleep_ms));
-            continue;
-        }
-        if (!cap.retrieve(frame)) {
-            totalRetrieveFail++;
             continue;
         }
         grabFailCount = 0;
@@ -516,7 +509,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
         const double logIntervalSec = std::chrono::duration<double>(now - lastMetricsLog).count();
         if (logIntervalSec >= cfg.metrics_log_interval_sec) {
             const uint64_t intervalProcessed = processedFrames - processedFramesAtLastLog;
-            const uint64_t dropProxyNow = totalGrabFail + totalRetrieveFail + totalInvalidFrame;
+            const uint64_t dropProxyNow = totalReadFail + totalInvalidFrame;
             const uint64_t intervalDropProxy = dropProxyNow - dropProxyAtLastLog;
             const double procFps = intervalProcessed / logIntervalSec;
             const double avgE2eMs = e2eMsWindow.empty() ? 0.0 : (e2eMsSum / static_cast<double>(e2eMsWindow.size()));
@@ -533,8 +526,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             std::ostringstream oss2;
             oss2 << std::fixed << std::setprecision(2)
                  << "drop_proxy_pct=" << dropProxyRatio
-                 << " (grabFail=" << totalGrabFail
-                 << ", retrieveFail=" << totalRetrieveFail
+                 << " (readFail=" << totalReadFail
                  << ", invalid=" << totalInvalidFrame << ")";
             if (headless) {
                 LogInfo("[Perf] " + oss1.str() + " " + oss2.str());
@@ -549,7 +541,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
         }
     }
 
-    cap.release();
+    cap.Close();
     if (!headless) {
         cv::destroyAllWindows();
     }

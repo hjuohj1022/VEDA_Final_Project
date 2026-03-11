@@ -257,18 +257,19 @@ python .\client_gui.py
 보안 연결(mTLS):
 - `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
 - 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
-  - `certs/rootCA.crt`
-  - `certs/cctv.crt`
-  - `certs/cctv.key`
+  - `certs/forTestClient/rootCA.crt`
+  - `certs/forTestClient/cctv.crt`
+  - `certs/forTestClient/cctv.key`
 
 서버 제어채널 mTLS:
 - `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
+- 이 구간은 RTSPS 입력과 별개로 `certs/mTLS/server.crt`, `certs/mTLS/server.key`를 사용합니다.
 - 런타임 설정(`runtime/runtime_config.h`) 기본값:
   - `control_tls.enabled=true`
   - `control_tls.require_client_cert=true`
-  - `control_tls.ca_file=certs/rootCA.crt`
-  - `control_tls.cert_file=certs/cctv.crt`
-  - `control_tls.key_file=certs/cctv.key`
+  - `control_tls.ca_file=certs/mTLS/rootCA.crt`
+  - `control_tls.cert_file=certs/mTLS/server.crt`
+  - `control_tls.key_file=certs/mTLS/server.key`
   - `control_tls.ssl_dll=libssl-1_1-x64.dll`
   - `control_tls.crypto_dll=libcrypto-1_1-x64.dll`
 

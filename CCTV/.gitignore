@@ -39,6 +39,9 @@
 /TensorRT-*/
 /_downloads/
 /_tensorrt_extract/
+/third_party/choco_cache/
+/third_party/downloads/
+/third_party/ffmpeg-shared/
 
 # ---------------------------
 # ML artifacts (large, regenerated)

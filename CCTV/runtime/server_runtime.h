@@ -40,7 +40,8 @@ struct ClientIoErrorInfo {
     std::string detail;
 };
 
-bool InitServerSocket(int port, int backlog, const TlsServerConfig* tlsCfg, ServerSocketContext& ctx);
+bool InitServerSocket(int port, int backlog, const std::string& bindAddress,
+                      const TlsServerConfig* tlsCfg, ServerSocketContext& ctx);
 bool AcceptServerClient(ServerSocketContext& ctx, ServerClient& client, sockaddr_in* clientAddr, int* clientLen);
 int ClientRecv(const ServerClient& client, char* buf, int len);
 int ClientSend(const ServerClient& client, const char* data, int len);

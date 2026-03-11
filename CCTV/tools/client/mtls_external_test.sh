@@ -3,9 +3,9 @@ set -euo pipefail
 
 HOST=""
 PORT="9090"
-CA_FILE="rootCA.crt"
-CERT_FILE="cctv.crt"
-KEY_FILE="cctv.key"
+CA_FILE="certs/forTestClient/rootCA.crt"
+CERT_FILE="certs/forTestClient/cctv.crt"
+KEY_FILE="certs/forTestClient/cctv.key"
 COMMAND="pause"
 TIMEOUT_SEC="8"
 
@@ -16,16 +16,16 @@ Usage:
 
 Options:
   --port <PORT>          Default: 9090
-  --ca <FILE>            Default: rootCA.crt
-  --cert <FILE>          Default: cctv.crt
-  --key <FILE>           Default: cctv.key
+  --ca <FILE>            Default: certs/forTestClient/rootCA.crt
+  --cert <FILE>          Default: certs/forTestClient/cctv.crt
+  --key <FILE>           Default: certs/forTestClient/cctv.key
   --cmd <TEXT>           Default: pause
   --timeout <SEC>        Default: 8
   -h, --help             Show this help
 
 Example:
   ./mtls_external_test.sh --host 203.0.113.10 \
-    --ca rootCA.crt --cert cctv.crt --key cctv.key --port 9090
+    --ca certs/forTestClient/rootCA.crt --cert certs/forTestClient/cctv.crt --key certs/forTestClient/cctv.key --port 9090
 EOF
 }
 
