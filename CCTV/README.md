@@ -164,10 +164,11 @@ CCTV/
 ### RTSPS(mTLS)
 - 기본 URL 예시는 `rtsps://...` 스킴을 사용합니다.
 - 런타임 기본 FFmpeg 캡처 옵션에 mTLS 설정이 포함됩니다.
+- 이 구간은 카메라 입력용 인증서로 `certs/RTSP/cctv.crt`, `certs/RTSP/cctv.key`를 계속 사용합니다.
   - `tls_verify;1`
-  - `ca_file;certs/rootCA.crt`
-  - `cert_file;certs/cctv.crt`
-  - `key_file;certs/cctv.key`
+  - `ca_file;certs/RTSP/rootCA.crt`
+  - `cert_file;certs/RTSP/cctv.crt`
+  - `key_file;certs/RTSP/cctv.key`
 
 ### `config/local_paths.cmake`
 자동 생성 파일이며, 수동 편집 시 아래 경로를 정확히 지정해야 합니다.
@@ -190,7 +191,7 @@ build/Release/depth_trt.exe
 빌드 후 자동 복사:
 - `build/Release/ml_assets/engines/`로 `ml_assets/engines`가 자동 복사됩니다.
 - 따라서 `ENGINE_PATH=ml_assets/engines/...` 설정이면 `build/Release` 단독 실행 시에도 엔진 경로가 유지됩니다.
-- `build/Release/certs/`로 `certs`가 자동 복사됩니다(mTLS 인증서/키 배포용).
+- `build/Release/certs/`로 `certs` 디렉터리 전체가 자동 복사됩니다(mTLS/RTSPS 인증서 배포용).
 
 ## Test
 ```powershell
@@ -216,18 +217,19 @@ python .\client_gui.py
 보안 연결(mTLS):
 - `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
 - 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
-  - `certs/rootCA.crt`
-  - `certs/cctv.crt`
-  - `certs/cctv.key`
+  - `certs/mTLS/rootCA.crt`
+  - `certs/mTLS/server.crt`
+  - `certs/mTLS/server.key`
 
 서버 제어채널 mTLS:
 - `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
+- 이 구간은 RTSPS 입력과 별개로 `certs/mTLS/server.crt`, `certs/mTLS/server.key`를 사용합니다.
 - 런타임 설정(`runtime/runtime_config.h`) 기본값:
   - `control_tls.enabled=true`
   - `control_tls.require_client_cert=true`
-  - `control_tls.ca_file=certs/rootCA.crt`
-  - `control_tls.cert_file=certs/cctv.crt`
-  - `control_tls.key_file=certs/cctv.key`
+  - `control_tls.ca_file=certs/mTLS/rootCA.crt`
+  - `control_tls.cert_file=certs/mTLS/server.crt`
+  - `control_tls.key_file=certs/mTLS/server.key`
   - `control_tls.ssl_dll=libssl-1_1-x64.dll`
   - `control_tls.crypto_dll=libcrypto-1_1-x64.dll`
 
@@ -239,7 +241,7 @@ python .\client_gui.py
 - 예시:
 ```bash
 chmod +x ./tools/client/mtls_external_test.sh
-./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --port 9090 --timeout 8
+./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --ca certs/mTLS/rootCA.crt --cert certs/mTLS/server.crt --key certs/mTLS/server.key --port 9090 --timeout 8
 ```
 
 운영 토폴로지별 테스트 경로:
