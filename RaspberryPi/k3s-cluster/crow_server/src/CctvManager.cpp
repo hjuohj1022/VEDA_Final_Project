@@ -12,7 +12,7 @@
 #include <vector>
 
 namespace {
-constexpr int kCommandResponseTimeoutMs = 5000;
+constexpr int kCommandResponseTimeoutMs = 3000;
 }
 
 CctvManager::CctvManager(const std::string& host, int port,
@@ -81,7 +81,7 @@ bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
 
     *out_ssl = nullptr;
     *out_socket_fd = -1;
-
+    
     std::cout << "[CCTV] Opening TLS connection to " << host_ << ":" << port_ << std::endl;
 
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -213,6 +213,7 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
     struct timeval tv;
     tv.tv_sec = kCommandResponseTimeoutMs / 1000;
     tv.tv_usec = (kCommandResponseTimeoutMs % 1000) * 1000;
+    setsockopt(control_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     setsockopt(control_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     std::cout << "[CCTV] Sending control command: " << command << std::endl;
@@ -243,7 +244,7 @@ std::string CctvManager::startStreamCommand(const std::string& command) {
     }
 
     std::lock_guard<std::mutex> lock(socket_mutex_);
-    const std::string full_cmd = command + "\n";
+    const std::string full_cmd = command + "\n";  
     std::cout << "[CCTV] Sending stream command: " << command << std::endl;
     const int write_result = SSL_write(ssl_, full_cmd.c_str(), static_cast<int>(full_cmd.length()));
     if (write_result <= 0) {

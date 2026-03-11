@@ -46,6 +46,14 @@ crow::response makeBusyResponse(const std::string& active_command) {
     return crow::response(409, body);
 }
 
+bool isAsyncPreferredCommand(const std::string& command) {
+    return (command == "pause") ||
+           (command == "resume") ||
+           (command == "stop") ||
+           (command.rfind("channel=", 0) == 0) ||
+           (command.rfind("pc_view", 0) == 0);
+}
+
 bool tryScheduleAsyncCommand(CctvManager& cctv_mgr, const std::string& command) {
     {
         std::lock_guard<std::mutex> lock(async_command_mutex);
@@ -72,17 +80,37 @@ bool tryScheduleAsyncCommand(CctvManager& cctv_mgr, const std::string& command) 
 
     return true;
 }
+
+crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command, bool force_async = false) {
+    if (force_async || isAsyncPreferredCommand(command)) {
+        if (!tryScheduleAsyncCommand(cctv_mgr, command)) {
+            std::lock_guard<std::mutex> lock(async_command_mutex);
+            return makeBusyResponse(async_command_status.active_command);
+        }
+        return makeAcceptedResponse(command);
+    }
+
+    return makeCommandResponse(command, cctv_mgr.sendCommand(command));
+}
 }  // namespace
 
 void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
     cctv_mgr.setStreamCallback([](const std::vector<uint8_t>& full_frame) {
-        std::lock_guard<std::mutex> lock(clients_mutex);
-        if (cctv_clients.empty()) {
+        std::vector<crow::websocket::connection*> clients;
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex);
+            if (cctv_clients.empty()) {
+                return;
+            }
+            clients.assign(cctv_clients.begin(), cctv_clients.end());
+        }
+
+        if (clients.empty()) {
             return;
         }
 
         std::string binary_data(full_frame.begin(), full_frame.end());
-        for (auto* client : cctv_clients) {
+        for (auto* client : clients) {
             client->send_binary(binary_data);
         }
     });
@@ -101,11 +129,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
             return crow::response(400, "Mode must be 'headless' or 'gui'");
         }
         const std::string cmd = "channel=" + std::to_string(x["channel"].i()) + " " + mode;
-        if (!tryScheduleAsyncCommand(cctv_mgr, cmd)) {
-            std::lock_guard<std::mutex> lock(async_command_mutex);
-            return makeBusyResponse(async_command_status.active_command);
-        }
-        return makeAcceptedResponse(cmd);
+        return dispatchCommand(cctv_mgr, cmd, true);
     });
 
     CROW_ROUTE(app, "/cctv/control/command").methods(crow::HTTPMethod::POST)
@@ -120,26 +144,22 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
             return crow::response(400, "Command is empty");
         }
 
-        return makeCommandResponse(cmd, cctv_mgr.sendCommand(cmd));
+        return dispatchCommand(cctv_mgr, cmd);
     });
 
     CROW_ROUTE(app, "/cctv/control/stop").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        if (!tryScheduleAsyncCommand(cctv_mgr, "stop")) {
-            std::lock_guard<std::mutex> lock(async_command_mutex);
-            return makeBusyResponse(async_command_status.active_command);
-        }
-        return makeAcceptedResponse("stop");
+        return dispatchCommand(cctv_mgr, "stop", true);
     });
 
     CROW_ROUTE(app, "/cctv/control/pause").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        return makeCommandResponse("pause", cctv_mgr.sendCommand("pause"));
+        return dispatchCommand(cctv_mgr, "pause", true);
     });
 
     CROW_ROUTE(app, "/cctv/control/resume").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        return makeCommandResponse("resume", cctv_mgr.sendCommand("resume"));
+        return dispatchCommand(cctv_mgr, "resume", true);
     });
 
     CROW_ROUTE(app, "/cctv/control/view").methods(crow::HTTPMethod::POST)
@@ -172,7 +192,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
             cmd += " mesh=" + std::to_string(x["mesh"].b() ? 1 : 0);
         }
 
-        return makeCommandResponse(cmd, cctv_mgr.sendCommand(cmd));
+        return dispatchCommand(cctv_mgr, cmd, true);
     });
 
     CROW_ROUTE(app, "/cctv/control/stream").methods(crow::HTTPMethod::POST)
@@ -192,11 +212,20 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
 
     CROW_WEBSOCKET_ROUTE(app, "/cctv/stream")
         .onopen([&](crow::websocket::connection& conn) {
-            std::lock_guard<std::mutex> lock(clients_mutex);
-            cctv_clients.insert(&conn);
-            if (cctv_mgr.getStreamMode() == CctvStreamMode::NONE) {
-                cctv_mgr.sendCommand("pc_stream");
-                std::cout << "[CCTV_WS] Image stream started (default pc_stream)." << std::endl;
+            bool should_start_default_stream = false;
+            {
+                std::lock_guard<std::mutex> lock(clients_mutex);
+                cctv_clients.insert(&conn);
+                should_start_default_stream = (cctv_mgr.getStreamMode() == CctvStreamMode::NONE);
+            }
+
+            if (should_start_default_stream) {
+                const std::string result = cctv_mgr.sendCommand("pc_stream");
+                if (result.rfind("Error:", 0) == 0) {
+                    std::cerr << "[CCTV_WS] Failed to start default pc_stream: " << result << std::endl;
+                } else {
+                    std::cout << "[CCTV_WS] Image stream started (default pc_stream)." << std::endl;
+                }
             }
         })
         .onclose([&](crow::websocket::connection& conn, const std::string&) {
