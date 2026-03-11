@@ -4,7 +4,7 @@ metadata:
   name: crow-cctv-ip-config
   namespace: default
 data:
-  # CCTV 백엔드 (3D 연산 엔진) 접속 정보
-  # 실제 환경의 IP와 포트로 수정하여 사용하세요.
-  CCTV_BACKEND_HOST: "REPLACE_WITH_ACTUAL_IP"
-  CCTV_BACKEND_PORT: "9090"
+  # Worker Pod does not connect to the CCTV backend directly.
+  # It should call the master-side relay Service instead.
+  CCTV_BACKEND_HOST: "cctv-relay-service"
+  CCTV_BACKEND_PORT: "19090"

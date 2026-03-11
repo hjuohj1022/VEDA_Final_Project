@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cctv-relay-config
+  namespace: default
+data:
+  CCTV_TARGET_HOST: "100.111.74.34"
+  CCTV_TARGET_PORT: "9090"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cctv-relay
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cctv-relay
+  template:
+    metadata:
+      labels:
+        app: cctv-relay
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-master
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: cctv-relay
+        image: nicolaka/netshoot:latest
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - exec socat -d -d TCP-LISTEN:19090,fork,reuseaddr TCP:${CCTV_TARGET_HOST}:${CCTV_TARGET_PORT}
+        env:
+        - name: CCTV_TARGET_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: cctv-relay-config
+              key: CCTV_TARGET_HOST
+        - name: CCTV_TARGET_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cctv-relay-config
+              key: CCTV_TARGET_PORT
+        ports:
+        - containerPort: 19090
+          hostPort: 19090
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cctv-relay-service
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: cctv-relay
+  ports:
+  - name: cctv-relay
+    protocol: TCP
+    port: 19090
+    targetPort: 19090

@@ -64,12 +64,39 @@ pipeline {
                 }
             }
         }
+
+        stage('CCTV Relay Deploy') {
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/cctv-relay.yaml'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh """
+                            kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/cctv-relay.yaml
+                            kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/crow-cctv-ip-config.example.yaml
+                            kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/cctv-relay
+                            kubectl --kubeconfig=$KUBECONFIG rollout status deployment/cctv-relay --timeout=180s
+                            kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/crow-server || true
+                        """
+                    }
+                }
+            }
+        }
         
         // 🦅 2. Crow Server
         stage('Crow Server 배포') {
             when { 
                 anyOf {
-                    changeset 'RaspberryPi/k3s-cluster/crow_server/**'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/CMakeLists.txt'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/Dockerfile'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/crow-server.yaml'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/include/**'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/src/**'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/swagger/**'
                     triggeredBy 'UserIdCause'
                 }
             }
