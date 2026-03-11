@@ -1,6 +1,7 @@
 #include "../include/CctvManager.h"
 
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -84,25 +85,36 @@ bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
     
     std::cout << "[CCTV] Opening TLS connection to " << host_ << ":" << port_ << std::endl;
 
-    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_UNSPEC;
+
+    struct addrinfo* results = nullptr;
+    const std::string port_str = std::to_string(port_);
+    const int gai_result = getaddrinfo(host_.c_str(), port_str.c_str(), &hints, &results);
+    if (gai_result != 0) {
+        std::cerr << "[CCTV] Failed to resolve backend host " << host_
+                  << ": " << gai_strerror(gai_result) << std::endl;
+        return false;
+    }
+
+    int fd = -1;
+    for (struct addrinfo* rp = results; rp != nullptr; rp = rp->ai_next) {
+        fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+        if (::connect(fd, rp->ai_addr, static_cast<socklen_t>(rp->ai_addrlen)) == 0) {
+            break;
+        }
+        close(fd);
+        fd = -1;
+    }
+    freeaddrinfo(results);
+
     if (fd < 0) {
-        std::cerr << "[CCTV] Failed to create socket for " << host_ << ":" << port_ << std::endl;
-        return false;
-    }
-
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port_);
-    if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) != 1) {
-        std::cerr << "[CCTV] Invalid backend IPv4 address: " << host_ << std::endl;
-        close(fd);
-        return false;
-    }
-
-    if (::connect(fd, reinterpret_cast<struct sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
         std::cerr << "[CCTV] TCP connect failed to " << host_ << ":" << port_ << std::endl;
-        close(fd);
         return false;
     }
 
