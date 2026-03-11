@@ -135,7 +135,7 @@ UART 설정:
 - `ERR`
 - `ERR overflow`
 
-상세 명령 정리는 [command.md](/C:/Users/1-21/Desktop/MyGitMISRA/VEDA_Final_Project/Hardware/command.md)에 있다.
+상세 명령 정리는 [command.md](VEDA_Final_Project/Hardware/command.md)에 있다.
 
 ## ESP32 Role
 
