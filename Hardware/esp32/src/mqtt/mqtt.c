@@ -1,6 +1,6 @@
 #include "mqtt.h"
-#include "../device/spi.h"
 #include "../device/frame_link.h"
+#include "../device/cmd_uart.h"
 #include "esp_system.h"
 #include <string.h>
 #include <stdio.h>
@@ -19,7 +19,7 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED: {
         s_mqtt_connected = true;
-        (void)esp_mqtt_client_subscribe(event->client, "test/topic", 1);
+        (void)esp_mqtt_client_subscribe(event->client, CMD_TOPIC, 1);
         (void)esp_mqtt_client_publish(s_client, "lepton/status", "Lepton ready", 12, 1, 0);
         (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd topic qos=1\n");
         (void)printf("Heap after MQTT connect: free=%lu min=%lu\n",
@@ -32,20 +32,30 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
         (void)printf("Topic: %.*s\n", (int)event->topic_len, event->topic);
         (void)printf("Data: %.*s\n", (int)event->data_len, event->data);
 
-        if (spi_cmd_queue != NULL) {
-            spi_cmd_t cmd = {0};
-            cmd.len = (event->data_len > (int)MAX_SPI_DATA_LEN)
-                      ? (uint8_t)MAX_SPI_DATA_LEN
+        if ((event->topic_len != (int)strlen(CMD_TOPIC)) ||
+            (strncmp(event->topic, CMD_TOPIC, (size_t)event->topic_len) != 0)) {
+            break;
+        }
+
+        if (g_cmd_uart_queue != NULL) {
+            cmd_uart_msg_t cmd = {0};
+            cmd.len = (event->data_len > (int)(CMD_MAX_LEN - 1))
+                      ? (uint8_t)(CMD_MAX_LEN - 1)
                       : (uint8_t)event->data_len;
             (void)memcpy(cmd.data, event->data, (size_t)cmd.len);
+            cmd.data[cmd.len] = '\0';
 
-            if (xQueueSend(spi_cmd_queue, &cmd, pdMS_TO_TICKS(100U)) != pdPASS) {
-                (void)printf("SPI queue full, command dropped: '%.*s'\n", (int)cmd.len, (const char *)cmd.data);
+            if (xQueueSend(g_cmd_uart_queue, &cmd, pdMS_TO_TICKS(100U)) != pdPASS) {
+                (void)printf("STM32 UART queue full, command dropped: '%.*s'\n",
+                             (int)cmd.len,
+                             (const char *)cmd.data);
             } else {
-                (void)printf("Queued to SPI: '%.*s'\n", (int)cmd.len, (const char *)cmd.data);
+                (void)printf("Queued to STM32 UART: '%.*s'\n",
+                             (int)cmd.len,
+                             (const char *)cmd.data);
             }
         } else {
-            (void)printf("SPI command bridge disabled, command ignored\n");
+            (void)printf("STM32 UART bridge unavailable, command ignored\n");
         }
         break;
     }
@@ -68,6 +78,18 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
     default: {
         break;
     }
+    }
+}
+
+bool mqttIsConnected(void)
+{
+    return s_mqtt_connected;
+}
+
+void mqttPublishText(const char *topic, const char *payload, int qos)
+{
+    if ((s_client != NULL) && s_mqtt_connected && (topic != NULL) && (payload != NULL)) {
+        (void)esp_mqtt_client_publish(s_client, topic, payload, 0, qos, 0);
     }
 }
 

@@ -1,6 +1,7 @@
 #include "mqtt/wifi.h"
 #include "mqtt/mqtt.h"
 #include "device/frame_link.h"
+#include "device/cmd_uart.h"
 
 esp_err_t systemInit(void)
 {
@@ -24,10 +25,12 @@ void app_main(void)
     (void)printf("APP mode=spi_frame_link build=20260310\n");
 
     frameLinkInit();
+    ESP_ERROR_CHECK(cmdUartInit());
     (void)xTaskCreate(frameLinkTask, "frame_link", 8192U, NULL, 5U, NULL);
     (void)xTaskCreate(mqttFrameTask, "mqtt_frame", 8192U, NULL, 5U, NULL);
+    (void)xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, 5U, NULL);
 
-    (void)printf("STM32 SPI command bridge disabled in frame-link SPI mode\n");
+    (void)printf("STM32 command bridge enabled: UART1(GPIO21/20) -> USART2(PA2/PA3)\n");
 
     wifi_config_t wifi_config = {
         .sta = {

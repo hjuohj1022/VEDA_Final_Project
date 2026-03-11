@@ -1,6 +1,6 @@
 #include "wifi.h"
 #include "mqtt.h"
-#include "../device/uart.h" 
+#include "../device/cmd_uart.h"
 static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     (void)arg;
@@ -28,7 +28,7 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
         {
             (void)printf("WiFi connected, got IP\n");
             (void)printf("Free heap: %lu\n", (uint32_t)esp_get_free_heap_size());
-            (void)uart_flush(UART_NUM);  /* ← UART 버퍼 비우기 */
+            cmdUartFlushInput();
             (void)mqttClient();
         }
         else 

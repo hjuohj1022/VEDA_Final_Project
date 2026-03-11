@@ -73,7 +73,7 @@ extern "C" {
  * @param  hi2c  CubeMX가 생성한 I2C 핸들 포인터
  * @return 0=성공, -1=I2C 오류
  */
-int     Motor_Init(I2C_HandleTypeDef *hi2c);
+int32_t Motor_Init(I2C_HandleTypeDef *hi2c);
 
 /**
  * @brief  특정 모터 절대 각도 이동
@@ -111,9 +111,10 @@ void    Motor_StartMove(uint8_t motor_id, int8_t dir);
  * @brief  모터 정지
  */
 void    Motor_Stop(uint8_t motor_id);
+void    Motor_StopAll(void);
 
 /**
- * @brief  SPI DATA 문자열 파싱 → 서보 제어
+ * @brief  UART command 문자열 파싱 → 서보 제어
  *
  *  형식: "motor<N> left press"    → 왼쪽으로 계속 이동 시작
  *        "motor<N> right press"   → 오른쪽으로 계속 이동 시작
@@ -122,7 +123,7 @@ void    Motor_Stop(uint8_t motor_id);
  *
  * @return 0=성공, -1=파싱 실패
  */
-int     Motor_ParseAndRun(const char *data);
+int32_t Motor_ParseAndRun(const char *data);
 
 #ifdef __cplusplus
 }
