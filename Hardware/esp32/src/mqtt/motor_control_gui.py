@@ -8,8 +8,8 @@ import os
 # --- MQTT Configuration ---
 MQTT_BROKER = "192.168.55.200"  # Broker IP
 MQTT_PORT = 8883               # MQTTS Secure Port
-MQTT_TOPIC = "test/topic"      # Topic the ESP32 is subscribed to
-RESP_TOPIC = "stm32/resp"
+MQTT_TOPIC = "motor/control"      # Topic the ESP32 is subscribed to
+RESP_TOPIC = "motor/response"
 
 # Certificate Paths (Relative to this file)
 CERT_DIR = os.path.join(os.path.dirname(__file__), "..", "certs")

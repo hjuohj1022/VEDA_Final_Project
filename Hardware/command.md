@@ -7,7 +7,7 @@
 명령 경로:
 
 `motor_control_gui.py`  
--> MQTT publish to `test/topic`  
+-> MQTT publish to `motor/control`  
 -> ESP32 subscribe  
 -> ESP32 UART1 bridge  
 -> STM32 `USART1 (PA9/PA10)` line command parser  
@@ -17,15 +17,15 @@
 
 STM32 UART 응답  
 -> ESP32 UART RX  
--> ESP32 MQTT publish to `stm32/resp`  
+-> ESP32 MQTT publish to `motor/response`  
 -> `motor_control_gui.py` subscribe / 표시
 
 ## 2. 통신 설정
 
 ### 2.1 MQTT
 
-- Command topic: `test/topic`
-- Response topic: `stm32/resp`
+- Command topic: `motor/control`
+- Response topic: `motor/response`
 
 ### 2.2 ESP32 <-> STM32 UART
 
@@ -236,7 +236,7 @@ STM32 부팅 시 UART로 아래 문자열이 출력될 수 있다.
 
 정상 명령 전달 시 예:
 
-- `Topic: test/topic`
+- `Topic: motor/control`
 - `Data: motor1 left press`
 - `Queued to STM32 UART: 'motor1 left press'`
 - `STM32 UART TX: 'motor1 left press'`
@@ -254,12 +254,12 @@ STM32 부팅 시 UART로 아래 문자열이 출력될 수 있다.
 
 응답 수신:
 
-- `stm32/resp: OK 91 90 90`
-- `stm32/resp: ANGLES 90 90 90`
+- `motor/response: OK 91 90 90`
+- `motor/response: ANGLES 90 90 90`
 
 ## 9. 주의 사항
 
 - STM32 제어용 UART는 현재 `USART1 (PA9/PA10)` 기준이다.
 - 기존 `PA2/PA3` 기준 문서나 배선은 더 이상 사용하지 않는다.
 - STM32가 부팅해도 ESP32 로그에 `STM32 UART RX: READY`가 보이지 않으면 UART 배선부터 확인해야 한다.
-- `test/topic`과 `lepton/frame/chunk`는 토픽 자체로는 충돌하지 않지만, 둘 다 같은 ESP32 리소스를 사용하므로 프레임 전송 중 명령 응답이 늦어질 수 있다.
+- `motor/control`과 `lepton/frame/chunk`는 토픽 자체로는 충돌하지 않지만, 둘 다 같은 ESP32 리소스를 사용하므로 프레임 전송 중 명령 응답이 늦어질 수 있다.
