@@ -2,6 +2,7 @@
 
 #include <QBuffer>
 #include <QByteArray>
+#include <QDateTime>
 #include <QDebug>
 #include <QImage>
 #include <QList>
@@ -15,9 +16,74 @@ namespace {
 constexpr int kThermalWidth = 160;
 constexpr int kThermalHeight = 120;
 constexpr int kThermalFrameBytes = kThermalWidth * kThermalHeight * 2;
-constexpr int kThermalHeaderBytes = 8;
+constexpr int kThermalHeaderBytes = 10;
+constexpr int kThermalHeaderWithRangeBytes = 8;
 constexpr int kThermalHeaderLegacyBytes = 4;
-constexpr int kThermalChunkLimit = 256;
+constexpr int kThermalChunkLimit = 100;
+constexpr qint64 kThermalFrameTimeoutMs = 1500;
+
+struct ThermalChunkHeader {
+    int frameId = -1;
+    quint16 idx = 0;
+    quint16 total = 0;
+    quint16 minVal = 0;
+    quint16 maxVal = 0;
+    int headerBytes = 0;
+    bool hasFrameId = false;
+};
+
+static bool isReasonableChunkHeader(const ThermalChunkHeader &header) {
+    return header.total > 0 && header.total <= kThermalChunkLimit && header.idx < header.total;
+}
+
+static bool parseThermalChunkHeader(const QByteArray &message, ThermalChunkHeader *header) {
+    if (!header || message.isEmpty()) {
+        return false;
+    }
+
+    const uchar *p = reinterpret_cast<const uchar *>(message.constData());
+
+    if (message.size() >= kThermalHeaderBytes) {
+        ThermalChunkHeader parsed;
+        parsed.hasFrameId = true;
+        parsed.frameId = static_cast<int>(qFromBigEndian<quint16>(p));
+        parsed.idx = qFromBigEndian<quint16>(p + 2);
+        parsed.total = qFromBigEndian<quint16>(p + 4);
+        parsed.minVal = qFromBigEndian<quint16>(p + 6);
+        parsed.maxVal = qFromBigEndian<quint16>(p + 8);
+        parsed.headerBytes = kThermalHeaderBytes;
+        if (isReasonableChunkHeader(parsed)) {
+            *header = parsed;
+            return true;
+        }
+    }
+
+    if (message.size() >= kThermalHeaderWithRangeBytes) {
+        ThermalChunkHeader parsed;
+        parsed.idx = qFromBigEndian<quint16>(p);
+        parsed.total = qFromBigEndian<quint16>(p + 2);
+        parsed.minVal = qFromBigEndian<quint16>(p + 4);
+        parsed.maxVal = qFromBigEndian<quint16>(p + 6);
+        parsed.headerBytes = kThermalHeaderWithRangeBytes;
+        if (isReasonableChunkHeader(parsed)) {
+            *header = parsed;
+            return true;
+        }
+    }
+
+    if (message.size() >= kThermalHeaderLegacyBytes) {
+        ThermalChunkHeader parsed;
+        parsed.idx = qFromBigEndian<quint16>(p);
+        parsed.total = qFromBigEndian<quint16>(p + 2);
+        parsed.headerBytes = kThermalHeaderLegacyBytes;
+        if (isReasonableChunkHeader(parsed)) {
+            *header = parsed;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static QRgb jetColor(unsigned char value) {
     const int v = static_cast<int>(value);
@@ -90,8 +156,15 @@ void Backend::startThermalStream() {
         return;
     }
     m_thermalStreaming = true;
-    m_thermalFrameChunks.clear();
+    m_thermalCurrentFrameId = -1;
     m_thermalTotalChunksExpected = 0;
+    m_thermalFrameStartedMs = 0;
+    m_thermalHeaderMin = 0;
+    m_thermalHeaderMax = 0;
+    m_thermalFrameChunks.clear();
+    m_thermalLastFrameId = -1;
+    m_thermalLastDisplayMs = 0;
+    m_thermalDisplayFps = 0.0;
     m_thermalInfoText = "Thermal stream active";
     qInfo() << "[THERMAL] stream started";
     emit thermalStreamingChanged();
@@ -103,8 +176,12 @@ void Backend::stopThermalStream() {
         return;
     }
     m_thermalStreaming = false;
-    m_thermalFrameChunks.clear();
+    m_thermalCurrentFrameId = -1;
     m_thermalTotalChunksExpected = 0;
+    m_thermalFrameStartedMs = 0;
+    m_thermalHeaderMin = 0;
+    m_thermalHeaderMax = 0;
+    m_thermalFrameChunks.clear();
     m_thermalInfoText = "Thermal stream stopped";
     qInfo() << "[THERMAL] stream stopped";
     emit thermalStreamingChanged();
@@ -174,67 +251,95 @@ void Backend::handleThermalChunkMessage(const QByteArray &message) {
         }
         return;
     }
-    if (message.size() < kThermalHeaderLegacyBytes) {
+    ThermalChunkHeader header;
+    if (!parseThermalChunkHeader(message, &header)) {
         if (debugThermal) {
-            qWarning() << "[THERMAL] dropped short payload:" << message.size();
+            qWarning() << "[THERMAL] dropped invalid payload bytes=" << message.size();
         }
         return;
     }
 
-    const uchar *p = reinterpret_cast<const uchar *>(message.constData());
-    const quint16 idx = qFromBigEndian<quint16>(p);
-    const quint16 total = qFromBigEndian<quint16>(p + 2);
-    quint16 minVal = 0;
-    quint16 maxVal = 0;
-    int headerBytes = kThermalHeaderLegacyBytes;
-    if (message.size() >= kThermalHeaderBytes) {
-        minVal = qFromBigEndian<quint16>(p + 4);
-        maxVal = qFromBigEndian<quint16>(p + 6);
-        headerBytes = kThermalHeaderBytes;
-    }
-    const QByteArray payload = message.mid(headerBytes);
-
-    if (total == 0 || total > kThermalChunkLimit) {
-        if (debugThermal) {
-            qWarning() << "[THERMAL] invalid total chunks:" << total;
-        }
-        return;
-    }
-    if (idx >= total) {
-        if (debugThermal) {
-            qWarning() << "[THERMAL] invalid chunk index:" << idx << "total:" << total;
-        }
-        return;
-    }
-
-    if (m_thermalTotalChunksExpected != static_cast<int>(total)) {
-        m_thermalFrameChunks.clear();
-        m_thermalTotalChunksExpected = total;
-    }
-
-    if (idx == 0 && !m_thermalFrameChunks.isEmpty()) {
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_thermalCurrentFrameId >= 0 && m_thermalFrameStartedMs > 0
+        && (nowMs - m_thermalFrameStartedMs) > kThermalFrameTimeoutMs) {
+        qWarning() << "[THERMAL] frame timeout id=" << m_thermalCurrentFrameId;
+        m_thermalCurrentFrameId = -1;
+        m_thermalTotalChunksExpected = 0;
+        m_thermalFrameStartedMs = 0;
+        m_thermalHeaderMin = 0;
+        m_thermalHeaderMax = 0;
         m_thermalFrameChunks.clear();
     }
-    if (debugThermal && idx == 0) {
-        qInfo() << "[THERMAL] frame begin total=" << total
+
+    bool shouldStartNewFrame = false;
+    if (header.hasFrameId) {
+        shouldStartNewFrame = (m_thermalCurrentFrameId < 0 || m_thermalCurrentFrameId != header.frameId);
+    } else {
+        shouldStartNewFrame = (m_thermalTotalChunksExpected != static_cast<int>(header.total))
+                           || (header.idx == 0 && !m_thermalFrameChunks.isEmpty());
+    }
+
+    if (shouldStartNewFrame) {
+        if (m_thermalCurrentFrameId >= 0
+            && !m_thermalFrameChunks.isEmpty()
+            && m_thermalFrameChunks.size() != m_thermalTotalChunksExpected) {
+            qWarning() << "[THERMAL] drop incomplete frame id=" << m_thermalCurrentFrameId
+                       << "chunks=" << m_thermalFrameChunks.size()
+                       << "/" << m_thermalTotalChunksExpected;
+        }
+
+        m_thermalCurrentFrameId = -1;
+        m_thermalTotalChunksExpected = 0;
+        m_thermalFrameStartedMs = 0;
+        m_thermalHeaderMin = 0;
+        m_thermalHeaderMax = 0;
+        m_thermalFrameChunks.clear();
+        m_thermalCurrentFrameId = header.hasFrameId ? header.frameId : 0;
+        m_thermalTotalChunksExpected = static_cast<int>(header.total);
+        m_thermalFrameStartedMs = nowMs;
+    }
+
+    if (m_thermalCurrentFrameId < 0) {
+        m_thermalCurrentFrameId = header.hasFrameId ? header.frameId : 0;
+    }
+    if (m_thermalTotalChunksExpected <= 0) {
+        m_thermalTotalChunksExpected = static_cast<int>(header.total);
+        m_thermalFrameStartedMs = nowMs;
+    }
+
+    const QByteArray payload = message.mid(header.headerBytes);
+    if (debugThermal && header.idx == 0) {
+        qInfo() << "[THERMAL] frame begin id=" << m_thermalCurrentFrameId
+                << "total=" << header.total
                 << "payload=" << payload.size()
-                << "headerMinMax=" << minVal << maxVal;
+                << "headerMinMax=" << header.minVal << header.maxVal;
     }
 
-    m_thermalHeaderMin = minVal;
-    m_thermalHeaderMax = maxVal;
-    m_thermalFrameChunks[static_cast<int>(idx)] = payload;
+    m_thermalHeaderMin = header.minVal;
+    m_thermalHeaderMax = header.maxVal;
+    m_thermalFrameChunks[static_cast<int>(header.idx)] = payload;
 
     if (m_thermalFrameChunks.size() == m_thermalTotalChunksExpected) {
+        const int frameId = m_thermalCurrentFrameId;
         if (debugThermal) {
-            qInfo() << "[THERMAL] frame chunks complete:" << m_thermalTotalChunksExpected;
+            qInfo() << "[THERMAL] frame chunks complete id=" << frameId
+                    << "chunks=" << m_thermalTotalChunksExpected;
         }
-        processThermalFrame(m_thermalFrameChunks, m_thermalTotalChunksExpected, m_thermalHeaderMin, m_thermalHeaderMax);
+        processThermalFrame(m_thermalFrameChunks,
+                            m_thermalTotalChunksExpected,
+                            m_thermalHeaderMin,
+                            m_thermalHeaderMax,
+                            frameId);
+        m_thermalCurrentFrameId = -1;
+        m_thermalTotalChunksExpected = 0;
+        m_thermalFrameStartedMs = 0;
+        m_thermalHeaderMin = 0;
+        m_thermalHeaderMax = 0;
         m_thermalFrameChunks.clear();
     }
 }
 
-void Backend::processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal) {
+void Backend::processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal, int frameId) {
     const bool debugThermal = (m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");
     QByteArray full;
     full.reserve(kThermalFrameBytes);
@@ -313,10 +418,25 @@ void Backend::processThermalFrame(const QMap<int, QByteArray> &chunks, int total
     scaled.save(&buffer, "PNG");
     const QString nextDataUrl = QString("data:image/png;base64,%1").arg(QString::fromLatin1(png.toBase64()));
 
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_thermalLastDisplayMs > 0) {
+        const double deltaSec = static_cast<double>(nowMs - m_thermalLastDisplayMs) / 1000.0;
+        if (deltaSec > 0.0) {
+            const double instant = 1.0 / deltaSec;
+            m_thermalDisplayFps = (m_thermalDisplayFps == 0.0)
+                                ? instant
+                                : ((m_thermalDisplayFps * 0.8) + (instant * 0.2));
+        }
+    }
+    m_thermalLastDisplayMs = nowMs;
+    m_thermalLastFrameId = frameId;
+
     const QString rangeMode = m_thermalAutoRange
                                   ? QString("Auto(%1%)").arg(m_thermalAutoRangeWindowPercent)
                                   : "Manual";
-    const QString info = QString("Palette: %1 | %2 Range: %3 ~ %4")
+    const QString info = QString("Frame: %1 | FPS: %2 | Palette: %3 | %4 Range: %5 ~ %6")
+                             .arg(frameId)
+                             .arg(m_thermalDisplayFps, 0, 'f', 2)
                              .arg(m_thermalPalette)
                              .arg(rangeMode)
                              .arg(frameMin)
@@ -330,8 +450,10 @@ void Backend::processThermalFrame(const QMap<int, QByteArray> &chunks, int total
         emit thermalInfoTextChanged();
     }
     if (debugThermal) {
-        qInfo() << "[THERMAL] frame rendered bytes=" << full.size()
+        qInfo() << "[THERMAL] frame rendered id=" << frameId
+                << "bytes=" << full.size()
                 << "range=" << frameMin << frameMax
+                << "fps=" << m_thermalDisplayFps
                 << "palette=" << m_thermalPalette;
     }
 }

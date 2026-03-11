@@ -347,7 +347,7 @@ private:
                                     QString *reason) const;
     void playbackExportStartDownload(const QUrl &downloadUrl, const QString &outPath);
     void handleThermalChunkMessage(const QByteArray &message);
-    void processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal);
+    void processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal, int frameId);
 
     // 공통 런타임 상태
     QNetworkAccessManager *m_manager;
@@ -445,7 +445,12 @@ private:
     int m_thermalAutoRangeWindowPercent = 96;
     int m_thermalManualMin = 7000;
     int m_thermalManualMax = 10000;
+    int m_thermalCurrentFrameId = -1;
+    int m_thermalLastFrameId = -1;
     int m_thermalTotalChunksExpected = 0;
+    qint64 m_thermalFrameStartedMs = 0;
+    qint64 m_thermalLastDisplayMs = 0;
+    double m_thermalDisplayFps = 0.0;
     QMap<int, QByteArray> m_thermalFrameChunks;
     quint16 m_thermalHeaderMin = 0;
     quint16 m_thermalHeaderMax = 0;

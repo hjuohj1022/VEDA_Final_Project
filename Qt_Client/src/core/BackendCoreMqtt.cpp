@@ -122,25 +122,38 @@ void Backend::setupMqtt() {
         }
 
         if (topicName == thermalTopic) {
-            if (message.size() >= 4) {
+            if (message.size() >= 10) {
+                const quint16 frameId = readBe16(message, 0);
+                const quint16 idx = readBe16(message, 2);
+                const quint16 total = readBe16(message, 4);
+                const quint16 minVal = readBe16(message, 6);
+                const quint16 maxVal = readBe16(message, 8);
+                qInfo() << "[MQTT][RX][" << transportTag << "]"
+                        << "topic=" << topicName
+                        << "count=" << count
+                        << "bytes=" << message.size()
+                        << "frame=" << frameId
+                        << "chunk=" << idx << "/" << total
+                        << "minMax=" << minVal << maxVal;
+            } else if (message.size() >= 8) {
                 const quint16 idx = readBe16(message, 0);
                 const quint16 total = readBe16(message, 2);
-                if (message.size() >= 8) {
-                    const quint16 minVal = readBe16(message, 4);
-                    const quint16 maxVal = readBe16(message, 6);
-                    qInfo() << "[MQTT][RX][" << transportTag << "]"
-                            << "topic=" << topicName
-                            << "count=" << count
-                            << "bytes=" << message.size()
-                            << "chunk=" << idx << "/" << total
-                            << "minMax=" << minVal << maxVal;
-                } else {
-                    qInfo() << "[MQTT][RX][" << transportTag << "]"
-                            << "topic=" << topicName
-                            << "count=" << count
-                            << "bytes=" << message.size()
-                            << "chunk=" << idx << "/" << total;
-                }
+                const quint16 minVal = readBe16(message, 4);
+                const quint16 maxVal = readBe16(message, 6);
+                qInfo() << "[MQTT][RX][" << transportTag << "]"
+                        << "topic=" << topicName
+                        << "count=" << count
+                        << "bytes=" << message.size()
+                        << "chunk=" << idx << "/" << total
+                        << "minMax=" << minVal << maxVal;
+            } else if (message.size() >= 4) {
+                const quint16 idx = readBe16(message, 0);
+                const quint16 total = readBe16(message, 2);
+                qInfo() << "[MQTT][RX][" << transportTag << "]"
+                        << "topic=" << topicName
+                        << "count=" << count
+                        << "bytes=" << message.size()
+                        << "chunk=" << idx << "/" << total;
             } else {
                 qInfo() << "[MQTT][RX][" << transportTag << "]"
                         << "topic=" << topicName
