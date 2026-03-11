@@ -1,6 +1,7 @@
 #include <string>
 
 #include <winsock2.h>
+#include <ws2tcpip.h>
 
 #include "logging.h"
 #include "server_runtime.h"
@@ -52,7 +53,8 @@ bool FailInit(ServerSocketContext& ctx, const std::string& err) {
 }
 }  // namespace
 
-bool InitServerSocket(int port, int backlog, const TlsServerConfig* tlsCfg, ServerSocketContext& ctx) {
+bool InitServerSocket(int port, int backlog, const std::string& bindAddress,
+                      const TlsServerConfig* tlsCfg, ServerSocketContext& ctx) {
     WSADATA wsa{};
     if (WSAStartup(kWsaVersion, &wsa) != 0) {
         return FailInit(ctx, "wsa_startup failed");
@@ -75,11 +77,16 @@ bool InitServerSocket(int port, int backlog, const TlsServerConfig* tlsCfg, Serv
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bindAddress.empty()) {
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    } else if (inet_pton(AF_INET, bindAddress.c_str(), &addr.sin_addr) != 1) {
+        return FailInit(ctx, "invalid bind address: " + bindAddress);
+    }
     addr.sin_port = htons(static_cast<u_short>(port));
 
     if (bind(ctx.server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        return FailInit(ctx, "bind failed (port=" + std::to_string(port) +
+        return FailInit(ctx, "bind failed (addr=" + (bindAddress.empty() ? std::string("0.0.0.0") : bindAddress) +
+                                 ", port=" + std::to_string(port) +
                                  ", wsa=" + std::to_string(WSAGetLastError()) + ")");
     }
 

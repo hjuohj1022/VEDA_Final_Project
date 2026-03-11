@@ -217,9 +217,9 @@ python .\client_gui.py
 보안 연결(mTLS):
 - `client_gui.py`는 `mTLS` 체크 시 클라이언트 인증서로 TLS 소켓을 직접 연결합니다.
 - 기본 포트는 `9090`이며, 아래 파일 경로를 사용합니다.
-  - `certs/mTLS/rootCA.crt`
-  - `certs/mTLS/server.crt`
-  - `certs/mTLS/server.key`
+  - `certs/forTestClient/rootCA.crt`
+  - `certs/forTestClient/cctv.crt`
+  - `certs/forTestClient/cctv.key`
 
 서버 제어채널 mTLS:
 - `depth_trt`는 OpenSSL 기반 mTLS 핸드셰이크를 직접 처리합니다(별도 stunnel 불필요).
@@ -241,7 +241,7 @@ python .\client_gui.py
 - 예시:
 ```bash
 chmod +x ./tools/client/mtls_external_test.sh
-./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --ca certs/mTLS/rootCA.crt --cert certs/mTLS/server.crt --key certs/mTLS/server.key --port 9090 --timeout 8
+./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --ca certs/forTestClient/rootCA.crt --cert certs/forTestClient/cctv.crt --key certs/forTestClient/cctv.key --port 9090 --timeout 8
 ```
 
 운영 토폴로지별 테스트 경로:
