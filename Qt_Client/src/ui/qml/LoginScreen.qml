@@ -1,11 +1,11 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtMultimedia
 import QtQuick.Dialogs
 
 Item {
-    // 로그인/녹화 목록/재생 화면 루트
+    // 로그인/열화상 목록 화면 루트
     id: root
     property var theme
     property string pendingDeleteFileName: ""
@@ -23,7 +23,7 @@ Item {
         backend.login(idField.text, pwField.text)
     }
     
-    // 로그인 전 화면
+    // 로그인 화면
     Rectangle {
         anchors.fill: parent
         color: theme ? theme.bgSecondary : "#09090b"
@@ -386,7 +386,7 @@ Item {
                                 backend.startThermalStream()
                         }
                         ToolTip.visible: hovered
-                        ToolTip.text: "열화상 스트림 시작/중지"
+                        ToolTip.text: "열화상 스트리밍 시작/중지"
                     }
                 }
 
@@ -663,83 +663,12 @@ Item {
         }
     }
 
-    // 공통 에러 다이얼로그
-    Dialog {
+    // 공통 상태/에러 다이얼로그
+    StatusDialog {
         id: errorDialog
         anchors.centerIn: parent
+        theme: root.theme
         title: "Error"
-        property string text: ""
-        modal: true
-        width: 360
-        closePolicy: Popup.NoAutoClose
-
-        header: Rectangle {
-            implicitHeight: 44
-            color: theme ? theme.bgSecondary : "#0f172a"
-            border.color: theme ? theme.border : "#27272a"
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 14
-                text: errorDialog.title
-                color: theme ? theme.textPrimary : "white"
-                font.bold: true
-                font.pixelSize: 14
-            }
-        }
-
-        contentItem: Rectangle {
-            implicitHeight: 86
-            color: "transparent"
-
-            Text {
-                anchors.fill: parent
-                anchors.margins: 14
-                text: errorDialog.text
-                color: theme ? theme.textPrimary : "white"
-                wrapMode: Text.WordWrap
-                verticalAlignment: Text.AlignVCenter
-            }
-        }
-
-        footer: Rectangle {
-            implicitHeight: 58
-            color: "transparent"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-
-                Item { Layout.fillWidth: true }
-
-                Button {
-                    text: "?확인"
-                    Layout.preferredWidth: 96
-                    Layout.preferredHeight: 34
-                    scale: down ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                    onClicked: errorDialog.close()
-                    background: Rectangle {
-                        color: parent.down ? (theme ? theme.border : "#374151") : (theme ? theme.bgSecondary : "#1f2937")
-                        border.color: theme ? theme.border : "#374151"
-                        radius: 6
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: theme ? theme.textPrimary : "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-            }
-        }
-
-        background: Rectangle {
-            color: theme ? theme.bgComponent : "#18181b"
-            border.color: theme ? theme.border : "#27272a"
-            radius: 8
-        }
     }
 
     // 다운로드 진행 팝업
@@ -848,7 +777,7 @@ Item {
         backend.downloadAndPlay(fileName)
     }
 
-    // 파일명 변경 팝업 (다크 테마 + 드래그 이동)
+    // 파일명 변경 팝업 (스크롤 방지 + 드래그 이동)
     Popup {
         id: renameDialog
         width: 420
@@ -1008,7 +937,7 @@ Item {
         }
     }
 
-    // 파일 삭제 확인 팝업 (다크 테마 + 드래그 이동)
+    // 파일 삭제 확인 팝업 (스크롤 방지 + 드래그 이동)
     Popup {
         id: deleteDialog
         width: 360

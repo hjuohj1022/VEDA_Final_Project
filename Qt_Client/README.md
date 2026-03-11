@@ -250,11 +250,27 @@ Team3VideoReceiver/
 │  │  └─ BackendThermal.cpp
 │  └─ ui/
 │     └─ qml/
+│        ├─ components/
+│        │  ├─ IconButton.qml
+│        │  ├─ SidebarControlButton.qml
+│        │  └─ SidebarDisplaySlider.qml
 │        ├─ Header.qml
+│        ├─ InlineMainViewContent.qml
 │        ├─ LoginScreen.qml
 │        ├─ Main.qml
+│        ├─ PlaybackContent.qml
+│        ├─ PlaybackExportSaveDialog.qml
 │        ├─ PlaybackScreen.qml
+│        ├─ RtspSettingsDialog.qml
 │        ├─ Sidebar.qml
+│        ├─ SidebarCameraControlsPanel.qml
+│        ├─ SidebarPlaybackControlsPanel.qml
+│        ├─ SidebarStore.qml
+│        ├─ SidebarSystemMetricsPanel.qml
+│        ├─ StatusDialog.qml
+│        ├─ ThermalContent.qml
+│        ├─ ThermalViewer.qml
+│        ├─ ViewGridContent.qml
 │        ├─ VideoGrid.qml
 │        └─ VideoPlayer.qml
 ├─ .editorconfig
@@ -288,6 +304,29 @@ Team3VideoReceiver/
   - `BackendSunapiPtz.cpp`
   - `BackendSunapiTimeline.cpp`
   - `BackendSunapiTimelineMonth.cpp`
+
+## QML UI 분리(1차) 요약
+
+동작 변경 없이 `Main.qml`의 책임을 줄이고 화면/패널/다이얼로그를 기능별로 분리했습니다.
+
+- 화면 콘텐츠 분리
+  - `ViewGridContent.qml`
+  - `PlaybackContent.qml`
+  - `ThermalContent.qml`
+  - `InlineMainViewContent.qml`
+- 다이얼로그 분리
+  - `PlaybackExportSaveDialog.qml`
+  - `RtspSettingsDialog.qml`
+  - `StatusDialog.qml`
+- Sidebar 하위 패널 분리
+  - `SidebarSystemMetricsPanel.qml`
+  - `SidebarCameraControlsPanel.qml`
+  - `SidebarPlaybackControlsPanel.qml`
+- 공통 상태 스토어 분리
+  - `SidebarStore.qml`
+- Sidebar -> Store 백엔드 전달 안정화
+  - `backendObject` 명시 프로퍼티를 통해 전달
+  - self-binding으로 인한 `undefined`/`Connections target` 경고 방지
 
 ### 리팩토링 중 발생한 잔버그와 수정 내역
 
