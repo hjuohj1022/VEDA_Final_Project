@@ -7,9 +7,9 @@
 #include "certs/cert.h"
 #include <stdbool.h>
 
-#define CHUNK_PAYLOAD_SIZE  2048                              // 청크 데이터 크기 축소 (안정성 향상)
-#define CHUNK_HEADER_SIZE   8                                 // index(2) + total(2) + min(2) + max(2)
-#define CHUNK_MSG_SIZE      (CHUNK_HEADER_SIZE + CHUNK_PAYLOAD_SIZE)  // 전체 메시지 크기
+#define CHUNK_PAYLOAD_SIZE  1024
+#define CHUNK_HEADER_SIZE   10
+#define CHUNK_MSG_SIZE      (CHUNK_HEADER_SIZE + CHUNK_PAYLOAD_SIZE)
 #define CHUNK_TOPIC         "lepton/frame/chunk"
 
 extern esp_mqtt_client_handle_t client;

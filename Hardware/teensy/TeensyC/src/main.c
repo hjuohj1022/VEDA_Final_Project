@@ -2,7 +2,6 @@
 #include <device.h>
 #include <drivers/i2c.h>
 #include <drivers/spi.h>
-#include <drivers/uart.h>
 #include <drivers/gpio.h>
 #include <usb/usb_device.h>
 #include <sys/printk.h>
@@ -14,12 +13,13 @@
 #include <fsl_gpio.h>
 #include <soc.h>
 
-#define LEP_CCI_ADDRESS  (0x2AU)
+#define LEP_CCI_ADDRESS  ((uint8_t)0x2AU)
 #define PACKET_SIZE      (164U)
 #define PACKETS_PER_SEG  (60U)
 #define PIXELS_PER_PKT   (80U)
 #define NUM_SEGMENTS     (4U)
 #define FRAME_SIZE       (160U * 120U)
+#define FRAME_BYTES      (FRAME_SIZE * 2U)
 
 #define LEP_REG_STATUS   (0x0002U)
 #define LEP_REG_COMMAND  (0x0004U)
@@ -28,24 +28,45 @@
 #define LEP_CMD_AGC_ENABLE  (0x0101U)
 #define LEP_CMD_VID_OUTPUT  (0x0204U)
 
+#define FRAME_SPI_PKT_SIZE   (256U)
+#define FRAME_SPI_CLOCK_HZ   (4000000U)
+#define FRAME_SPI_GAP_US     (300U)
+#define FRAME_SPI_CS_SETUP_US (5U)
+#define FRAME_SPI_CS_HOLD_US  (5U)
+#define FRAME_POST_SEND_SLEEP_MS (250U)
+
+#define FRAME_SPI_HEADER_SIZE   (14U)
+#define FRAME_SPI_PAYLOAD_SIZE  (FRAME_SPI_PKT_SIZE - FRAME_SPI_HEADER_SIZE)
+
 static uint16_t frameBuffer[FRAME_SIZE];
 static uint8_t  rawPacket[PACKET_SIZE];
+static uint8_t  frameTxPacket[FRAME_SPI_PKT_SIZE];
 
 /* Device nodes */
-#define I2C_DEV_NODE  DT_NODELABEL(lpi2c1)
-#define SPI_DEV_NODE  DT_NODELABEL(lpspi4)
-#define UART_DEV_NODE DT_NODELABEL(lpuart6)
-#define CS_GPIO_NODE  DT_NODELABEL(gpio2)
-#define CS_PIN        (0U)
+#define I2C_DEV_NODE         DT_NODELABEL(lpi2c1)
+#define LEPTON_SPI_DEV_NODE  DT_NODELABEL(lpspi4)
+#define LEPTON_CS_GPIO_NODE  DT_NODELABEL(gpio2)
+#define FRAME_CS_GPIO_NODE   DT_NODELABEL(gpio1)
+#define LEPTON_CS_PIN        (0U)
+#define FRAME_CS_PIN         (3U)
+#define FRAME_SPI_NODE       DT_NODELABEL(lpspi3)
 
 static const struct device *i2c_dev;
-static const struct device *spi_dev;
-static const struct device *uart_dev;
-static const struct device *cs_gpio;
+static const struct device *lepton_spi_dev;
+static const struct device *frame_spi_dev;
+static const struct device *lepton_cs_gpio;
+static const struct device *frame_cs_gpio;
+static bool frame_spi_ready = false;
 
-static struct spi_config spi_cfg = {
+static struct spi_config lepton_spi_cfg = {
 	.frequency = 18000000U,
 	.operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8U) | SPI_MODE_CPOL | SPI_MODE_CPHA, /* SPI_MODE3 */
+	.slave = 0,
+};
+
+static struct spi_config frame_spi_cfg = {
+	.frequency = FRAME_SPI_CLOCK_HZ,
+	.operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8U),
 	.slave = 0,
 };
 
@@ -72,6 +93,38 @@ static void setup_pinmux(void) {
 	IOMUXC_SetPinConfig(IOMUXC_GPIO_B0_01_LPSPI4_SDI, 0x10B0u);
 	IOMUXC_SetPinConfig(IOMUXC_GPIO_B0_02_LPSPI4_SDO, 0x10B0u);
 	IOMUXC_SetPinConfig(IOMUXC_GPIO_B0_03_LPSPI4_SCK, 0x10B0u);
+}
+
+static void setup_frame_spi_pinmux(void)
+{
+	/* SPI frame link on Teensy pins 0(CS GPIO) / 1(MISO) / 26(MOSI) / 27(SCK) */
+	IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B0_03_GPIO1_IO03, 0);
+	IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B0_02_LPSPI3_SDI, 0);
+	IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_14_LPSPI3_SDO, 0);
+	IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_15_LPSPI3_SCK, 0);
+
+	IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_03_GPIO1_IO03, 0x10B0u);
+	IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_02_LPSPI3_SDI, 0x10B0u);
+	IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_14_LPSPI3_SDO, 0x10B0u);
+	IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_15_LPSPI3_SCK, 0x10B0u);
+}
+
+static void ensureFrameSpiReady(void)
+{
+	if (frame_spi_ready) {
+		return;
+	}
+
+	if (frame_spi_dev == NULL) {
+		printk("Frame SPI device unavailable\n");
+		return;
+	}
+
+	setup_frame_spi_pinmux();
+	(void)gpio_pin_configure(frame_cs_gpio, FRAME_CS_PIN, GPIO_OUTPUT_ACTIVE);
+	(void)gpio_pin_set(frame_cs_gpio, FRAME_CS_PIN, 1);
+	frame_spi_ready = true;
+	printk("Frame SPI pinmux ready\n");
 }
 
 static void cciWriteReg(uint16_t reg, uint16_t val) {
@@ -116,113 +169,184 @@ static bool cciSet(uint16_t cmdId, uint16_t value) {
 }
 
 static void resetLepton(void) {
-	(void)gpio_pin_set(cs_gpio, CS_PIN, 1);
+	(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 1);
 	(void)k_msleep(200U);
 }
 
-static void uart_send(const struct device *dev, const uint8_t *data, size_t len) {
-	for (size_t i = 0U; i < len; i++) {
-		uart_poll_out(dev, data[i]);
+static uint16_t frameChecksum(const uint8_t *data, uint16_t len)
+{
+	uint32_t sum = 0U;
+
+	for (uint16_t i = 0U; i < len; i++) {
+		sum += data[i];
+	}
+
+	return (uint16_t)(sum & 0xFFFFU);
+}
+
+static void frameWriteU16Be(uint8_t *dst, uint16_t value)
+{
+	dst[0] = (uint8_t)((value >> 8U) & 0xFFU);
+	dst[1] = (uint8_t)(value & 0xFFU);
+}
+
+static int sendFrameOverSpi(uint16_t frame_id)
+{
+	const uint8_t *frame_bytes = (const uint8_t *)frameBuffer;
+	const uint16_t total_chunks = (uint16_t)((FRAME_BYTES + FRAME_SPI_PAYLOAD_SIZE - 1U) / FRAME_SPI_PAYLOAD_SIZE);
+
+	ensureFrameSpiReady();
+	if (!frame_spi_ready) {
+		return -1;
+	}
+
+	for (uint16_t chunk_idx = 0U; chunk_idx < total_chunks; chunk_idx++) {
+		const size_t offset = (size_t)chunk_idx * (size_t)FRAME_SPI_PAYLOAD_SIZE;
+		const uint16_t payload_len = (uint16_t)(((FRAME_BYTES - offset) > (size_t)FRAME_SPI_PAYLOAD_SIZE)
+		                                      ? (size_t)FRAME_SPI_PAYLOAD_SIZE
+		                                      : (FRAME_BYTES - offset));
+		struct spi_buf tx_buf = {
+			.buf = frameTxPacket,
+			.len = FRAME_SPI_PKT_SIZE,
+		};
+		struct spi_buf_set tx_bufs = {
+			.buffers = &tx_buf,
+			.count = 1U,
+		};
+
+		(void)memset(frameTxPacket, 0, sizeof(frameTxPacket));
+		frameTxPacket[0] = (uint8_t)'T';
+		frameTxPacket[1] = (uint8_t)'E';
+		frameTxPacket[2] = (uint8_t)'S';
+		frameTxPacket[3] = (uint8_t)'T';
+		frameWriteU16Be(&frameTxPacket[4], frame_id);
+		frameWriteU16Be(&frameTxPacket[6], chunk_idx);
+		frameWriteU16Be(&frameTxPacket[8], total_chunks);
+		frameWriteU16Be(&frameTxPacket[10], payload_len);
+		(void)memcpy(&frameTxPacket[FRAME_SPI_HEADER_SIZE], &frame_bytes[offset], payload_len);
+		frameWriteU16Be(&frameTxPacket[12], frameChecksum(&frameTxPacket[FRAME_SPI_HEADER_SIZE], payload_len));
+
+		(void)gpio_pin_set(frame_cs_gpio, FRAME_CS_PIN, 0);
+		(void)k_busy_wait(FRAME_SPI_CS_SETUP_US);
+		if (spi_write(frame_spi_dev, &frame_spi_cfg, &tx_bufs) != 0) {
+			(void)gpio_pin_set(frame_cs_gpio, FRAME_CS_PIN, 1);
+			return -1;
+		}
+		(void)k_busy_wait(FRAME_SPI_CS_HOLD_US);
+		(void)gpio_pin_set(frame_cs_gpio, FRAME_CS_PIN, 1);
+
+		(void)k_usleep(FRAME_SPI_GAP_US);
+	}
+
+	return 0;
+}
+
+static bool captureFrame(uint32_t *discard_count)
+{
+	const uint32_t start_ms = k_uptime_get_32();
+	uint8_t current_seg = 0U;
+	uint32_t local_discards = 0U;
+
+	while (true) {
+		if ((k_uptime_get_32() - start_ms) > 3000U) {
+			*discard_count = local_discards;
+			return false;
+		}
+
+		(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 0);
+		struct spi_buf rx_buf = { .buf = rawPacket, .len = PACKET_SIZE };
+		struct spi_buf_set rx_bufs = { .buffers = &rx_buf, .count = 1U };
+		(void)spi_read(lepton_spi_dev, &lepton_spi_cfg, &rx_bufs);
+		(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 1);
+
+		if ((rawPacket[0] & 0x0FU) == 0x0FU) {
+			local_discards++;
+			(void)k_usleep(30U);
+			continue;
+		}
+
+		const uint8_t packet_id = rawPacket[1];
+		if (packet_id >= PACKETS_PER_SEG) {
+			local_discards++;
+			continue;
+		}
+
+		if (packet_id == 20U) {
+			const uint8_t seg_bits = (uint8_t)((rawPacket[0] >> 4U) & 0x07U);
+			if ((seg_bits > 0U) && (seg_bits <= 4U)) {
+				current_seg = seg_bits;
+			}
+		}
+
+		if (current_seg > 0U) {
+			const uint32_t base_idx =
+				(((uint32_t)(current_seg - 1U) * (uint32_t)PACKETS_PER_SEG * (uint32_t)PIXELS_PER_PKT) +
+				 ((uint32_t)packet_id * (uint32_t)PIXELS_PER_PKT));
+
+			if ((base_idx + PIXELS_PER_PKT) <= (uint32_t)FRAME_SIZE) {
+				for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
+					const uint8_t msb = rawPacket[4U + (i * 2U)];
+					const uint8_t lsb = rawPacket[5U + (i * 2U)];
+					frameBuffer[base_idx + i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
+				}
+			}
+
+			if (packet_id == 59U) {
+				if (current_seg == 4U) {
+					*discard_count = local_discards;
+					return true;
+				}
+				current_seg++;
+			}
+		}
 	}
 }
 
 void main(void) {
+	uint16_t frame_id = 1U;
+
 	setup_pinmux();
 	(void)usb_enable(NULL);
 
 	i2c_dev = DEVICE_DT_GET(I2C_DEV_NODE);
-	spi_dev = DEVICE_DT_GET(SPI_DEV_NODE);
-	uart_dev = DEVICE_DT_GET(UART_DEV_NODE);
-	cs_gpio = DEVICE_DT_GET(CS_GPIO_NODE);
+	lepton_spi_dev = DEVICE_DT_GET(LEPTON_SPI_DEV_NODE);
+#if DT_NODE_HAS_STATUS(FRAME_SPI_NODE, okay)
+	frame_spi_dev = DEVICE_DT_GET(FRAME_SPI_NODE);
+#else
+	frame_spi_dev = NULL;
+#endif
+	lepton_cs_gpio = DEVICE_DT_GET(LEPTON_CS_GPIO_NODE);
+	frame_cs_gpio = DEVICE_DT_GET(FRAME_CS_GPIO_NODE);
 
-	if ((!device_is_ready(i2c_dev)) || (!device_is_ready(spi_dev)) || 
-	    (!device_is_ready(uart_dev)) || (!device_is_ready(cs_gpio))) {
+	if ((!device_is_ready(i2c_dev)) || (!device_is_ready(lepton_spi_dev)) ||
+	    (!device_is_ready(lepton_cs_gpio)) ||
+	    (!device_is_ready(frame_cs_gpio))) {
 		printk("Devices not ready\n");
 	} else {
-		(void)gpio_pin_configure(cs_gpio, CS_PIN, GPIO_OUTPUT_ACTIVE);
-		(void)gpio_pin_set(cs_gpio, CS_PIN, 1);
+		(void)gpio_pin_configure(lepton_cs_gpio, LEPTON_CS_PIN, GPIO_OUTPUT_ACTIVE);
+		(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 1);
 
 		(void)k_msleep(1000U);
 
 		(void)cciSet(LEP_CMD_AGC_ENABLE, 0x0000U);
 		(void)cciSet(LEP_CMD_VID_OUTPUT, 0x0007U);
-		printk("Lepton init complete\n");
+		printk("Lepton init complete, SPI frame link ready\n");
 
 		while (true) {
-			uint32_t startTime = k_uptime_get_32();
-			uint8_t currentSeg = 0U;
-			bool frameComplete = false;
-
-			while (!frameComplete) {
-				if ((k_uptime_get_32() - startTime) > 3000U) {
-					resetLepton();
-					break;
-				}
-
-				(void)gpio_pin_set(cs_gpio, CS_PIN, 0);
-				struct spi_buf rx_buf = { .buf = rawPacket, .len = PACKET_SIZE };
-				struct spi_buf_set rx_bufs = { .buffers = &rx_buf, .count = 1U };
-				(void)spi_read(spi_dev, &spi_cfg, &rx_bufs);
-				(void)gpio_pin_set(cs_gpio, CS_PIN, 1);
-
-				if ((rawPacket[0] & 0x0FU) == 0x0FU) {
-					(void)k_usleep(30U);
-					continue;
-				}
-
-				uint8_t packetId = rawPacket[1];
-				if (packetId >= PACKETS_PER_SEG) {
-					continue;
-				}
-
-				if (packetId == 20U) {
-					uint8_t segBits = (uint8_t)((rawPacket[0] >> 4U) & 0x07U);
-					if ((segBits > 0U) && (segBits <= 4U)) {
-						currentSeg = segBits;
-					}
-				}
-
-				if (currentSeg > 0U) {
-					uint32_t baseIdx = (uint32_t)(((uint32_t)(currentSeg - 1U) * (uint32_t)PACKETS_PER_SEG * (uint32_t)PIXELS_PER_PKT) + ((uint32_t)packetId * (uint32_t)PIXELS_PER_PKT));
-
-					if ((baseIdx + PIXELS_PER_PKT) <= (uint32_t)FRAME_SIZE) {
-						for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
-							uint8_t msb = rawPacket[4U + (i * 2U)];
-							uint8_t lsb = rawPacket[5U + (i * 2U)];
-							frameBuffer[baseIdx + i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
-						}
-					}
-
-					if (packetId == 59U) {
-						if (currentSeg == 4U) {
-							frameComplete = true;
-						} else {
-							currentSeg++;
-						}
-					}
-				}
+			uint32_t discard_count = 0U;
+			if (!captureFrame(&discard_count)) {
+				printk("Capture timeout, resetting Lepton (discards=%u)\n", discard_count);
+				resetLepton();
+				continue;
 			}
 
-			if (frameComplete) {
-				printk("Frame complete - sending\n");
-				uart_send(uart_dev, (const uint8_t *)"FSTART", 6U);
-				uint8_t zero = 0U;
-				uart_send(uart_dev, &zero, 1U);
-
-				const uint8_t *ptr = (const uint8_t *)frameBuffer;
-				size_t totalBytes = (size_t)FRAME_SIZE * 2U;
-				size_t sentBytes = 0U;
-
-				while (sentBytes < totalBytes) {
-					size_t remaining = totalBytes - sentBytes;
-					size_t len = (remaining > 1024U) ? 1024U : remaining;
-					uart_send(uart_dev, &ptr[sentBytes], len);
-					sentBytes += len;
-					(void)k_usleep(200U);
-				}
-				printk("Sent OK\n");
-				(void)k_msleep(400U);
+			if (sendFrameOverSpi(frame_id) == 0) {
+				printk("Frame sent over SPI: id=%u\n", frame_id);
+				frame_id++;
+			} else {
+				printk("Frame SPI send failed: id=%u\n", frame_id);
 			}
+			(void)k_msleep(FRAME_POST_SEND_SLEEP_MS);
 		}
 	}
 }

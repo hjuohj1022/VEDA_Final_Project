@@ -18,8 +18,3 @@
 &lpspi4 {
 	status = "okay";
 };
-
-&lpuart6 {
-	status = "okay";
-	current-speed = <921600>;
-};

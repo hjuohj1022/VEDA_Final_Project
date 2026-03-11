@@ -12,9 +12,9 @@ MQTT_TOPIC = "test/topic"      # Topic the ESP32 is subscribed to
 
 # Certificate Paths (Relative to this file)
 CERT_DIR = os.path.join(os.path.dirname(__file__), "..", "certs")
-CA_CERT     = os.path.join(CERT_DIR, "ca_cert.pem")
-CLIENT_CERT = os.path.join(CERT_DIR, "client_cert.pem")
-CLIENT_KEY  = os.path.join(CERT_DIR, "client_key.pem")
+CA_CERT     = os.path.join(CERT_DIR, "rootCA.crt")
+CLIENT_CERT = os.path.join(CERT_DIR, "client-stm32.crt")
+CLIENT_KEY  = os.path.join(CERT_DIR, "client-stm32.key")
 
 class MotorControlApp:
     def __init__(self, root):
