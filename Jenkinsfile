@@ -56,7 +56,82 @@ pipeline {
                     sh "mkdir -p RaspberryPi/k3s-cluster/security/certs"
                     dir('RaspberryPi/k3s-cluster/security/certs') {
                         withCredentials([file(credentialsId: 'all-certs-bundle', variable: 'CERTS_BUNDLE')]) {
-                            sh "tar -xzvf '$CERTS_BUNDLE'"
+                            sh '''
+                                set -euo pipefail
+
+                                bundle="$CERTS_BUNDLE"
+                                extract_dir="$(mktemp -d)"
+                                trap 'rm -rf "$extract_dir"' EXIT
+
+                                if command -v unzip >/dev/null 2>&1 && unzip -tq "$bundle" >/dev/null 2>&1; then
+                                    unzip -oq "$bundle" -d "$extract_dir"
+                                elif command -v jar >/dev/null 2>&1 && jar tf "$bundle" >/dev/null 2>&1; then
+                                    (
+                                        cd "$extract_dir"
+                                        jar xf "$bundle"
+                                    )
+                                elif tar -tzf "$bundle" >/dev/null 2>&1; then
+                                    tar -xzf "$bundle" -C "$extract_dir"
+                                elif tar -tf "$bundle" >/dev/null 2>&1; then
+                                    tar -xf "$bundle" -C "$extract_dir"
+                                else
+                                    echo "Unsupported certificate bundle format: $bundle" >&2
+                                    exit 1
+                                fi
+
+                                src_dir="$extract_dir"
+                                for candidate in \
+                                    "$extract_dir" \
+                                    "$extract_dir/nginx-mtls" \
+                                    "$extract_dir/cctv-certs" \
+                                    "$extract_dir/certs" \
+                                    "$extract_dir/certs/nginx-mtls" \
+                                    "$extract_dir/certs/cctv-certs" \
+                                    "$extract_dir/security/certs" \
+                                    "$extract_dir/security/certs/nginx-mtls" \
+                                    "$extract_dir/security/certs/cctv-certs"
+                                do
+                                    if [ -f "$candidate/rootCA.crt" ] && [ -f "$candidate/server.crt" ]; then
+                                        src_dir="$candidate"
+                                        break
+                                    fi
+                                done
+
+                                for required in rootCA.crt server.crt server.key; do
+                                    if [ ! -f "$src_dir/$required" ]; then
+                                        echo "Missing certificate bundle file: $required" >&2
+                                        exit 1
+                                    fi
+                                done
+
+                                find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+                                for file in \
+                                    rootCA.crt \
+                                    server.crt \
+                                    server.key \
+                                    client-qt.crt \
+                                    client-qt.key \
+                                    client-cctv.crt \
+                                    client-cctv.key \
+                                    client-stm32.crt \
+                                    client-stm32.key \
+                                    cctv.crt \
+                                    cctv.key
+                                do
+                                    if [ -f "$src_dir/$file" ]; then
+                                        cp "$src_dir/$file" "./$file"
+                                    else
+                                        match="$(find "$extract_dir" -type f -name "$file" | head -n 1 || true)"
+                                        if [ -n "$match" ]; then
+                                            cp "$match" "./$file"
+                                        fi
+                                    fi
+                                done
+
+                                find . -type f -name '*.key' -exec chmod 600 {} +
+                                find . -type f -name '*.crt' -exec chmod 644 {} +
+                            '''
                         }
                     }
                     stash name: 'certs-stash', includes: 'RaspberryPi/k3s-cluster/security/certs/**'
@@ -149,7 +224,7 @@ pipeline {
                         sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml"
                         sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mqtt-broker"
                     }
-                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
+                    archiveArtifacts artifacts: 'RaspberryPi/k3s-cluster/security/certs/client-qt.*, RaspberryPi/k3s-cluster/security/certs/client-cctv.*, RaspberryPi/k3s-cluster/security/certs/client-stm32.*, RaspberryPi/k3s-cluster/security/certs/cctv.*, RaspberryPi/k3s-cluster/security/certs/rootCA.crt', fingerprint: true
                 }
             }
         }
