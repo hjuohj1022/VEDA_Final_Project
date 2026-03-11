@@ -700,6 +700,8 @@ paths:
       responses:
         '200':
           description: OK
+        '202':
+          description: Accepted for background execution
         '400':
           description: Invalid request
   /cctv/control/command:
@@ -731,6 +733,8 @@ paths:
       responses:
         '200':
           description: OK
+        '202':
+          description: Accepted for background execution for non-stream control commands
         '400':
           description: Invalid request
   /cctv/control/stop:
@@ -739,18 +743,20 @@ paths:
       responses:
         '200':
           description: OK
+        '202':
+          description: Accepted for background execution
   /cctv/control/pause:
     post:
       summary: Pause CCTV Processing
       responses:
-        '200':
-          description: OK
+        '202':
+          description: Accepted for background execution
   /cctv/control/resume:
     post:
       summary: Resume CCTV Processing
       responses:
-        '200':
-          description: OK
+        '202':
+          description: Accepted for background execution
   /cctv/control/view:
     post:
       summary: Update View Parameters
@@ -777,8 +783,8 @@ paths:
                 mesh:
                   type: boolean
       responses:
-        '200':
-          description: OK
+        '202':
+          description: Accepted for background execution
   /cctv/control/stream:
     post:
       summary: Start CCTV stream mode
