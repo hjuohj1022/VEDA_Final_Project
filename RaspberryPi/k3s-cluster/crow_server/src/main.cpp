@@ -1,5 +1,4 @@
 #include "crow.h"
-#include "../include/MqttManager.h"
 #include "../include/SunapiProxy.h"
 #include "../include/SunapiWsProxy.h"
 #include "../include/CctvManager.h"
@@ -18,14 +17,8 @@
 #include <system_error>
 #include <algorithm>
 #include <cctype>
-#include <set>
-#include <mutex>
 
 namespace fs = std::filesystem;
-
-// WebSocket 클라이언트 관리
-std::set<crow::websocket::connection*> thermal_clients;
-std::mutex clients_mutex;
 
 // -------------------------------------------------------
 // JWT 관련 설정 및 함수
@@ -208,42 +201,6 @@ int main()
     
     // CCTV 라우트 등록
     registerCctvProxyRoutes(app, cctv_mgr);
-
-    // ==========================================
-    // MQTT 매니저 초기화 및 브로드캐스트 설정
-    // ==========================================
-    // 환경변수에서 MQTT 브로커 정보 가져오기 (기본값: mqtt-service)
-    const char* mqtt_host_env = std::getenv("MQTT_HOST");
-    std::string mqtt_host = mqtt_host_env ? mqtt_host_env : "mqtt-service";
-    
-    MqttManager mqtt("crow-server-relay", mqtt_host.c_str(), 1883);
-    mqtt.set_message_callback([](const std::string& topic, const std::string& payload) {
-        // lepton/frame/XX 토픽으로 들어오는 바이너리 데이터를 모든 WS 클라이언트에게 전송
-        if (topic.find("lepton/frame/") == 0) {
-            std::lock_guard<std::mutex> lock(clients_mutex);
-            for (auto u : thermal_clients) {
-                u->send_binary(payload);
-            }
-        }
-    });
-
-    // ==========================================
-    // 열화상 스트리밍 WebSocket API
-    // ==========================================
-    CROW_WEBSOCKET_ROUTE(app, "/thermal-stream")
-        .onopen([&](crow::websocket::connection& conn) {
-            std::lock_guard<std::mutex> lock(clients_mutex);
-            thermal_clients.insert(&conn);
-            std::cout << "[WS] Thermal client connected. Total: " << thermal_clients.size() << std::endl;
-        })
-        .onclose([&](crow::websocket::connection& conn, const std::string& reason) {
-            std::lock_guard<std::mutex> lock(clients_mutex);
-            thermal_clients.erase(&conn);
-            std::cout << "[WS] Thermal client disconnected. Total: " << thermal_clients.size() << std::endl;
-        })
-        .onmessage([&](crow::websocket::connection& conn, const std::string& data, bool is_binary) {
-            // (옵션) 클라이언트로부터 제어 명령을 받을 때 사용
-        });
 
     // ==========================================
     // 회원가입 API

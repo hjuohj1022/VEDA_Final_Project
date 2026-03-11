@@ -13,6 +13,15 @@ spec:
       labels:
         app: nginx-gateway
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-master
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
       containers:
       - name: nginx
         image: hjuohj/nginx-gateway:latest
@@ -20,7 +29,7 @@ spec:
         ports:
         - containerPort: 80
         - containerPort: 443
-        - containerPort: 8554
+        - containerPort: 8555
         - containerPort: 8883
         volumeMounts:
         - name: certs
@@ -62,10 +71,6 @@ spec:
       protocol: TCP
       port: 443
       targetPort: 443
-    - name: rtsp
-      protocol: TCP
-      port: 8554
-      targetPort: 8554
     - name: rtsps
       protocol: TCP
       port: 8555

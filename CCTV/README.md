@@ -2,6 +2,8 @@
 
 RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 수행하고, TCP 제어/스트리밍 인터페이스를 제공하는 Windows 전용 서버입니다.
 
+현재 기본 설정은 `RTSPS` 입력과 제어 채널 `mTLS`를 전제로 합니다. 일반 `rtsp://` 또는 비TLS 제어 채널로 운영하려면 `runtime/runtime_config.h`와 인증서 구성을 환경에 맞게 조정해야 합니다.
+
 ## Overview
 | Component | Role | Main File |
 |---|---|---|
@@ -56,12 +58,15 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
 ```
 
 ## Quick Start
+아래 예시는 저장소 루트 기준이며, 로컬에서 사용하는 CMake 생성기에 맞게 실행하면 됩니다.
+
 ```powershell
 # 1) 의존성 자동 설치 (OpenCV/TensorRT/DA3Metric + config/local_paths.cmake)
 powershell -ExecutionPolicy Bypass -File .\setup_dependencies.ps1
 
 # 2) 환경 설정 (필수)
-# - config/app_config.h: ENGINE_PATH, RTSP_URLS, INPUT_HEIGHT/WIDTH 점검
+# - config/app_config.h: ENGINE_PATH, RTSP_URLS, RTSP_CHANNEL, INPUT_HEIGHT/WIDTH 점검
+# - certs/: 기본 설정으로 실행하려면 rootCA.crt, cctv.crt, cctv.key 준비
 
 # 3) 빌드
 cmake -S . -B build
@@ -73,6 +78,8 @@ cmake --build build --config Release
 # 5) 클라이언트 실행 (선택)
 python .\client_gui.py
 ```
+
+추가 검증은 아래 `Static Analysis`, `Test` 섹션을 참고합니다.
 
 ## Features
 - RTSP 채널 선택 실행 (`channel=0~3`)
@@ -88,23 +95,32 @@ python .\client_gui.py
 ## Directory Layout
 ```text
 CCTV/
+  .clang-tidy
   runtime/
     main.cpp
     server_runtime.h/.cpp
     command_dispatcher.h/.cpp
     depth_worker.cu
+    logging.h/.cpp
+    pointcloud.h
     request.h/.cpp
     request_validator.h/.cpp
     net_protocol.h/.cpp
+    tls_server.h/.cpp
     trt_engine.h/.cpp
     runtime_config.h/.cpp
     request_parser_smoke.cpp
-    runner.h pointcloud.h ...
+    runner.h
   config/
     app_config.h(.example)
     local_paths.cmake(.example)
+  certs/
+    rootCA.crt
+    cctv.crt
+    cctv.key
   tools/
     bootstrap/setup_dependencies.ps1
+    run_static_analysis.ps1
     client/client_gui.py
     client/mtls_external_test.sh
     client/view_ply.py
@@ -136,8 +152,8 @@ CCTV/
 ```
 
 기본 동작:
-- OpenCV 4.10.0 다운로드/압축해제
-- TensorRT 10.15.1.29 다운로드/압축해제
+- 현재 기본 URL 기준 OpenCV 4.10.0 다운로드/압축해제
+- 현재 기본 URL 기준 TensorRT 10.15.1.29 다운로드/압축해제
   - `-TensorRtUrl` 미지정 시 `-CudaPath`의 CUDA 버전 태그로 URL 자동 선택
   - 예: CUDA `v12.1` -> `cuda-12.1` 우선, 실패 시 `cuda-12.9` fallback
 - DA3Metric 체크포인트 다운로드 (`ml_assets/checkpoints/DA3METRIC-LARGE`)
@@ -158,17 +174,18 @@ CCTV/
 
 - `ENGINE_PATH`: TensorRT 엔진 경로(프로젝트 루트 기준 상대경로 권장)
 - `RTSP_URLS`: 채널별 RTSP 주소
-- `RTSP_CHANNEL`: 기본 채널
+- `RTSP_CHANNEL`: 기본 채널 (`RTSP_URLS` 범위 내 인덱스여야 함)
 - `INPUT_HEIGHT`, `INPUT_WIDTH`: 엔진 입력 shape와 반드시 일치
 
-### RTSPS(mTLS)
+### TLS 기본 전제
 - 기본 URL 예시는 `rtsps://...` 스킴을 사용합니다.
-- 런타임 기본 FFmpeg 캡처 옵션에 mTLS 설정이 포함됩니다.
-- 이 구간은 카메라 입력용 인증서로 `certs/RTSP/cctv.crt`, `certs/RTSP/cctv.key`를 계속 사용합니다.
+- 런타임 기본 FFmpeg 캡처 옵션에 TLS 관련 설정이 포함됩니다.
   - `tls_verify;1`
-  - `ca_file;certs/RTSP/rootCA.crt`
-  - `cert_file;certs/RTSP/cctv.crt`
-  - `key_file;certs/RTSP/cctv.key`
+  - `ca_file;certs/rootCA.crt`
+  - `cert_file;certs/cctv.crt`
+  - `key_file;certs/cctv.key`
+- 제어 채널도 기본값으로 TLS가 활성화되어 있습니다.
+- 일반 `rtsp://` 또는 비TLS 제어 채널을 사용할 경우 `runtime/runtime_config.h`의 `ffmpeg_capture_options`, `control_tls.*` 값을 환경에 맞게 수정해야 합니다.
 
 ### `config/local_paths.cmake`
 자동 생성 파일이며, 수동 편집 시 아래 경로를 정확히 지정해야 합니다.
@@ -188,20 +205,43 @@ Output:
 build/Release/depth_trt.exe
 ```
 
+추가 참고:
+- 멀티 설정 생성기(예: Visual Studio)에서는 `--config Release`를 사용합니다.
+- 단일 설정 생성기(예: Ninja)에서는 configure 시 빌드 타입을 지정해야 할 수 있습니다.
+- Debug/Release 산출물은 설정별로 분리되도록 구성되어 있습니다.
+
 빌드 후 자동 복사:
 - `build/Release/ml_assets/engines/`로 `ml_assets/engines`가 자동 복사됩니다.
 - 따라서 `ENGINE_PATH=ml_assets/engines/...` 설정이면 `build/Release` 단독 실행 시에도 엔진 경로가 유지됩니다.
-- `build/Release/certs/`로 `certs` 디렉터리 전체가 자동 복사됩니다(mTLS/RTSPS 인증서 배포용).
+- 프로젝트 루트에 `certs/`가 있으면 `build/Release/certs/`로 함께 복사됩니다(mTLS 인증서/키 배포용).
+
+## Static Analysis
+기본 정적 분석 경로는 MSVC `/analyze`입니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_static_analysis.ps1
+```
+
+분석 동작:
+- `request_parser_smoke`, `depth_trt`를 Debug 설정으로 순차 빌드합니다.
+- `ENABLE_MSVC_ANALYZE=ON`으로 configure 후 `/analyze`를 적용합니다.
+- 프로젝트 내부 코드 기준 경고를 먼저 정리하는 용도로 사용합니다.
+- `.clang-tidy`도 저장소에 포함되어 있지만, 실제 사용 가능 여부는 로컬 LLVM/MSVC 조합에 따라 달라질 수 있습니다.
 
 ## Test
 ```powershell
-# 스모크 테스트 빌드 + 실행
-cmake --build build --config Release --target request_parser_smoke
-.\build\Release\request_parser_smoke.exe
+# Debug 스모크 테스트 빌드 + 실행
+cmake --build build --config Debug --target request_parser_smoke
+.\build\Debug\request_parser_smoke.exe
+
+# Release 앱 빌드 검증
+cmake --build build --config Release --target depth_trt --clean-first
 
 # ctest 통합 실행
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+현재 자동 테스트 타깃은 `request_parser_smoke`가 중심이며, `depth_trt`는 빌드 검증 위주로 확인합니다.
 
 ## Run
 서버:
@@ -241,20 +281,13 @@ python .\client_gui.py
 - 예시:
 ```bash
 chmod +x ./tools/client/mtls_external_test.sh
-./tools/client/mtls_external_test.sh --host <SERVER_TAILNET_IP> --ca certs/forTestClient/rootCA.crt --cert certs/forTestClient/cctv.crt --key certs/forTestClient/cctv.key --port 9090 --timeout 8
+./tools/client/mtls_external_test.sh \
+  --host <SERVER_HOST_OR_IP> \
+  --ca certs/rootCA.crt --cert certs/cctv.crt --key certs/cctv.key \
+  --port 9090 --timeout 8
 ```
 
-운영 토폴로지별 테스트 경로:
-
-| Topology | 동작 방식 | 권장 테스트 대상 |
-|---|---|---|
-| Tailnet 노드 -> 서버(직접) | 클라이언트 노드가 Tailscale 설치 + kernel TUN | `100.x.x.x:9090` |
-| Tailnet 마스터(advertise) -> 워커 서브넷(인입) | Tailnet 클라이언트가 advertise된 서브넷으로 접근 | 워커 LAN IP:`9090` |
-| 워커(비-Tailscale) -> Tailnet 서버(역방향 필요) | 기본 advertise만으로는 미지원, 라우트/NAT 또는 터널 필요 | `ssh -L` 사용 시 `127.0.0.1:19090` |
-
-참고:
-- `advertise-routes`는 기본적으로 `Tailnet -> 서브넷` 경로입니다.
-- 워커가 직접 `100.x`로 나가려면 추가 라우팅/NAT 또는 터널 구성이 필요합니다.
+오버레이 네트워크(Tailscale, subnet routing, SSH tunnel 등)를 거쳐 접속하는 경우의 라우팅 방식은 환경마다 달라집니다. 먼저 로컬 또는 직접 TCP 경로에서 mTLS 연결을 검증한 뒤, 네트워크 토폴로지별 라우팅 문제를 별도로 확인하는 것을 권장합니다.
 
 ## TCP Command Reference
 기본 명령 예시:
@@ -312,15 +345,14 @@ python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 - RTSP 접속 실패: URL/계정/포트/네트워크/카메라 채널 점검
 - TensorRT 다운로드 실패: `-TensorRtUrl`로 직접 ZIP URL 지정
 - DLL 관련 실행 오류: 빌드 산출물 폴더에 TensorRT/OpenCV DLL 복사 여부 확인
-- 외부 mTLS 테스트에서 `tailscale ping`은 성공하지만 `openssl/curl/nc` TCP가 타임아웃이면:
-  - 소스 노드 `tailscaled` 실행 인자를 확인합니다.
-  - `--tun=userspace-networking`이면 일반 TCP 테스트가 실패할 수 있으므로 kernel TUN 모드(`--tun=tailscale0`)로 전환 후 재시도합니다.
-  - 확인 명령:
-    - `cat /proc/$(pidof tailscaled)/cmdline | tr '\0' ' '; echo`
-- 워커 노드에 `ip/route` 유틸이 없어 `100.x` 라우트 설정이 불가하면:
-  - `ssh -L` 포트포워딩으로 우회 테스트합니다.
-  - 예: `ssh -f -N -L 19090:<SERVER_TAILNET_IP>:9090 <master_user>@<MASTER_LAN_IP>`
-  - 이후 워커에서 `127.0.0.1:19090` 대상으로 `mtls_external_test.sh` 실행
+- 정적 분석에서 `clang-tidy`가 실패하면:
+  - 로컬 LLVM/MSVC 조합에 따라 도구체인 호환성 문제가 있을 수 있습니다.
+  - 이 경우 `.clang-tidy`는 규칙셋 참고용으로 두고, 실제 분석은 `tools/run_static_analysis.ps1`의 MSVC `/analyze` 경로를 사용합니다.
+- 설정 전환 직후 이상한 링크/산출물 충돌이 보이면:
+  - 우선 `cmake --build build --config Release --target depth_trt --clean-first`처럼 `--clean-first`로 재빌드합니다.
+- 로컬에서는 mTLS가 되는데 VPN/Tailscale/서브넷 라우팅 구간에서만 타임아웃이 나면:
+  - 애플리케이션 자체보다 라우팅, NAT, 터널 모드, 방화벽 문제일 가능성이 큽니다.
+  - 먼저 직접 경로(`127.0.0.1` 또는 동일 LAN)에서 연결을 확인한 뒤 네트워크 계층을 분리해서 점검합니다.
 
 ## Operational Checklist
 - `config/local_paths.cmake` 경로가 실제 설치 경로와 일치하는가?

@@ -1,6 +1,6 @@
 #include "wifi.h"
 #include "mqtt.h"
-#include "../device/uart.h" 
+#include "../device/cmd_uart.h"
 static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     (void)arg;
@@ -28,7 +28,7 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
         {
             (void)printf("WiFi connected, got IP\n");
             (void)printf("Free heap: %lu\n", (uint32_t)esp_get_free_heap_size());
-            (void)uart_flush(UART_NUM);  /* ← UART 버퍼 비우기 */
+            cmdUartFlushInput();
             (void)mqttClient();
         }
         else 
@@ -66,6 +66,16 @@ esp_err_t wifiConnect(const wifi_config_t *conf)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, (wifi_config_t *)conf));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    /* 절전 모드 상태 확인 로그 추가 */
+    wifi_ps_type_t ps_type;
+    if (esp_wifi_get_ps(&ps_type) == ESP_OK) {
+        if (ps_type == WIFI_PS_NONE) {
+            (void)printf("[WiFi] Power Save Mode: DISABLED (WIFI_PS_NONE)\n");
+        } else {
+            (void)printf("[WiFi] Power Save Mode: ENABLED (type: %d)\n", (int)ps_type);
+        }
+    }
 
     return ESP_OK;
 }

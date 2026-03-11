@@ -2,9 +2,9 @@
 /**
  ******************************************************************************
  * @file    motor.c
- * @brief   PCA9685 I2C PWM 드라이버 + 3채널 서보 제어 + SPI 명령 파서
+ * @brief   PCA9685 I2C PWM driver + 3-channel servo control + UART command parser
  *
- * 명령 형식 (SPI DATA 필드, 최대 30바이트):
+ * 명령 형식 (UART line command):
  *   "motor1 left press"    → motor1을 왼쪽(CCW)으로 1도씩 계속 이동
  *   "motor2 right press"   → motor2를 오른쪽(CW)으로 1도씩 계속 이동
  *   "motor1 release"       → motor1 이동 중지
@@ -135,17 +135,17 @@ int32_t Motor_Init(I2C_HandleTypeDef *hi2c)
     /* sleep 모드 진입 후 prescale 설정 */
     if (pca_write(PCA9685_MODE1, 0x10U) != HAL_OK) 
     {
-        return -1;
+        return -2;
     }
     if (pca_write(PCA9685_PRESCALE, (uint8_t)PCA9685_PRESCALE_VAL) != HAL_OK) 
     {
-        return -1;
+        return -3;
     }
 
     /* 정상 동작 모드, Auto-Increment ON */
     if (pca_write(PCA9685_MODE1, 0x20U) != HAL_OK) 
     {
-        return -1;
+        return -4;
     }
     HAL_Delay(1U);
 
@@ -216,6 +216,14 @@ void Motor_Stop(uint8_t motor_id)
     }
 }
 
+void Motor_StopAll(void)
+{
+    for (uint8_t i = 0U; i < (uint8_t)MOTOR_NUM; i++)
+    {
+        s_moving[i] = 0;
+    }
+}
+
 void Motor_Update(void)
 {
     const uint32_t now = HAL_GetTick();
@@ -257,7 +265,7 @@ int32_t Motor_ParseAndRun(const char *data)
         char cmd2[16] = {0};
 
         /* "motor1 left press" -> n=3, "motor1 release" -> n=2 */
-        const int32_t n = (int32_t)sscanf(data, " motor%d %15s %15s", &motor_num, cmd1, cmd2);
+        const int32_t n = (int32_t)sscanf(data, " motor%ld %15s %15s", &motor_num, cmd1, cmd2);
 
         if ((n >= 2) && (motor_num >= 1) && (motor_num <= (int32_t)MOTOR_NUM)) 
         {

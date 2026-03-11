@@ -1,13 +1,13 @@
 #include "mqtt/wifi.h"
 #include "mqtt/mqtt.h"
-#include "device/uart.h"
-#include "device/spi.h"
+#include "device/frame_link.h"
+#include "device/cmd_uart.h"
 
 esp_err_t systemInit(void)
 {
     esp_err_t ret = nvs_flash_init();
     if ((ret == (esp_err_t)ESP_ERR_NVS_NO_FREE_PAGES) ||
-        (ret == (esp_err_t)ESP_ERR_NVS_NEW_VERSION_FOUND)) 
+        (ret == (esp_err_t)ESP_ERR_NVS_NEW_VERSION_FOUND))
     {
         (void)nvs_flash_erase();
         ret = nvs_flash_init();
@@ -22,14 +22,16 @@ esp_err_t systemInit(void)
 void app_main(void)
 {
     (void)systemInit();
+    (void)printf("APP mode=spi_frame_link build=20260310\n");
 
-    uartInit();
-    /* UART와 MQTT 우선순위를 5로 동일하게 설정하여 CPU 시간을 공평하게 분배 */
-    (void)xTaskCreate(uartTask,      "uart_task",  8192U, NULL, 5U, NULL);
+    frameLinkInit();
+    ESP_ERROR_CHECK(cmdUartInit());
+    (void)xTaskCreate(frameLinkTask, "frame_link", 8192U, NULL, 5U, NULL);
     (void)xTaskCreate(mqttFrameTask, "mqtt_frame", 8192U, NULL, 5U, NULL);
+    (void)xTaskCreate(mqttHealthTask, "mqtt_health", 4096U, NULL, 4U, NULL);
+    (void)xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, 5U, NULL);
 
-    (void)spiMasterInit();
-    (void)xTaskCreate(spiTask, "spi_task", 4096U, NULL, 4U, NULL);
+    (void)printf("STM32 command bridge enabled: UART1(GPIO21/20) -> USART1(PA9/PA10)\n");
 
     wifi_config_t wifi_config = {
         .sta = {

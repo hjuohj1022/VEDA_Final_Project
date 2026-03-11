@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include <stdint.h>
 
-#define LEP_CCI_ADDRESS  (0x2AU)
+#define LEP_CCI_ADDRESS  ((uint8_t)0x2AU)
 #define PACKET_SIZE      (164U)
 #define PACKETS_PER_SEG  (60U)
 #define PIXELS_PER_PKT   (80U)
@@ -79,7 +79,7 @@ static void resetLepton(void) {
 
 void setup() {
   Serial.begin(2000000);
-  Serial1.begin(921600);
+  Serial1.begin(4000000);
   Wire.begin();
   Wire.setClock(400000);
   pinMode(CS_PIN, OUTPUT);

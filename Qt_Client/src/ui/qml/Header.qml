@@ -31,9 +31,13 @@ Rectangle {
         if (currentSection === 0) {
             return "View 화면 안내\n" +
                    "• 라이브 화면 모니터링 화면\n" +
-                   "• 더블 클릭 시 단일 카메라 확대 전환\n" +
-                   "• 확대 상태에서 3D map 모드 전환 가능\n" +
-                   "• 확대 상태에서 줌/포커스 제어 사용 가능"
+                   "• 더블 클릭 시 단일 카메라 확대 전환"
+        }
+        if (currentSection === 3) {
+            return "확대 화면 안내\n" +
+                   "• 3D map 모드 전환 가능\n" +
+                   "• 줌/포커스 제어 사용 가능\n" +
+                   "• 표시(대비/밝기/윤곽 조정/컬러 레벨) 제어 가능"
         }
         if (currentSection === 2) {
             return "Playback 화면 안내\n" +
@@ -43,9 +47,9 @@ Rectangle {
                    "• 내보내기로 선택 구간 영상 저장 가능"
         }
         if (currentSection === 1) {
-            return "Export 화면 안내\n" +
-                   "• 서버에 시간별 저장된 녹화 영상 목록 조회\n" +
-                   "• 원하는 파일 다운로드 및 로컬 저장 가능"
+            return "Thermal 화면 안내\n" +
+                   "• 열화상 스트림 모니터링 화면\n" +
+                   "• 컬러 팔레트 및 온도 범위(자동/수동) 조정 가능"
         }
         return "화면 안내"
     }
