@@ -680,6 +680,26 @@ paths:
       responses:
         '200':
           description: OK
+  /esp32/watchdog/request:
+    post:
+      summary: Request an immediate ESP32 watchdog/status publish
+      responses:
+        '202':
+          description: Watchdog request published to MQTT
+        '503':
+          description: MQTT broker unavailable
+  /esp32/watchdog/latest:
+    get:
+      summary: Get the latest cached ESP32 watchdog/status payload
+      responses:
+        '200':
+          description: Latest `system/status` payload and metadata
+  /esp32/watchdog/status:
+    get:
+      summary: Get server-side ESP32 watchdog MQTT bridge status
+      responses:
+        '200':
+          description: MQTT connection status, last request, and latest status metadata
   /motor/control/command:
     post:
       summary: Send raw motor command over MQTT

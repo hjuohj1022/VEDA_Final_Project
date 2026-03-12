@@ -3,6 +3,7 @@
 #include "../include/SunapiWsProxy.h"
 #include "../include/CctvManager.h"
 #include "../include/CctvProxy.h"
+#include "../include/EspHealthManager.h"
 #include "../include/MotorManager.h"
 #include <jwt-cpp/jwt.h> 
 #include <filesystem>
@@ -219,6 +220,19 @@ int main()
         motor_timeout_ms
     );
     registerMotorRoutes(app, motor_mgr);
+
+    const char* esp_watchdog_client_id = std::getenv("ESP32_WATCHDOG_CLIENT_ID") ? std::getenv("ESP32_WATCHDOG_CLIENT_ID") : "crow_esp_watchdog_api";
+    const char* esp_watchdog_control_topic = std::getenv("ESP32_SYSTEM_CONTROL_TOPIC") ? std::getenv("ESP32_SYSTEM_CONTROL_TOPIC") : "system/control";
+    const char* esp_watchdog_status_topic = std::getenv("ESP32_SYSTEM_STATUS_TOPIC") ? std::getenv("ESP32_SYSTEM_STATUS_TOPIC") : "system/status";
+
+    EspHealthManager esp_health_mgr(
+        mqtt_host,
+        mqtt_port,
+        esp_watchdog_client_id,
+        esp_watchdog_control_topic,
+        esp_watchdog_status_topic
+    );
+    registerEspHealthRoutes(app, esp_health_mgr);
 
     // ==========================================
     // 회원가입 API
