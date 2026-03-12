@@ -200,13 +200,14 @@ void Backend::checkStorage() {
     }
     const auto reqTimer = std::make_shared<QElapsedTimer>();
     reqTimer->start();
+    const bool debugStorage = (m_env.value("STORAGE_DEBUG", "0").trimmed() == "1");
 
     QNetworkRequest request = makeApiJsonRequest("/api/sunapi/storage");
     applyAuthIfNeeded(request);
     QNetworkReply *reply = m_manager->get(request);
     attachIgnoreSslErrors(reply, "SUNAPI_STORAGE_CHECK");
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, reqTimer]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, reqTimer, debugStorage]() {
         const QByteArray data = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
@@ -234,11 +235,13 @@ void Backend::checkStorage() {
         m_storagePercent = static_cast<int>((usedBytes / totalBytes) * 100.0);
         m_storageUsed = formatStorageBytes(usedBytes);
         m_storageTotal = formatStorageBytes(totalBytes);
-        qInfo() << "[SUNAPI][STORAGE] parsed"
-                << "url=" << reply->request().url()
-                << "usedBytes=" << usedBytes
-                << "totalBytes=" << totalBytes
-                << "display=" << m_storageUsed << "/" << m_storageTotal;
+        if (debugStorage) {
+            qInfo() << "[SUNAPI][STORAGE] parsed"
+                    << "url=" << reply->request().url()
+                    << "usedBytes=" << usedBytes
+                    << "totalBytes=" << totalBytes
+                    << "display=" << m_storageUsed << "/" << m_storageTotal;
+        }
         emit storageChanged();
         setLatency(static_cast<int>(reqTimer->elapsed()));
         reply->deleteLater();

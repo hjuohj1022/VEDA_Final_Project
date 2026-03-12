@@ -88,6 +88,8 @@ void Backend::login(QString id, QString pw) {
                 m_loginLocked = false;
                 emit loginLockChanged();
             }
+            // Storage timer is 60s; refresh once immediately after successful login.
+            checkStorage();
             emit isLoggedInChanged();
             emit userIdChanged();
             emit sessionRemainingSecondsChanged();

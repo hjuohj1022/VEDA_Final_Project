@@ -324,12 +324,20 @@ Item {
     }
 
     onShowCameraControlsChanged: {
+        if (!showCameraControls && mapModeEnabled && backend) {
+            backend.stopCctv3dMapSequence()
+            mapModeEnabled = false
+        }
         if (showCameraControls && selectedCameraIndex >= 0) {
             store.refreshDisplaySettings()
             displaySettingsRefreshTimer.restart()
         }
     }
     onSelectedCameraIndexChanged: {
+        if (mapModeEnabled && backend) {
+            backend.stopCctv3dMapSequence()
+            mapModeEnabled = false
+        }
         if (showCameraControls && selectedCameraIndex >= 0) {
             supportZoom = true
             supportFocus = true

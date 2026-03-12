@@ -135,14 +135,26 @@ Item {
                 }
 
                 C.SidebarControlButton {
-                    text: store.mapModeEnabled ? "3D Map 모드 ON (미구현)" : "3D Map 모드 OFF (미구현)"
+                    text: store.mapModeEnabled ? "3D Map 모드 ON" : "3D Map 모드 OFF"
                     Layout.fillWidth: true
                     compact: true
+                    accentStyle: store.mapModeEnabled
                     theme: root.theme
                     onClicked: {
-                        store.mapModeEnabled = !store.mapModeEnabled
-                        if (store.mapModeEnabled && store.selectedCameraIndex >= 0) {
-                            backend.sunapiSimpleAutoFocus(store.selectedCameraIndex)
+                        if (store.selectedCameraIndex < 0)
+                            return
+
+                        if (!store.mapModeEnabled) {
+                            var started = backend.startCctv3dMapSequence(store.selectedCameraIndex)
+                            store.mapModeEnabled = started
+                            if (started) {
+                                store.cameraControlStatus = "3D Map 시퀀스를 시작합니다."
+                                store.cameraControlError = false
+                                store.restartCameraControlStatusTimer()
+                            }
+                        } else {
+                            backend.stopCctv3dMapSequence()
+                            store.mapModeEnabled = false
                         }
                     }
                 }
@@ -228,7 +240,6 @@ Item {
                         text: "오토포커스"
                         Layout.fillWidth: true
                         compact: true
-                        accentStyle: store.mapModeEnabled
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportFocus
                         onClicked: backend.sunapiSimpleAutoFocus(store.selectedCameraIndex)
