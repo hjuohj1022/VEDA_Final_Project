@@ -11,4 +11,5 @@ struct LaunchOptions {
 };
 
 bool ParseLaunchOptions(int argc, char** argv, LaunchOptions& out, std::string& outErr);
+bool ValidateLaunchOptions(const LaunchOptions& options, std::string& outErr);
 int ResolveWorkerPort(const LaunchOptions& options);

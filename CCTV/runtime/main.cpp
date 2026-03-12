@@ -7,9 +7,14 @@
 
 int main(int argc, char** argv) {
     LaunchOptions options;
-    std::string parseErr;
-    if (!ParseLaunchOptions(argc, argv, options, parseErr)) {
-        LogError(parseErr);
+    std::string launchErr;
+    if (!ParseLaunchOptions(argc, argv, options, launchErr)) {
+        LogError(launchErr);
+        return 1;
+    }
+
+    if (!ValidateLaunchOptions(options, launchErr)) {
+        LogError(launchErr);
         return 1;
     }
 

@@ -12,6 +12,16 @@
 namespace {
 constexpr std::size_t kClientBufferSize = 1024U;
 
+bool ApplySocketRecvTimeout(const SOCKET socket, const int timeoutMs) {
+    if (socket == INVALID_SOCKET || timeoutMs <= 0) {
+        return true;
+    }
+
+    const DWORD timeout = static_cast<DWORD>(timeoutMs);
+    return setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
+                      reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == 0;
+}
+
 void LogClientReceiveFailure(const std::string& prefix) {
     const ClientIoErrorInfo ioErr = GetLastClientIoError();
     if (ioErr.kind == ClientIoErrorKind::kClosed) {
@@ -60,6 +70,7 @@ bool InitControlServerContext(const RuntimeConfig& cfg,
 }
 
 bool AcceptParsedControlRequest(ServerSocketContext& serverCtx,
+                                const RuntimeConfig& cfg,
                                 ParsedControlRequest& outRequest,
                                 const std::string& recvFailurePrefix) {
     sockaddr_in clientAddr{};
@@ -67,6 +78,11 @@ bool AcceptParsedControlRequest(ServerSocketContext& serverCtx,
     ServerClient client;
     if (!AcceptServerClient(serverCtx, client, &clientAddr, &clientLen)) {
         return false;
+    }
+
+    if (!ApplySocketRecvTimeout(client.socket, cfg.control_client_read_timeout_ms)) {
+        LogWarn(recvFailurePrefix + "failed to apply client read timeout (wsa=" +
+                std::to_string(WSAGetLastError()) + ")");
     }
 
     std::array<char, kClientBufferSize> requestBuf{};

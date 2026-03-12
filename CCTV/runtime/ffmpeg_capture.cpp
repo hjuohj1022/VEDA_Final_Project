@@ -20,6 +20,7 @@ extern "C" {
 
 #include <opencv2/core/mat.hpp>
 
+#include "logging.h"
 #include "runtime_config.h"
 
 namespace {
@@ -71,6 +72,34 @@ int ParseEnvInt(const char* name, const int defaultValue) {
     return static_cast<int>(parsed);
 }
 
+bool ParseEnvBool(const char* name, const bool defaultValue) {
+    char* raw = nullptr;
+    std::size_t rawLen = 0;
+    if (_dupenv_s(&raw, &rawLen, name) != 0 || !raw || rawLen == 0) {
+        free(raw);
+        return defaultValue;
+    }
+
+    std::string value(raw);
+    free(raw);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+    }
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+    }
+    return defaultValue;
+}
+
+int ResolveInjectedFailureReadCount() {
+    if (!ParseEnvBool("VEDA_ENABLE_TEST_HOOKS", false)) {
+        return -1;
+    }
+    return ParseEnvInt("VEDA_TEST_CAPTURE_FAIL_AFTER_READS", -1);
+}
+
 struct DictionaryGuard {
     AVDictionary* dict = nullptr;
 
@@ -116,7 +145,7 @@ struct FfmpegRtspCapture::Impl {
     RuntimeConfig cfgSnapshot{};
     std::string configuredUrl;
     int successfulReadCount = 0;
-    const int failAfterReadsForTest = ParseEnvInt("VEDA_TEST_CAPTURE_FAIL_AFTER_READS", -1);
+    const int failAfterReadsForTest = ResolveInjectedFailureReadCount();
     bool failAfterReadsTriggered = false;
 
     ~Impl() {
@@ -173,6 +202,11 @@ struct FfmpegRtspCapture::Impl {
         configuredUrl = url;
         cfgSnapshot = cfg;
         Close();
+
+        if (failAfterReadsForTest >= 0 && successfulReadCount == 0 && !failAfterReadsTriggered) {
+            LogWarn("FFmpeg capture test hook enabled: fail after " +
+                    std::to_string(failAfterReadsForTest) + " successful reads");
+        }
 
         openTimeoutMs = cfg.open_timeout_ms;
         readTimeoutMs = cfg.read_timeout_ms;

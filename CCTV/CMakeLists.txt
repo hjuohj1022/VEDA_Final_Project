@@ -121,6 +121,7 @@ add_executable(request_parser_smoke
 add_executable(ffmpeg_capture_probe
     runtime/ffmpeg_capture.cpp
     runtime/ffmpeg_capture_probe.cpp
+    runtime/logging.cpp
     runtime/runtime_config.cpp
 )
 

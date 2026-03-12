@@ -73,7 +73,7 @@ int RunDepthService(const ServiceRunOptions& options) {
     while (true) {
         JoinFinishedStreamThreads(runtimeCtx);
         ParsedControlRequest requestCtx;
-        if (!AcceptParsedControlRequest(serverCtx, requestCtx)) {
+        if (!AcceptParsedControlRequest(serverCtx, cfg, requestCtx)) {
             continue;
         }
         HandleClientRequest(requestCtx.client, requestCtx.request, runtimeCtx);

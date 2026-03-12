@@ -667,6 +667,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     uint64_t totalReconnectFail = 0;
 
     bool fatalError = false;
+    std::string fatalStartupDetail;
     while (!stopFlag.load()) {
         if (IsWorkerPaused(viewParams)) {
             HandlePausedState(cfg, headless, streamBuf, rgbdStreamBuf, pcStreamBuf,
@@ -686,8 +687,6 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             continue;
         }
 
-        reportStartupSuccess();
-
         const auto gpuStart = std::chrono::steady_clock::now();
         if (!resized.isContinuous()) {
             resized = resized.clone();
@@ -696,6 +695,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                                         cudaMemcpyHostToDevice, cudaRes.stream),
                        "cudaMemcpyAsync(d_raw_img)", __FILE__, __LINE__)) {
             fatalError = true;
+            fatalStartupDetail = "CUDA input upload failed";
             break;
         }
 
@@ -707,12 +707,14 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             LogError(std::string("CUDA kernel error: ") + cudaGetErrorString(err) +
                      " (frame=" + std::to_string(frameIdx) + ")");
             fatalError = true;
+            fatalStartupDetail = "CUDA preprocess kernel failed: " + std::string(cudaGetErrorString(err));
             break;
         }
 
         if (!trt.context->enqueueV3(cudaRes.stream)) {
             LogError("enqueueV3 failed (frame=" + std::to_string(frameIdx) + ")");
             fatalError = true;
+            fatalStartupDetail = "TensorRT enqueue failed";
             break;
         }
         err = cudaGetLastError();
@@ -720,6 +722,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             LogError(std::string("CUDA post-enqueue error: ") + cudaGetErrorString(err) +
                      " (frame=" + std::to_string(frameIdx) + ")");
             fatalError = true;
+            fatalStartupDetail = "CUDA post-enqueue failed: " + std::string(cudaGetErrorString(err));
             break;
         }
 
@@ -727,6 +730,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                                         cudaMemcpyDeviceToHost, cudaRes.stream),
                        "cudaMemcpyAsync(output)", __FILE__, __LINE__)) {
             fatalError = true;
+            fatalStartupDetail = "CUDA output download failed";
             break;
         }
         err = cudaStreamSynchronize(cudaRes.stream);
@@ -734,6 +738,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             LogError(std::string("CUDA stream sync error: ") + cudaGetErrorString(err) +
                      " (frame=" + std::to_string(frameIdx) + ")");
             fatalError = true;
+            fatalStartupDetail = "CUDA stream sync failed: " + std::string(cudaGetErrorString(err));
             break;
         }
         const auto gpuEnd = std::chrono::steady_clock::now();
@@ -767,6 +772,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
         }
 
         frozenFrame.Update(depthMat, colorForDepth, frame, outW, outH, frameIdx);
+        reportStartupSuccess();
 
         const auto frameEnd = std::chrono::steady_clock::now();
         const double gpuMs =
@@ -785,7 +791,10 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
 
     if (!startupReported) {
         if (fatalError) {
-            CompleteWorkerStartup(startupState, false, "Worker exited before startup completed");
+            CompleteWorkerStartup(startupState, false,
+                                  fatalStartupDetail.empty()
+                                      ? "Worker exited before startup completed"
+                                      : fatalStartupDetail);
         } else {
             CompleteWorkerStartup(startupState, false, "Worker stopped before startup completed");
         }

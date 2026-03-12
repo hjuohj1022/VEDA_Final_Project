@@ -51,6 +51,9 @@ struct RuntimeConfig {
     int png_compression = 3;
 
     int server_listen_backlog = 5;
+    int control_client_read_timeout_ms = 5000;
+    int proxy_relay_io_timeout_ms = 30000;
+    int proxy_max_concurrent_clients = 32;
     ControlTlsConfig control_tls;
 };
 

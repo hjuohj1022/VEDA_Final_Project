@@ -23,5 +23,6 @@ bool InitControlServerContext(const RuntimeConfig& cfg,
                               ServerSocketContext& serverCtx);
 
 bool AcceptParsedControlRequest(ServerSocketContext& serverCtx,
+                                const RuntimeConfig& cfg,
                                 ParsedControlRequest& outRequest,
                                 const std::string& recvFailurePrefix = "");
