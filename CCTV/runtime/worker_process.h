@@ -20,6 +20,7 @@ public:
 private:
     bool SpawnLocked(std::string& outErr);
     bool WaitUntilReadyLocked(std::string& outErr);
+    void TerminateAndCleanupLocked(DWORD waitMs = 2000) noexcept;
     void CleanupHandlesLocked() noexcept;
 
     std::wstring exePath_;

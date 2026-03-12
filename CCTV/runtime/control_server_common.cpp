@@ -64,6 +64,7 @@ bool InitControlServerContext(const RuntimeConfig& cfg,
     if (!InitServerSocket(port, cfg.server_listen_backlog, bindAddress, &tlsCfg, serverCtx)) {
         return false;
     }
+    serverCtx.acceptedClientTimeoutMs = cfg.control_client_read_timeout_ms;
 
     LogListeningState(port, tlsCfg, bindAddress, listenSuffix);
     return true;

@@ -44,6 +44,19 @@ void SetTcpIoErrorFromWsaCode(const int wsaErr, const std::string& operation) {
     }
 }
 
+bool ApplySocketIoTimeouts(const SOCKET socket, const int timeoutMs) {
+    if (socket == INVALID_SOCKET || timeoutMs <= 0) {
+        return true;
+    }
+
+    const DWORD timeout = static_cast<DWORD>(timeoutMs);
+    const bool recvOk = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
+                                   reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == 0;
+    const bool sendOk = setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO,
+                                   reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == 0;
+    return recvOk && sendOk;
+}
+
 bool FailInit(ServerSocketContext& ctx, const std::string& err) {
     if (!err.empty()) {
         LogError("[NET] " + err);
@@ -112,6 +125,14 @@ bool AcceptServerClient(ServerSocketContext& ctx, ServerClient& client, sockaddr
     client.socket = acceptedSocket;
     if (!ctx.secureEnabled) {
         return true;
+    }
+
+    if (!ApplySocketIoTimeouts(acceptedSocket, ctx.acceptedClientTimeoutMs)) {
+        LogWarn("[TLS] failed to apply accepted client handshake timeout (wsa=" +
+                std::to_string(WSAGetLastError()) + ")");
+        closesocket(acceptedSocket);
+        client.socket = INVALID_SOCKET;
+        return false;
     }
 
     std::string err;

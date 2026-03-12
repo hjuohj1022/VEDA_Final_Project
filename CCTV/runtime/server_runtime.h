@@ -23,6 +23,7 @@ struct ServerSocketContext {
     SOCKET server = INVALID_SOCKET;
     bool wsaStarted = false;
     bool secureEnabled = false;
+    int acceptedClientTimeoutMs = 0;
     void* tlsCtx = nullptr;  // SSL_CTX*
 };
 

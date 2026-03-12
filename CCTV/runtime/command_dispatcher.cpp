@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <mutex>
 
@@ -220,18 +221,18 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     }
 
     ctx.workerStop.store(false);
-    WorkerStartupState startupState;
-    ResetWorkerStartupState(startupState);
-    ctx.worker = std::thread([channel, headless, &ctx, &startupState]() {
+    auto startupState = std::make_shared<WorkerStartupState>();
+    ResetWorkerStartupState(*startupState);
+    ctx.worker = std::thread([channel, headless, &ctx, startupState]() {
         const bool ok = RunDepthWorker(channel, headless, ctx.workerStop,
                                        &ctx.depthStream, &ctx.rgbdStream, &ctx.pcStream, &ctx.viewParams,
-                                       &startupState);
+                                       startupState.get());
         if (!ok) {
             LogError("Worker exited with errors.");
             bool startupSucceeded = false;
             {
-                std::lock_guard<std::mutex> lock(startupState.mu);
-                startupSucceeded = startupState.finished && startupState.success;
+                std::lock_guard<std::mutex> lock(startupState->mu);
+                startupSucceeded = startupState->finished && startupState->success;
             }
             if (startupSucceeded) {
                 ExitWorkerServiceProcess(kWorkerRuntimeFailureExitCode,
@@ -244,9 +245,9 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     const RuntimeConfig& cfg = GetRuntimeConfig();
     const auto startupTimeout = std::chrono::milliseconds(
         cfg.open_timeout_ms + cfg.read_timeout_ms + kWorkerStartupSlackMs);
-    std::unique_lock<std::mutex> startupLock(startupState.mu);
-    const bool startupFinished = startupState.cv.wait_for(startupLock, startupTimeout, [&startupState]() {
-        return startupState.finished;
+    std::unique_lock<std::mutex> startupLock(startupState->mu);
+    const bool startupFinished = startupState->cv.wait_for(startupLock, startupTimeout, [&startupState]() {
+        return startupState->finished;
     });
     if (!startupFinished) {
         startupLock.unlock();
@@ -255,8 +256,8 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
                                  kWorkerStartupTimeoutExitCode,
                                  "Worker startup timed out before ready signal. Recycling worker process.");
     }
-    const bool startupOk = startupState.success;
-    const std::string startupDetail = startupState.detail;
+    const bool startupOk = startupState->success;
+    const std::string startupDetail = startupState->detail;
     startupLock.unlock();
     if (!startupOk) {
         SendFinalResponseAndExit(clientSocket,
