@@ -680,6 +680,236 @@ paths:
       responses:
         '200':
           description: OK
+  /motor/control/command:
+    post:
+      summary: Send raw motor command over MQTT
+      description: |
+        Publishes a raw ASCII command to `motor/control` and waits for the next `motor/response`.
+        Examples:
+        - `motor1 left press`
+        - `motor2 release`
+        - `motor3 set 120`
+        - `read`
+        - `ping`
+        - `stopall`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/press:
+    post:
+      summary: Start continuous motor movement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - direction
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                direction:
+                  type: string
+                  enum: [left, right]
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/release:
+    post:
+      summary: Stop continuous movement for one motor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/stop:
+    post:
+      summary: Alias of release for one motor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/set:
+    post:
+      summary: Move one motor to an absolute angle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - angle
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                angle:
+                  type: integer
+                  minimum: 0
+                  maximum: 180
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/move:
+    post:
+      summary: Move one motor relative to its current angle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - direction
+                - degrees
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                direction:
+                  type: string
+                  enum: [left, right]
+                degrees:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: Motor response received
+        '400':
+          description: Invalid request or STM32 returned ERR
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/stopall:
+    post:
+      summary: Stop all continuous motor movement
+      responses:
+        '200':
+          description: Motor response received
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/control/center:
+    post:
+      summary: Center all motors to one target angle
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                angle:
+                  type: integer
+                  minimum: 0
+                  maximum: 180
+                  default: 90
+      responses:
+        '200':
+          description: Per-motor results returned
+        '400':
+          description: Invalid request
+  /motor/angles:
+    get:
+      summary: Read all motor angles
+      responses:
+        '200':
+          description: Motor response received
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/ping:
+    get:
+      summary: Check motor controller connectivity
+      responses:
+        '200':
+          description: Motor response received
+        '503':
+          description: MQTT broker unavailable
+        '504':
+          description: Timed out waiting for motor response
+  /motor/status:
+    get:
+      summary: Get motor MQTT bridge status
+      responses:
+        '200':
+          description: Current server-side motor bridge status
   /cctv/control/start:
     post:
       summary: Start CCTV Processing
