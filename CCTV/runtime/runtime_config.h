@@ -57,4 +57,5 @@ struct RuntimeConfig {
     ControlTlsConfig control_tls;
 };
 
+RuntimeConfig LoadRuntimeConfigFromEnvironment();
 const RuntimeConfig& GetRuntimeConfig();

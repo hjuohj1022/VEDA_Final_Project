@@ -19,8 +19,9 @@ int ParsePositiveEnvOrDefault(const char* name, const int defaultValue) {
     }
     return static_cast<int>(parsed);
 }
+}  // namespace
 
-RuntimeConfig BuildRuntimeConfig() {
+RuntimeConfig LoadRuntimeConfigFromEnvironment() {
     RuntimeConfig cfg;
     cfg.control_client_read_timeout_ms =
         ParsePositiveEnvOrDefault("VEDA_CONTROL_CLIENT_READ_TIMEOUT_MS", cfg.control_client_read_timeout_ms);
@@ -30,9 +31,8 @@ RuntimeConfig BuildRuntimeConfig() {
         ParsePositiveEnvOrDefault("VEDA_PROXY_MAX_CONCURRENT_CLIENTS", cfg.proxy_max_concurrent_clients);
     return cfg;
 }
-}  // namespace
 
 const RuntimeConfig& GetRuntimeConfig() {
-    static const RuntimeConfig cfg = BuildRuntimeConfig();
+    static const RuntimeConfig cfg = LoadRuntimeConfigFromEnvironment();
     return cfg;
 }
