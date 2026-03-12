@@ -2,6 +2,12 @@
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import "common"
+import "view"
+import "playback"
+import "thermal"
+import "sidebar"
+import "dialogs"
 
 ApplicationWindow {
     id: window

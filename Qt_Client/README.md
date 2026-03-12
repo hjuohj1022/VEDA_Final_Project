@@ -41,7 +41,7 @@
 - 상단 탭의 `Thermal` 진입 시 열화상 스트림 시작, 이탈 시 자동 중지
 - MQTT 청크 프레임(160x120, 16-bit) 재조립 후 QML `Image`로 표시
 - 팔레트(`Jet`/`Gray`/`Iron`) 및 Auto/Manual range 제어 지원
-- 관련 구현: `src/core/BackendThermal.cpp`, `src/ui/qml/ThermalViewer.qml`
+- 관련 구현: `src/core/thermal/BackendThermal.cpp`, `src/ui/qml/thermal/ThermalViewer.qml`
 
 ### 5. CCTV 3D Map (1차: API + WS 수신)
 - Camera Controls의 `3D Map 모드 ON/OFF` 버튼으로 시작/중지
@@ -53,8 +53,8 @@
   - WS 바이너리 프레임 수신/카운트까지 연동
   - OpenCL 포인트클라우드 렌더링은 후속 단계
 - 관련 구현:
-  - `src/core/BackendCctv3dMap.cpp`
-  - `src/ui/qml/SidebarCameraControlsPanel.qml`
+  - `src/core/cctv/BackendCctv3dMap.cpp`
+  - `src/ui/qml/sidebar/SidebarCameraControlsPanel.qml`
 
 ### 6. 인증 (Login / Sign Up)
 - 로그인 화면에서 `Sign In`/`Sign Up` 모드 전환 지원
@@ -69,15 +69,15 @@
 ```text
                  +----------------------------------------------+
                  |              QML UI Layer                    |
-                 | Main.qml / LoginScreen / VideoGrid / Sidebar |
+                 | Main.qml + common/view/playback/sidebar/*    |
                  | - Login / Live / Playback / Export controls  |
                  +------------------------+---------------------+
                                           | signals / bindings
                                           v
                  +------------------------+---------------------+
                  |             Backend Facade (QObject)         |
-                 |                include/core/Backend.h        |
-                 +-----------+----------------+-----------------+
+                  |                include/core/Backend.h        |
+                  +-----------+----------------+-----------------+
                              |                |
                              |                +-----------------------------+
                              |                                              |
@@ -232,66 +232,38 @@ Team3VideoReceiver/
 ├─ certs/
 ├─ include/
 │  └─ core/
-│     └─ Backend.h
+│     ├─ Backend.h                         # QML 공개 퍼사드(API 계약)
+│     └─ internal/
+│        ├─ auth/
+│        ├─ cctv/
+│        ├─ core/
+│        ├─ media/
+│        ├─ rtsp/
+│        ├─ stream/
+│        ├─ sunapi/
+│        └─ thermal/
 ├─ src/
 │  ├─ app/
 │  │  └─ main.cpp
 │  ├─ core/
-│  │  ├─ BackendAuthLogin.cpp
-│  │  ├─ BackendAuthRegister.cpp
-│  │  ├─ BackendAuthSession.cpp
-│  │  ├─ BackendCoreApi.cpp
-│  │  ├─ BackendCoreEnv.cpp
-│  │  ├─ BackendCoreMqtt.cpp
-│  │  ├─ BackendCoreSsl.cpp
-│  │  ├─ BackendCoreState.cpp
-│  │  ├─ BackendCctv3dMap.cpp
-│  │  ├─ BackendInit.cpp
-│  │  ├─ BackendMediaRecordings.cpp
-│  │  ├─ BackendMediaStorage.cpp
-│  │  ├─ BackendPlaybackWsRuntime.cpp
-│  │  ├─ BackendRtspConfig.cpp
-│  │  ├─ BackendRtspPlayback.cpp
-│  │  ├─ BackendRtspProbe.cpp
-│  │  ├─ BackendStreamingWs.cpp
-│  │  ├─ BackendSunapiDisplay.cpp
-│  │  ├─ BackendSunapiExportDownload.cpp
-│  │  ├─ BackendSunapiExportFfmpeg.cpp
-│  │  ├─ BackendSunapiExportHttp.cpp
-│  │  ├─ BackendSunapiExportParse.cpp
-│  │  ├─ BackendSunapiExportWsMux.cpp
-│  │  ├─ BackendSunapiExportWsPrep.cpp
-│  │  ├─ BackendSunapiExportWsRtsp.cpp
-│  │  ├─ BackendSunapiExportWsSession.cpp
-│  │  ├─ BackendSunapiPtz.cpp
-│  │  ├─ BackendSunapiTimeline.cpp
-│  │  ├─ BackendSunapiTimelineMonth.cpp
-│  │  └─ BackendThermal.cpp
+│  │  ├─ auth/
+│  │  ├─ cctv/
+│  │  ├─ core/
+│  │  ├─ media/
+│  │  ├─ rtsp/
+│  │  ├─ stream/
+│  │  ├─ sunapi/
+│  │  └─ thermal/
 │  └─ ui/
 │     └─ qml/
+│        ├─ common/
+│        ├─ view/
+│        ├─ playback/
+│        ├─ thermal/
+│        ├─ sidebar/
+│        ├─ dialogs/
 │        ├─ components/
-│        │  ├─ IconButton.qml
-│        │  ├─ SidebarControlButton.qml
-│        │  └─ SidebarDisplaySlider.qml
-│        ├─ Header.qml
-│        ├─ InlineMainViewContent.qml
-│        ├─ LoginScreen.qml
-│        ├─ Main.qml
-│        ├─ PlaybackContent.qml
-│        ├─ PlaybackExportSaveDialog.qml
-│        ├─ PlaybackScreen.qml
-│        ├─ RtspSettingsDialog.qml
-│        ├─ Sidebar.qml
-│        ├─ SidebarCameraControlsPanel.qml
-│        ├─ SidebarPlaybackControlsPanel.qml
-│        ├─ SidebarStore.qml
-│        ├─ SidebarSystemMetricsPanel.qml
-│        ├─ StatusDialog.qml
-│        ├─ ThermalContent.qml
-│        ├─ ThermalViewer.qml
-│        ├─ ViewGridContent.qml
-│        ├─ VideoGrid.qml
-│        └─ VideoPlayer.qml
+│        └─ Main.qml
 ├─ .editorconfig
 ├─ .env
 ├─ .gitignore
@@ -300,70 +272,44 @@ Team3VideoReceiver/
 └─ README.md
 ```
 
-## 소스 코드 2차 리팩토링 요약
+## 헤더 리팩토링(1차) 요약
 
-대형 단일 파일을 기능 도메인 기준으로 분리해 책임 경계를 명확히 정리했습니다.
+`Backend`를 QML용 퍼사드(API 계약)로 유지하고 내부 구현을 서비스 계층으로 분리했습니다.
 
-- `Backend.cpp` -> `BackendInit.cpp`, `BackendPlaybackWsRuntime.cpp`
-- `BackendCore.cpp` -> `BackendCoreEnv.cpp`, `BackendCoreSsl.cpp`, `BackendCoreMqtt.cpp`, `BackendCoreApi.cpp`, `BackendCoreState.cpp`
-- `BackendMedia.cpp` -> `BackendMediaRecordings.cpp`, `BackendMediaStorage.cpp`
-- `BackendRtsp.cpp` -> `BackendRtspConfig.cpp`, `BackendRtspPlayback.cpp`, `BackendRtspProbe.cpp`
-- `BackendSunapiDisplay.cpp` 분리로 표시 설정 API 처리 책임 분리
-- `BackendThermal.cpp` 분리로 열화상 MQTT 프레임 처리/팔레트 렌더링 분리
-- `BackendSunapiExport.cpp` ->
-  `BackendSunapiExportHttp.cpp`,
-  `BackendSunapiExportParse.cpp`,
-  `BackendSunapiExportFfmpeg.cpp`,
-  `BackendSunapiExportDownload.cpp`,
-  `BackendSunapiExportWsPrep.cpp`,
-  `BackendSunapiExportWsSession.cpp`,
-  `BackendSunapiExportWsRtsp.cpp`,
-  `BackendSunapiExportWsMux.cpp`
-- SUNAPI/PTZ/타임라인 분리
-  - `BackendSunapiPtz.cpp`
-  - `BackendSunapiTimeline.cpp`
-  - `BackendSunapiTimelineMonth.cpp`
+- `include/core/Backend.h`
+  - `Q_PROPERTY`, `Q_INVOKABLE`, `signals` 중심 공개 인터페이스 유지
+- 내부 상태/헬퍼
+  - `include/core/internal/core/Backend_p.h`로 이동
+- 도메인별 서비스 헤더
+  - `include/core/internal/<domain>/*Service.h`
+- 구현 파일은 도메인 폴더로 정리
+  - `src/core/<domain>/*.cpp`
+- 공개 인터페이스와 내부 구현의 의존성 경계 명확화
+  - 빌드 영향 범위 축소
+  - 헤더 include 충돌 감소
 
-## QML UI 분리(1차) 요약
+## QML 디렉토리 개편 요약
 
-동작 변경 없이 `Main.qml`의 책임을 줄이고 화면/패널/다이얼로그를 기능별로 분리했습니다.
+동작 변경 없이 기능 기준으로 폴더를 재구성했습니다.
 
-- 화면 콘텐츠 분리
-  - `ViewGridContent.qml`
-  - `PlaybackContent.qml`
-  - `ThermalContent.qml`
-  - `InlineMainViewContent.qml`
-- 다이얼로그 분리
-  - `PlaybackExportSaveDialog.qml`
-  - `RtspSettingsDialog.qml`
-  - `StatusDialog.qml`
-- Sidebar 하위 패널 분리
-  - `SidebarSystemMetricsPanel.qml`
-  - `SidebarCameraControlsPanel.qml`
-  - `SidebarPlaybackControlsPanel.qml`
-- 공통 상태 스토어 분리
-  - `SidebarStore.qml`
-- Sidebar -> Store 백엔드 전달 안정화
-  - `backendObject` 명시 프로퍼티를 통해 전달
-  - self-binding으로 인한 `undefined`/`Connections target` 경고 방지
+- 진입점
+  - `src/ui/qml/Main.qml`
+- 공통
+  - `src/ui/qml/common/*`
+- 화면 콘텐츠
+  - `src/ui/qml/view/*`
+  - `src/ui/qml/playback/*`
+  - `src/ui/qml/thermal/*`
+- 사이드바
+  - `src/ui/qml/sidebar/*`
+- 다이얼로그
+  - `src/ui/qml/dialogs/*`
+- 재사용 컴포넌트
+  - `src/ui/qml/components/*`
 
-### 리팩토링 중 발생한 잔버그와 수정 내역
-
-- 증상: Export 진행 중 컴파일 에러(람다 캡처 누락/미정의 심볼/헤더 누락)
-  - 원인: 함수 분리 과정에서 의존 유틸 및 `this` 캡처, include 목록 누락
-  - 조치: 분리된 파일별 include/시그니처/람다 캡처 재정렬
-
-- 증상: Export 취소 시 파일 잠김 또는 삭제 실패
-  - 원인: WebSocket/`QNetworkReply`/`QProcess` 종료 순서와 파일 핸들 해제 타이밍 충돌
-  - 조치: 취소 시그널에서 네트워크/프로세스 선종료 후 파일 삭제 재시도(`removeFileWithRetry`) 적용
-
-- 증상: 리팩토링 후 fallback 경로(FFmpeg -> WS)가 비정상 종료되거나 재시작 루프 발생
-  - 원인: 실패/취소 상태 플래그와 fallback 트리거 경합
-  - 조치: 취소 플래그 우선 처리, 완료/실패/취소 공통 종료 경로 단일화
-
-- 증상: 주석 자동 치환 이후 의미 없는 주석/깨진 한글 발생
-  - 원인: 기계적 주석 치환 및 인코딩 처리 실수
-  - 조치: 핵심 분기(에러/fallback/리소스 정리) 중심 자연어 주석으로 재작성, 깨진 주석 전수 복구
+참고:
+- QML 파일 이동에 맞춰 `CMakeLists.txt`의 `qt_add_qml_module(... QML_FILES ...)` 경로를 함께 갱신했습니다.
+- 폴더 간 참조는 상대 import 경로로 정리했습니다.
 
 ## 빌드
 

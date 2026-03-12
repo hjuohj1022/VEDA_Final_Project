@@ -4,22 +4,44 @@
 #include <QObject>
 #include <QHash>
 #include <QMap>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QPointer>
-#include <QSslConfiguration>
-#include <QMqttClient>
-#include <QTimer>
 #include <QUrl>
 #include <QVariant>
-#include <QWebSocket>
 #include <QStringList>
+
 #include <functional>
-class QUdpSocket;
-class QProcess;
+#include <memory>
+
 class QJsonObject;
 class QFile;
+class QNetworkReply;
+class QNetworkRequest;
+class BackendPrivate;
+class BackendAuthSessionService;
+class BackendAuthRequestService;
+class BackendRtspConfigService;
+class BackendRtspPlaybackService;
+class BackendSunapiDisplayService;
+class BackendThermalService;
+class BackendSunapiPtzService;
+class BackendRtspProbeService;
+class BackendMediaRecordingsService;
+class BackendMediaStorageService;
+class BackendSunapiTimelineService;
+class BackendCctv3dMapService;
+class BackendStreamingWsService;
+class BackendPlaybackWsRuntimeService;
+class BackendCoreSslService;
+class BackendCoreMqttService;
+class BackendInitService;
+class BackendCoreApiService;
+class BackendCoreEnvService;
+class BackendCoreStateService;
+class BackendSunapiExportDownloadService;
+class BackendSunapiExportFfmpegService;
+class BackendSunapiExportHttpService;
+class BackendSunapiExportWsRtspService;
+class BackendSunapiExportWsSessionService;
+class BackendSunapiExportWsMuxService;
 
 class Backend : public QObject
 {
@@ -36,17 +58,19 @@ class Backend : public QObject
     Q_PROPERTY(QString rtspIp READ rtspIp NOTIFY rtspIpChanged)
     Q_PROPERTY(QString rtspPort READ rtspPort NOTIFY rtspPortChanged)
 
-    // 라이브 메트릭 정보
+    // Live metrics
     Q_PROPERTY(int activeCameras READ activeCameras WRITE setActiveCameras NOTIFY activeCamerasChanged)
     Q_PROPERTY(int currentFps READ currentFps WRITE setCurrentFps NOTIFY currentFpsChanged)
     Q_PROPERTY(int latency READ latency WRITE setLatency NOTIFY latencyChanged)
 
-    // Storage info
+    // Storage/system info
     Q_PROPERTY(QString storageUsed READ storageUsed NOTIFY storageChanged)
     Q_PROPERTY(QString storageTotal READ storageTotal NOTIFY storageChanged)
     Q_PROPERTY(int storagePercent READ storagePercent NOTIFY storageChanged)
     Q_PROPERTY(int detectedObjects READ detectedObjects NOTIFY detectedObjectsChanged)
     Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
+
+    // Thermal/display info
     Q_PROPERTY(QString thermalFrameDataUrl READ thermalFrameDataUrl NOTIFY thermalFrameDataUrlChanged)
     Q_PROPERTY(QString thermalInfoText READ thermalInfoText NOTIFY thermalInfoTextChanged)
     Q_PROPERTY(bool thermalStreaming READ thermalStreaming NOTIFY thermalStreamingChanged)
@@ -66,47 +90,48 @@ public:
     ~Backend();
 
     bool isLoggedIn() const;
-    QString userId() const { return m_userId; }
-    int sessionRemainingSeconds() const { return m_sessionRemainingSeconds; }
-    bool loginLocked() const { return m_loginLocked; }
-    int loginFailedAttempts() const { return m_loginFailedAttempts; }
-    int loginMaxAttempts() const { return m_loginMaxAttempts; }
+    QString userId() const;
+    int sessionRemainingSeconds() const;
+    bool loginLocked() const;
+    int loginFailedAttempts() const;
+    int loginMaxAttempts() const;
     QString serverUrl() const;
+
     QString rtspIp() const;
     void setRtspIp(const QString &ip);
     QString rtspPort() const;
     void setRtspPort(const QString &port);
 
-    int activeCameras() const { return m_activeCameras; }
+    int activeCameras() const;
     void setActiveCameras(int count);
 
-    int currentFps() const { return m_currentFps; }
+    int currentFps() const;
     void setCurrentFps(int fps);
 
-    int latency() const { return m_latency; }
+    int latency() const;
     void setLatency(int ms);
 
-    QString storageUsed() const { return m_storageUsed; }
-    QString storageTotal() const { return m_storageTotal; }
-    int storagePercent() const { return m_storagePercent; }
-    int detectedObjects() const { return m_detectedObjects; }
-    QString networkStatus() const { return m_networkStatus; }
-    QString thermalFrameDataUrl() const { return m_thermalFrameDataUrl; }
-    QString thermalInfoText() const { return m_thermalInfoText; }
-    bool thermalStreaming() const { return m_thermalStreaming; }
-    QString thermalPalette() const { return m_thermalPalette; }
-    bool thermalAutoRange() const { return m_thermalAutoRange; }
-    int thermalAutoRangeWindowPercent() const { return m_thermalAutoRangeWindowPercent; }
-    int thermalManualMin() const { return m_thermalManualMin; }
-    int thermalManualMax() const { return m_thermalManualMax; }
-    int displayContrast() const { return m_displayContrast; }
-    int displayBrightness() const { return m_displayBrightness; }
-    int displaySharpnessLevel() const { return m_displaySharpnessLevel; }
-    bool displaySharpnessEnabled() const { return m_displaySharpnessEnabled; }
-    int displayColorLevel() const { return m_displayColorLevel; }
+    QString storageUsed() const;
+    QString storageTotal() const;
+    int storagePercent() const;
+    int detectedObjects() const;
+    QString networkStatus() const;
 
-    // QML 호출 가능 인터페이스
-    // 인증/세션
+    QString thermalFrameDataUrl() const;
+    QString thermalInfoText() const;
+    bool thermalStreaming() const;
+    QString thermalPalette() const;
+    bool thermalAutoRange() const;
+    int thermalAutoRangeWindowPercent() const;
+    int thermalManualMin() const;
+    int thermalManualMax() const;
+    int displayContrast() const;
+    int displayBrightness() const;
+    int displaySharpnessLevel() const;
+    bool displaySharpnessEnabled() const;
+    int displayColorLevel() const;
+
+    // Auth/session
     Q_INVOKABLE void login(QString id, QString pw);
     Q_INVOKABLE void registerUser(QString id, QString pw);
     Q_INVOKABLE void skipLoginTemporarily();
@@ -114,7 +139,7 @@ public:
     Q_INVOKABLE void resetSessionTimer();
     Q_INVOKABLE bool adminUnlock(QString adminCode);
 
-    // RTSP 설정/점검
+    // RTSP config
     Q_INVOKABLE bool updateRtspIp(QString ip);
     Q_INVOKABLE bool updateRtspConfig(QString ip, QString port);
     Q_INVOKABLE bool resetRtspConfigToEnv();
@@ -122,7 +147,7 @@ public:
     Q_INVOKABLE void useEnvRtspCredentials();
     Q_INVOKABLE void probeRtspEndpoint(QString ip, QString port, int timeoutMs = 1200);
 
-    // 녹화 목록/파일 관리
+    // Recordings/files
     Q_INVOKABLE void refreshRecordings();
     Q_INVOKABLE void deleteRecording(QString name);
     Q_INVOKABLE void renameRecording(QString oldName, QString newName);
@@ -131,7 +156,7 @@ public:
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
 
-    // Playback 제어
+    // Playback
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
     Q_INVOKABLE void preparePlaybackRtsp(int channelIndex, const QString &dateText, const QString &timeText);
     Q_INVOKABLE void loadPlaybackTimeline(int channelIndex, const QString &dateText);
@@ -147,6 +172,8 @@ public:
                                            const QString &endTimeText,
                                            const QString &savePath = QString());
     Q_INVOKABLE void cancelPlaybackExport();
+
+    // Thermal
     Q_INVOKABLE void startThermalStream();
     Q_INVOKABLE void stopThermalStream();
     Q_INVOKABLE void setThermalPalette(const QString &palette);
@@ -162,6 +189,8 @@ public:
     Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
     Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
     Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
+
+    // SUNAPI display + 3D map
     Q_INVOKABLE void sunapiLoadDisplaySettings(int cameraIndex);
     Q_INVOKABLE bool sunapiSetDisplaySettings(int cameraIndex,
                                               int contrast,
@@ -174,7 +203,7 @@ public:
     Q_INVOKABLE void stopCctv3dMapSequence();
 
 signals:
-    // 상태 변경(Property NOTIFY)
+    // Property notify
     void isLoggedInChanged();
     void userIdChanged();
     void sessionRemainingSecondsChanged();
@@ -188,32 +217,31 @@ signals:
     void detectedObjectsChanged();
     void networkStatusChanged();
 
-    // 인증/세션 이벤트
+    // Auth/session events
     void loginSuccess();
     void loginFailed(QString error);
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();
 
-    // 녹화 목록/파일 이벤트
+    // Recordings/file events
     void recordingsLoaded(QVariantList files);
     void recordingsLoadFailed(QString error);
-
     void deleteSuccess();
     void deleteFailed(QString error);
     void renameSuccess();
     void renameFailed(QString error);
 
-    // 다운로드 이벤트(일반 녹화 파일)
+    // Download events
     void downloadProgress(qint64 received, qint64 total);
     void downloadFinished(QString path);
     void downloadError(QString error);
 
-    // RTSP/카메라 제어 이벤트
+    // RTSP/camera events
     void cameraControlMessage(QString message, bool isError);
     void rtspProbeFinished(bool success, QString error);
 
-    // Playback 준비/타임라인 이벤트
+    // Playback prepare/timeline events
     void playbackPrepared(QString url);
     void playbackPrepareFailed(QString error);
     void playbackTimelineLoaded(int channelIndex, QString dateText, QVariantList segments);
@@ -221,16 +249,18 @@ signals:
     void playbackMonthRecordedDaysLoaded(int channelIndex, QString yearMonth, QVariantList days);
     void playbackMonthRecordedDaysFailed(QString error);
 
-    // Streaming WS 이벤트
+    // Streaming WS events
     void streamingWsStateChanged(QString state);
     void streamingWsFrame(QString direction, QString hexPayload);
     void streamingWsError(QString error);
 
-    // Playback Export 수명주기 이벤트
+    // Playback export lifecycle
     void playbackExportStarted(QString message);
     void playbackExportProgress(int percent, QString message);
     void playbackExportFinished(QString path);
     void playbackExportFailed(QString error);
+
+    // Thermal/display notify
     void thermalFrameDataUrlChanged();
     void thermalInfoTextChanged();
     void thermalStreamingChanged();
@@ -245,38 +275,69 @@ private slots:
     void onSessionTick();
 
 private:
-    // Core/SSL 유틸
+    friend class BackendAuthSessionService;
+    friend class BackendAuthRequestService;
+    friend class BackendRtspConfigService;
+    friend class BackendRtspPlaybackService;
+    friend class BackendSunapiDisplayService;
+    friend class BackendThermalService;
+    friend class BackendSunapiPtzService;
+    friend class BackendRtspProbeService;
+    friend class BackendMediaRecordingsService;
+    friend class BackendMediaStorageService;
+    friend class BackendSunapiTimelineService;
+    friend class BackendCctv3dMapService;
+    friend class BackendStreamingWsService;
+    friend class BackendPlaybackWsRuntimeService;
+    friend class BackendCoreSslService;
+    friend class BackendCoreMqttService;
+    friend class BackendInitService;
+    friend class BackendCoreApiService;
+    friend class BackendCoreEnvService;
+    friend class BackendCoreStateService;
+    friend class BackendSunapiExportDownloadService;
+    friend class BackendSunapiExportFfmpegService;
+    friend class BackendSunapiExportHttpService;
+    friend class BackendSunapiExportWsRtspService;
+    friend class BackendSunapiExportWsSessionService;
+    friend class BackendSunapiExportWsMuxService;
+
+    // Core/SSL helpers
     void setupSslConfiguration();
     void applySslIfNeeded(QNetworkRequest &request) const;
     void applyAuthIfNeeded(QNetworkRequest &request) const;
     void attachIgnoreSslErrors(QNetworkReply *reply, const QString &tag) const;
 
-    // Core API URL/Request 유틸
+    // Core API URL/request helpers
     QUrl buildApiUrl(const QString &path, const QMap<QString, QString> &query = {}) const;
     QNetworkRequest makeApiJsonRequest(const QString &path, const QMap<QString, QString> &query = {}) const;
 
-    // SUNAPI 공통 에러 유틸
+    // SUNAPI common body error helper
     bool isSunapiBodyError(const QString &body, QString *reason = nullptr) const;
 
-    // Core 초기화
+    // Core initialization
     void loadEnv();
     void setupMqtt();
 
-    // SUNAPI PTZ/Focus 런타임
+    // SUNAPI PTZ/Focus helpers
     bool sendSunapiPtzFocusCommand(int cameraIndex,
                                    const QString &command,
                                    const QString &actionLabel);
+
+    // CCTV 3D map sequence helpers
     void runCctv3dMapSequenceStep(int sequenceToken, int step);
     void pollCctv3dMapMoveStatus(int sequenceToken);
     bool postCctvControlStart(int sequenceToken);
     bool postCctvControlStream(int sequenceToken);
     void connectCctvStreamWs(int sequenceToken);
     void disconnectCctvStreamWs(bool expectedStop = false);
+
+    // Playback WS helpers
     QString ensurePlaybackWsSdpSource();
     void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
     void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
 
-    // Playback Export 진입점
+    // Playback export entry helpers
     void requestPlaybackExportViaWs(int channelIndex,
                                     const QString &dateText,
                                     const QString &startTimeText,
@@ -289,7 +350,7 @@ private:
                                             const QString &outPath,
                                             const std::function<void()> &onFailedFallback);
 
-    // Playback Export 준비/경로/인증 유틸
+    // Playback export preparation helpers
     QString resolvePlaybackExportFfmpegBinary() const;
     bool buildPlaybackExportWsOutputPath(const QString &savePath,
                                          bool *wantsAvi,
@@ -297,7 +358,7 @@ private:
                                          QString *finalOutPath,
                                          QString *error);
 
-    // Playback Export RTSP/RTP 처리
+    // Playback export RTSP/RTP processing
     QByteArray buildPlaybackExportRtspRequest(int &nextCseq,
                                               const QString &authHeader,
                                               const QString &session,
@@ -339,7 +400,7 @@ private:
                                           const std::function<void(const QByteArray &)> &sendRtsp,
                                           const std::function<void(const QString &)> &failWith);
 
-    // Playback Export 응답 파싱/다운로드
+    // Playback export response parsing/download
     QString sunapiExportExtractKvValue(const QString &text, const QStringList &keys) const;
     QString sunapiExportExtractJsonString(const QJsonObject &obj, const QStringList &keys) const;
     int sunapiExportParseHmsToSec(const QString &hms) const;
@@ -354,133 +415,16 @@ private:
                                     QString *downloadUrl,
                                     QString *reason) const;
     void playbackExportStartDownload(const QUrl &downloadUrl, const QString &outPath);
+
+    // Thermal pipeline helpers
     void handleThermalChunkMessage(const QByteArray &message);
-    void processThermalFrame(const QMap<int, QByteArray> &chunks, int totalChunks, quint16 minVal, quint16 maxVal, int frameId);
+    void processThermalFrame(const QMap<int, QByteArray> &chunks,
+                             int totalChunks,
+                             quint16 minVal,
+                             quint16 maxVal,
+                             int frameId);
 
-    // 공통 런타임 상태
-    QNetworkAccessManager *m_manager;
-    QMap<QString, QString> m_env;
-    QTimer *m_storageTimer;
-    QTimer *m_sessionTimer;
-
-    // 인증/세션 상태
-    bool m_isLoggedIn = false;
-    QString m_userId;
-    QString m_authToken;
-    int m_sessionRemainingSeconds = 0;
-    const int m_sessionTimeoutSeconds = 300;
-    bool m_loginLocked = false;
-    int m_loginFailedAttempts = 0;
-    const int m_loginMaxAttempts = 5;
-
-    // RTSP 설정 상태
-    bool m_useCustomRtspConfig = false;
-    QString m_rtspIp;
-    QString m_rtspPort;
-    QString m_rtspMainPathTemplateOverride;
-    QString m_rtspSubPathTemplateOverride;
-
-    bool m_useCustomRtspAuth = false;
-    QString m_rtspUsernameOverride;
-    QString m_rtspPasswordOverride;
-
-    // 메트릭 데이터
-    int m_activeCameras = 0;
-    int m_currentFps = 0;
-    int m_latency = 0;
-
-    // 스토리지 데이터
-    QString m_storageUsed = "0 GB";
-    QString m_storageTotal = "0 GB";
-    int m_storagePercent = 0;
-
-    QMqttClient *m_mqttClient = nullptr;
-    int m_detectedObjects = 0;
-    QString m_networkStatus = "Disconnected";
-
-    // 다운로드/인증 요청 상태
-    QNetworkReply *m_downloadReply = nullptr;
-    QPointer<QNetworkReply> m_loginReply;
-    bool m_loginInProgress = false;
-    QPointer<QNetworkReply> m_registerReply;
-    bool m_registerInProgress = false;
-    QString m_tempFilePath;
-
-    // SSL/WS 상태
-    QSslConfiguration m_sslConfig;
-    bool m_sslConfigReady = false;
-    bool m_sslIgnoreErrors = false;
-    QWebSocket *m_streamingWs = nullptr;
-    QTimer *m_playbackWsKeepaliveTimer = nullptr;
-    bool m_playbackWsActive = false;
-    bool m_playbackWsPlaySent = false;
-    bool m_playbackWsPaused = false;
-    int m_playbackWsNextCseq = 1;
-    int m_playbackWsFinalSetupCseq = 0;
-    QString m_playbackWsUri;
-    QString m_playbackWsAuthHeader;
-    QString m_playbackWsSession;
-    QUdpSocket *m_playbackRtpOutSocket = nullptr;
-    QString m_playbackWsSdpPath;
-    int m_playbackRtpVideoPort = 5004;
-    int m_playbackRtpVideoChannel = 2;
-    int m_playbackRtpVideoAltChannel = 3;
-    int m_playbackWsH264SetupCseq = -1;
-    int m_playbackRtpPayloadType = 96;
-    bool m_playbackWsSdpPublished = false;
-    QByteArray m_playbackSps;
-    QByteArray m_playbackPps;
-    QByteArray m_playbackFuBuffer;
-    int m_playbackFuNalType = 0;
-    QByteArray m_playbackInterleavedBuffer;
-    int m_playbackValidRtpCount = 0;
-
-    // Playback Export 상태
-    QPointer<QWebSocket> m_playbackExportWs;
-    QPointer<QProcess> m_playbackExportFfmpegProc;
-    QPointer<QNetworkReply> m_playbackExportDownloadReply;
-    bool m_playbackExportCancelRequested = false;
-    bool m_playbackExportInProgress = false;
-    QString m_playbackExportOutPath;
-    QString m_playbackExportFinalPath;
-
-    // Thermal stream 상태
-    QString m_thermalFrameDataUrl;
-    QString m_thermalInfoText = "Thermal idle";
-    bool m_thermalStreaming = false;
-    QString m_thermalPalette = "Jet";
-    bool m_thermalAutoRange = true;
-    int m_thermalAutoRangeWindowPercent = 96;
-    int m_thermalManualMin = 7000;
-    int m_thermalManualMax = 10000;
-    int m_thermalCurrentFrameId = -1;
-    int m_thermalLastFrameId = -1;
-    int m_thermalTotalChunksExpected = 0;
-    qint64 m_thermalFrameStartedMs = 0;
-    qint64 m_thermalLastDisplayMs = 0;
-    double m_thermalDisplayFps = 0.0;
-    QMap<int, QByteArray> m_thermalFrameChunks;
-    quint16 m_thermalHeaderMin = 0;
-    quint16 m_thermalHeaderMax = 0;
-    int m_displayContrast = 50;
-    int m_displayBrightness = 50;
-    int m_displaySharpnessLevel = 12;
-    bool m_displaySharpnessEnabled = true;
-    int m_displayColorLevel = 50;
-
-    // CCTV 3D map state (phase 1: API + WS receive)
-    QPointer<QWebSocket> m_cctvStreamWs;
-    QPointer<QTimer> m_cctv3dMapStepTimer;
-    int m_cctv3dMapSequenceToken = 0;
-    int m_cctv3dMapPendingStep = 0;
-    int m_cctv3dMapMoveStatusPollCount = 0;
-    int m_cctv3dMapStartRetryCount = 0;
-    int m_cctv3dMapCameraIndex = -1;
-    int m_cctv3dMapWsActiveToken = 0;
-    bool m_cctv3dMapStoppingExpected = false;
-    qint64 m_cctv3dMapFrameCount = 0;
-    qint64 m_cctv3dMapTotalBytes = 0;
+    std::unique_ptr<BackendPrivate> d_ptr;
 };
 
 #endif // BACKEND_H
-
