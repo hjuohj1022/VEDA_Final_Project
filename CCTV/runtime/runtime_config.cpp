@@ -13,10 +13,11 @@ int ParsePositiveEnvOrDefault(const char* name, const int defaultValue) {
 
     char* end = nullptr;
     const long parsed = std::strtol(raw, &end, 10);
-    free(raw);
     if (end == raw || (end && *end != '\0') || parsed <= 0) {
+        free(raw);
         return defaultValue;
     }
+    free(raw);
     return static_cast<int>(parsed);
 }
 }  // namespace
