@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <sstream>
@@ -52,6 +53,24 @@ std::string AvErrorToString(const int code) {
     return std::string(buffer.data());
 }
 
+int ParseEnvInt(const char* name, const int defaultValue) {
+    char* raw = nullptr;
+    std::size_t rawLen = 0;
+    if (_dupenv_s(&raw, &rawLen, name) != 0 || !raw || rawLen == 0) {
+        free(raw);
+        return defaultValue;
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(raw, &end, 10);
+    const bool invalid = (end == raw || (end && *end != '\0') || parsed < 0);
+    free(raw);
+    if (invalid) {
+        return defaultValue;
+    }
+    return static_cast<int>(parsed);
+}
+
 struct DictionaryGuard {
     AVDictionary* dict = nullptr;
 
@@ -94,7 +113,11 @@ struct FfmpegRtspCapture::Impl {
     int readTimeoutMs = 0;
     bool deadlineActive = false;
     std::chrono::steady_clock::time_point deadline{};
-    std::string openedUrl;
+    RuntimeConfig cfgSnapshot{};
+    std::string configuredUrl;
+    int successfulReadCount = 0;
+    const int failAfterReadsForTest = ParseEnvInt("VEDA_TEST_CAPTURE_FAIL_AFTER_READS", -1);
+    bool failAfterReadsTriggered = false;
 
     ~Impl() {
         Close();
@@ -140,7 +163,6 @@ struct FfmpegRtspCapture::Impl {
         }
 
         videoStreamIndex = -1;
-        openedUrl.clear();
     }
 
     bool IsOpened() const {
@@ -148,6 +170,8 @@ struct FfmpegRtspCapture::Impl {
     }
 
     bool Open(const std::string& url, const RuntimeConfig& cfg, std::string& error) {
+        configuredUrl = url;
+        cfgSnapshot = cfg;
         Close();
 
         openTimeoutMs = cfg.open_timeout_ms;
@@ -230,9 +254,16 @@ struct FfmpegRtspCapture::Impl {
             return false;
         }
 
-        openedUrl = url;
         error.clear();
         return true;
+    }
+
+    bool Reopen(std::string& error) {
+        if (configuredUrl.empty()) {
+            error = "capture has no remembered url";
+            return false;
+        }
+        return Open(configuredUrl, cfgSnapshot, error);
     }
 
     bool ConvertFrame(const AVFrame* src, cv::Mat& outFrame, std::string& error) {
@@ -286,6 +317,15 @@ struct FfmpegRtspCapture::Impl {
             return false;
         }
 
+        if (!failAfterReadsTriggered &&
+            failAfterReadsForTest >= 0 &&
+            successfulReadCount >= failAfterReadsForTest) {
+            failAfterReadsTriggered = true;
+            Close();
+            error = "test injected read failure after " + std::to_string(successfulReadCount) + " successful reads";
+            return false;
+        }
+
         while (true) {
             ArmDeadline(readTimeoutMs);
             const int readErr = av_read_frame(formatCtx, packet);
@@ -334,6 +374,7 @@ struct FfmpegRtspCapture::Impl {
                 if (!ok) {
                     return false;
                 }
+                successfulReadCount++;
                 return true;
             }
         }
@@ -354,6 +395,10 @@ bool FfmpegRtspCapture::Open(const std::string& url, const RuntimeConfig& cfg, s
 
 bool FfmpegRtspCapture::Read(cv::Mat& frame, std::string& error) {
     return impl_->Read(frame, error);
+}
+
+bool FfmpegRtspCapture::Reopen(std::string& error) {
+    return impl_->Reopen(error);
 }
 
 bool FfmpegRtspCapture::IsOpened() const {

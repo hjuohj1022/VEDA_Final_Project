@@ -93,6 +93,7 @@ add_custom_command(
 add_executable(depth_trt
     ${CUDA_DEPTH_WORKER_OBJ}
     runtime/command_dispatcher.cpp
+    runtime/control_server_common.cpp
     runtime/ffmpeg_capture.cpp
     runtime/launch_options.cpp
     runtime/main.cpp
