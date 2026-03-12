@@ -93,6 +93,7 @@ add_custom_command(
 add_executable(depth_trt
     ${CUDA_DEPTH_WORKER_OBJ}
     runtime/command_dispatcher.cpp
+    runtime/control_server_common.cpp
     runtime/ffmpeg_capture.cpp
     runtime/launch_options.cpp
     runtime/main.cpp
@@ -117,9 +118,17 @@ add_executable(request_parser_smoke
     runtime/request_validator.cpp
 )
 
+add_executable(launch_runtime_smoke
+    runtime/launch_runtime_smoke.cpp
+    runtime/launch_options.cpp
+    runtime/request.cpp
+    runtime/runtime_config.cpp
+)
+
 add_executable(ffmpeg_capture_probe
     runtime/ffmpeg_capture.cpp
     runtime/ffmpeg_capture_probe.cpp
+    runtime/logging.cpp
     runtime/runtime_config.cpp
 )
 
@@ -156,6 +165,7 @@ if(ENABLE_MSVC_ANALYZE)
 endif()
 
 add_test(NAME request_parser_smoke COMMAND request_parser_smoke)
+add_test(NAME launch_runtime_smoke COMMAND launch_runtime_smoke)
 
 # 7. 링크
 target_link_libraries(depth_trt debug ${OPENCV_PATH}/x64/vc16/lib/opencv_world4100d.lib)

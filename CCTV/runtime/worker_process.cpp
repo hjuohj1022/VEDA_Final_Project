@@ -129,9 +129,7 @@ void WorkerProcessManager::Shutdown() {
         return;
     }
 
-    TerminateProcess(procInfo_.hProcess, 0);
-    WaitForSingleObject(procInfo_.hProcess, 2000);
-    CleanupHandlesLocked();
+    TerminateAndCleanupLocked();
 }
 
 bool WorkerProcessManager::SpawnLocked(std::string& outErr) {
@@ -190,10 +188,23 @@ bool WorkerProcessManager::WaitUntilReadyLocked(std::string& outErr) {
 
         if (GetTickCount() - startTick >= kWorkerStartupTimeoutMs) {
             outErr = "worker startup timeout on port " + std::to_string(port_);
+            TerminateAndCleanupLocked();
             return false;
         }
         Sleep(kWorkerConnectRetrySleepMs);
     }
+}
+
+void WorkerProcessManager::TerminateAndCleanupLocked(const DWORD waitMs) noexcept {
+    if (!hasProcess_) {
+        return;
+    }
+
+    if (procInfo_.hProcess != nullptr) {
+        TerminateProcess(procInfo_.hProcess, 0);
+        WaitForSingleObject(procInfo_.hProcess, waitMs);
+    }
+    CleanupHandlesLocked();
 }
 
 void WorkerProcessManager::CleanupHandlesLocked() noexcept {

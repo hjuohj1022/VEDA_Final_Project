@@ -14,6 +14,7 @@ namespace {
 struct ProbeOptions {
     int channel = RTSP_CHANNEL;
     int readFrames = 1;
+    bool reopenBeforeRead = false;
     std::string urlOverride;
 };
 
@@ -23,6 +24,7 @@ void PrintUsage() {
         << "  --channel=<0-3>      RTSP channel index (default: app_config.h RTSP_CHANNEL)\n"
         << "  --url=<rtsps://...>  Override RTSP URL directly\n"
         << "  --read-frames=<n>    Frames to decode after open (default: 1)\n"
+        << "  --reopen-before-read Reopen capture once after open and before read\n"
         << "  --help               Show this message\n";
 }
 
@@ -65,6 +67,10 @@ bool ParseArgs(const int argc, char** argv, ProbeOptions& options) {
         }
         if (StartsWith(arg, "--url=")) {
             options.urlOverride = arg.substr(6);
+            continue;
+        }
+        if (arg == "--reopen-before-read") {
+            options.reopenBeforeRead = true;
             continue;
         }
         std::cerr << "[FFMPEG_PROBE][ERR] unknown argument: " << arg << "\n";
@@ -126,6 +132,20 @@ int main(int argc, char** argv) {
     const auto openEnd = std::chrono::steady_clock::now();
     const auto openMs = std::chrono::duration_cast<std::chrono::milliseconds>(openEnd - openStart).count();
     std::cout << "[FFMPEG_PROBE] open_ms=" << openMs << "\n";
+
+    if (options.reopenBeforeRead) {
+        const auto reopenStart = std::chrono::steady_clock::now();
+        if (!capture.Reopen(captureError)) {
+            const auto reopenEnd = std::chrono::steady_clock::now();
+            const auto reopenMs = std::chrono::duration_cast<std::chrono::milliseconds>(reopenEnd - reopenStart).count();
+            std::cerr << "[FFMPEG_PROBE][ERR] reopen failed after " << reopenMs
+                      << " ms: " << captureError << "\n";
+            return 4;
+        }
+        const auto reopenEnd = std::chrono::steady_clock::now();
+        const auto reopenMs = std::chrono::duration_cast<std::chrono::milliseconds>(reopenEnd - reopenStart).count();
+        std::cout << "[FFMPEG_PROBE] reopen_ms=" << reopenMs << "\n";
+    }
 
     for (int i = 0; i < options.readFrames; ++i) {
         cv::Mat frame;

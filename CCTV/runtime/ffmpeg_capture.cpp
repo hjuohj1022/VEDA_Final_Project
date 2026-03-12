@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <sstream>
@@ -14,11 +15,13 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 }
 
 #include <opencv2/core/mat.hpp>
 
+#include "logging.h"
 #include "runtime_config.h"
 
 namespace {
@@ -52,6 +55,52 @@ std::string AvErrorToString(const int code) {
     return std::string(buffer.data());
 }
 
+int ParseEnvInt(const char* name, const int defaultValue) {
+    char* raw = nullptr;
+    std::size_t rawLen = 0;
+    if (_dupenv_s(&raw, &rawLen, name) != 0 || !raw || rawLen == 0) {
+        free(raw);
+        return defaultValue;
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(raw, &end, 10);
+    const bool invalid = (end == raw || (end && *end != '\0') || parsed < 0);
+    free(raw);
+    if (invalid) {
+        return defaultValue;
+    }
+    return static_cast<int>(parsed);
+}
+
+bool ParseEnvBool(const char* name, const bool defaultValue) {
+    char* raw = nullptr;
+    std::size_t rawLen = 0;
+    if (_dupenv_s(&raw, &rawLen, name) != 0 || !raw || rawLen == 0) {
+        free(raw);
+        return defaultValue;
+    }
+
+    std::string value(raw);
+    free(raw);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+    }
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+    }
+    return defaultValue;
+}
+
+int ResolveInjectedFailureReadCount() {
+    if (!ParseEnvBool("VEDA_ENABLE_TEST_HOOKS", false)) {
+        return -1;
+    }
+    return ParseEnvInt("VEDA_TEST_CAPTURE_FAIL_AFTER_READS", -1);
+}
+
 struct DictionaryGuard {
     AVDictionary* dict = nullptr;
 
@@ -81,6 +130,70 @@ void ApplyCaptureOptions(const RuntimeConfig& cfg, DictionaryGuard& dict) {
         SetOption(dict, key, value);
     }
 }
+
+AVPixelFormat NormalizeDeprecatedPixelFormat(const AVPixelFormat format) {
+    switch (format) {
+        case AV_PIX_FMT_YUVJ420P:
+            return AV_PIX_FMT_YUV420P;
+        case AV_PIX_FMT_YUVJ422P:
+            return AV_PIX_FMT_YUV422P;
+        case AV_PIX_FMT_YUVJ444P:
+            return AV_PIX_FMT_YUV444P;
+        case AV_PIX_FMT_YUVJ440P:
+            return AV_PIX_FMT_YUV440P;
+        case AV_PIX_FMT_YUVJ411P:
+            return AV_PIX_FMT_YUV411P;
+        default:
+            return format;
+    }
+}
+
+bool IsDeprecatedFullRangeFormat(const AVPixelFormat format) {
+    switch (format) {
+        case AV_PIX_FMT_YUVJ420P:
+        case AV_PIX_FMT_YUVJ422P:
+        case AV_PIX_FMT_YUVJ444P:
+        case AV_PIX_FMT_YUVJ440P:
+        case AV_PIX_FMT_YUVJ411P:
+            return true;
+        default:
+            return false;
+    }
+}
+
+int ResolveSourceRange(const AVFrame* frame) {
+    if (!frame) {
+        return 0;
+    }
+    if (frame->color_range == AVCOL_RANGE_JPEG) {
+        return 1;
+    }
+    if (frame->color_range == AVCOL_RANGE_MPEG) {
+        return 0;
+    }
+    return IsDeprecatedFullRangeFormat(static_cast<AVPixelFormat>(frame->format)) ? 1 : 0;
+}
+
+int MapColorSpaceToSwsMatrix(const AVColorSpace colorSpace) {
+    switch (colorSpace) {
+        case AVCOL_SPC_BT709:
+            return SWS_CS_ITU709;
+        case AVCOL_SPC_FCC:
+            return SWS_CS_FCC;
+        case AVCOL_SPC_BT470BG:
+        case AVCOL_SPC_SMPTE170M:
+            return SWS_CS_ITU601;
+        case AVCOL_SPC_SMPTE240M:
+            return SWS_CS_SMPTE240M;
+        case AVCOL_SPC_BT2020_NCL:
+        case AVCOL_SPC_BT2020_CL:
+            return SWS_CS_BT2020;
+        case AVCOL_SPC_RGB:
+        case AVCOL_SPC_UNSPECIFIED:
+        default:
+            return SWS_CS_DEFAULT;
+    }
+}
 }  // namespace
 
 struct FfmpegRtspCapture::Impl {
@@ -94,7 +207,11 @@ struct FfmpegRtspCapture::Impl {
     int readTimeoutMs = 0;
     bool deadlineActive = false;
     std::chrono::steady_clock::time_point deadline{};
-    std::string openedUrl;
+    RuntimeConfig cfgSnapshot{};
+    std::string configuredUrl;
+    int successfulReadCount = 0;
+    const int failAfterReadsForTest = ResolveInjectedFailureReadCount();
+    bool failAfterReadsTriggered = false;
 
     ~Impl() {
         Close();
@@ -140,7 +257,6 @@ struct FfmpegRtspCapture::Impl {
         }
 
         videoStreamIndex = -1;
-        openedUrl.clear();
     }
 
     bool IsOpened() const {
@@ -148,7 +264,14 @@ struct FfmpegRtspCapture::Impl {
     }
 
     bool Open(const std::string& url, const RuntimeConfig& cfg, std::string& error) {
+        configuredUrl = url;
+        cfgSnapshot = cfg;
         Close();
+
+        if (failAfterReadsForTest >= 0 && successfulReadCount == 0 && !failAfterReadsTriggered) {
+            LogWarn("FFmpeg capture test hook enabled: fail after " +
+                    std::to_string(failAfterReadsForTest) + " successful reads");
+        }
 
         openTimeoutMs = cfg.open_timeout_ms;
         readTimeoutMs = cfg.read_timeout_ms;
@@ -230,9 +353,16 @@ struct FfmpegRtspCapture::Impl {
             return false;
         }
 
-        openedUrl = url;
         error.clear();
         return true;
+    }
+
+    bool Reopen(std::string& error) {
+        if (configuredUrl.empty()) {
+            error = "capture has no remembered url";
+            return false;
+        }
+        return Open(configuredUrl, cfgSnapshot, error);
     }
 
     bool ConvertFrame(const AVFrame* src, cv::Mat& outFrame, std::string& error) {
@@ -241,11 +371,14 @@ struct FfmpegRtspCapture::Impl {
             return false;
         }
 
+        const AVPixelFormat srcFormat = NormalizeDeprecatedPixelFormat(
+            static_cast<AVPixelFormat>(src->format));
+
         swsCtx = sws_getCachedContext(
             swsCtx,
             src->width,
             src->height,
-            static_cast<AVPixelFormat>(src->format),
+            srcFormat,
             src->width,
             src->height,
             AV_PIX_FMT_BGR24,
@@ -255,6 +388,18 @@ struct FfmpegRtspCapture::Impl {
             nullptr);
         if (!swsCtx) {
             error = "sws_getCachedContext failed";
+            return false;
+        }
+
+        const int sourceRange = ResolveSourceRange(src);
+        const int destinationRange = 1;
+        const int colorspaceMatrix = MapColorSpaceToSwsMatrix(src->colorspace);
+        const int* coefficients = sws_getCoefficients(colorspaceMatrix);
+        if (sws_setColorspaceDetails(swsCtx,
+                                     coefficients, sourceRange,
+                                     coefficients, destinationRange,
+                                     0, 1 << 16, 1 << 16) < 0) {
+            error = "sws_setColorspaceDetails failed";
             return false;
         }
 
@@ -283,6 +428,15 @@ struct FfmpegRtspCapture::Impl {
     bool Read(cv::Mat& frame, std::string& error) {
         if (!IsOpened()) {
             error = "capture is not open";
+            return false;
+        }
+
+        if (!failAfterReadsTriggered &&
+            failAfterReadsForTest >= 0 &&
+            successfulReadCount >= failAfterReadsForTest) {
+            failAfterReadsTriggered = true;
+            Close();
+            error = "test injected read failure after " + std::to_string(successfulReadCount) + " successful reads";
             return false;
         }
 
@@ -334,6 +488,7 @@ struct FfmpegRtspCapture::Impl {
                 if (!ok) {
                     return false;
                 }
+                successfulReadCount++;
                 return true;
             }
         }
@@ -354,6 +509,10 @@ bool FfmpegRtspCapture::Open(const std::string& url, const RuntimeConfig& cfg, s
 
 bool FfmpegRtspCapture::Read(cv::Mat& frame, std::string& error) {
     return impl_->Read(frame, error);
+}
+
+bool FfmpegRtspCapture::Reopen(std::string& error) {
+    return impl_->Reopen(error);
 }
 
 bool FfmpegRtspCapture::IsOpened() const {

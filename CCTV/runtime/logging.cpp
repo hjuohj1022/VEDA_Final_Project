@@ -6,6 +6,7 @@
 namespace {
 void LogTo(std::ostream& stream, const char* level, const std::string& msg) {
     stream << level << msg << '\n';
+    stream.flush();
 }
 }  // namespace
 

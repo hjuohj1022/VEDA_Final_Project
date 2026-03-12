@@ -74,3 +74,18 @@ int ResolveWorkerPort(const LaunchOptions& options) {
     }
     return kDefaultPort + 1;
 }
+
+bool ValidateLaunchOptions(const LaunchOptions& options, std::string& outErr) {
+    if (options.workerMode) {
+        return true;
+    }
+
+    const int resolvedWorkerPort = ResolveWorkerPort(options);
+    if (resolvedWorkerPort == options.port) {
+        outErr = "[CFG] --worker-port must differ from --port (both resolved to " +
+                 std::to_string(options.port) + ")";
+        return false;
+    }
+
+    return true;
+}
