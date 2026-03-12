@@ -1,0 +1,149 @@
+{
+  "version": 7,
+  "cmakeMinimumRequired": {
+    "major": 3
+  },
+  "configurePresets": [
+    {
+      "name": "sdram_txt_debug-env",
+      "displayName": "sdram_txt_debug-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "sdram_txt_release-env",
+      "displayName": "sdram_txt_release-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "flexspi_nor_sdram_debug-env",
+      "displayName": "flexspi_nor_sdram_debug-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "flexspi_nor_sdram_release-env",
+      "displayName": "flexspi_nor_sdram_release-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "debug-env",
+      "displayName": "debug-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "release-env",
+      "displayName": "release-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "sdram_debug-env",
+      "displayName": "sdram_debug-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "sdram_release-env",
+      "displayName": "sdram_release-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "flexspi_nor_debug-env",
+      "displayName": "flexspi_nor_debug-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    },
+    {
+      "name": "flexspi_nor_release-env",
+      "displayName": "flexspi_nor_release-env",
+      "hidden": true,
+      "environment": {
+        "ARMGCC_DIR": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+        "SdkRootDirPath": "c:/mcux/SDK_2_16_000_EVK-MIMXRT1060",
+        "POSTPROCESS_UTILITY": "",
+        "MCUX_VENV_PATH": "",
+        "PATH": "C:/Users/1-21/AppData/Local/stm32cube/bundles/ninja/1.13.2+st.1/bin${pathListSep}$env{MCUX_VENV_PATH}${pathListSep}$penv{PATH}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "cacheVariables": {}
+    }
+  ],
+  "buildPresets": []
+}

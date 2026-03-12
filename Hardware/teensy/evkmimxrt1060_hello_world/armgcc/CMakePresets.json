@@ -1,0 +1,243 @@
+{
+  "version": 7,
+  "cmakeMinimumRequired": {
+    "major": 3
+  },
+  "configurePresets": [
+    {
+      "name": "sdram_txt_debug",
+      "displayName": "sdram_txt_debug",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "sdram_txt_debug-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "sdram_txt_debug",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "sdram_txt_release",
+      "displayName": "sdram_txt_release",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "sdram_txt_release-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "sdram_txt_release",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "flexspi_nor_sdram_debug",
+      "displayName": "flexspi_nor_sdram_debug",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "flexspi_nor_sdram_debug-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "flexspi_nor_sdram_debug",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "flexspi_nor_sdram_release",
+      "displayName": "flexspi_nor_sdram_release",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "flexspi_nor_sdram_release-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "flexspi_nor_sdram_release",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "debug",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "debug-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "debug",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "release",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "release-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "release",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "sdram_debug",
+      "displayName": "sdram_debug",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "sdram_debug-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "sdram_debug",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "sdram_release",
+      "displayName": "sdram_release",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "sdram_release-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "sdram_release",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "flexspi_nor_debug",
+      "displayName": "flexspi_nor_debug",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "flexspi_nor_debug-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "flexspi_nor_debug",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    },
+    {
+      "name": "flexspi_nor_release",
+      "displayName": "flexspi_nor_release",
+      "generator": "Ninja",
+      "binaryDir": "${fileDir}/${presetName}",
+      "toolchainFile": "$env{SdkRootDirPath}/tools/cmake_toolchain_files/armgcc.cmake",
+      "inherits": "flexspi_nor_release-env",
+      "cacheVariables": {
+        "POSTPROCESS_UTILITY": "$env{POSTPROCESS_UTILITY}",
+        "LIBRARY_TYPE": "NEWLIB",
+        "LANGUAGE": "C",
+        "CMAKE_BUILD_TYPE": "flexspi_nor_release",
+        "SdkRootDirPath": "$env{SdkRootDirPath}",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "$env{binaryDir}",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "$env{binaryDir}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "sdram_txt_debug",
+      "displayName": "sdram_txt_debug",
+      "configurePreset": "sdram_txt_debug"
+    },
+    {
+      "name": "sdram_txt_release",
+      "displayName": "sdram_txt_release",
+      "configurePreset": "sdram_txt_release"
+    },
+    {
+      "name": "flexspi_nor_sdram_debug",
+      "displayName": "flexspi_nor_sdram_debug",
+      "configurePreset": "flexspi_nor_sdram_debug"
+    },
+    {
+      "name": "flexspi_nor_sdram_release",
+      "displayName": "flexspi_nor_sdram_release",
+      "configurePreset": "flexspi_nor_sdram_release"
+    },
+    {
+      "name": "debug",
+      "displayName": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "displayName": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "sdram_debug",
+      "displayName": "sdram_debug",
+      "configurePreset": "sdram_debug"
+    },
+    {
+      "name": "sdram_release",
+      "displayName": "sdram_release",
+      "configurePreset": "sdram_release"
+    },
+    {
+      "name": "flexspi_nor_debug",
+      "displayName": "flexspi_nor_debug",
+      "configurePreset": "flexspi_nor_debug"
+    },
+    {
+      "name": "flexspi_nor_release",
+      "displayName": "flexspi_nor_release",
+      "configurePreset": "flexspi_nor_release"
+    }
+  ],
+  "include": [
+    "mcux_include.json"
+  ]
+}
