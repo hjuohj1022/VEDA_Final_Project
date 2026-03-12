@@ -1,15 +1,15 @@
-cmake_minimum_required(VERSION 3.19)
+﻿cmake_minimum_required(VERSION 3.19)
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
-# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
+# Network 紐⑤뱢 異붽? (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
 
 qt_standard_project_setup()
 
-# QTP0001: QML 모듈의 기본 리소스 접두사를 :/qt/qml/로 설정
+# QTP0001: QML 紐⑤뱢??湲곕낯 由ъ냼???묐몢?щ? :/qt/qml/濡??ㅼ젙
 qt_policy(SET QTP0001 NEW)
-# QTP0004: 하위 QML 디렉터리(qmldir) 정책 경고 억제
+# QTP0004: ?섏쐞 QML ?붾젆?곕━(qmldir) ?뺤콉 寃쎄퀬 ?듭젣
 qt_policy(SET QTP0004 OLD)
 
 set_source_files_properties(
@@ -25,36 +25,64 @@ set_source_files_properties(
 qt_add_executable(Team3VideoReceiver
     WIN32 MACOSX_BUNDLE
     src/app/main.cpp
-    src/core/BackendInit.cpp
-    src/core/BackendPlaybackWsRuntime.cpp
-    src/core/BackendCoreEnv.cpp
-    src/core/BackendCoreSsl.cpp
-    src/core/BackendCoreMqtt.cpp
-    src/core/BackendCoreApi.cpp
-    src/core/BackendCoreState.cpp
-    src/core/BackendAuthLogin.cpp
-    src/core/BackendAuthRegister.cpp
-    src/core/BackendAuthSession.cpp
-    src/core/BackendMediaRecordings.cpp
-    src/core/BackendMediaStorage.cpp
-    src/core/BackendRtspConfig.cpp
-    src/core/BackendRtspPlayback.cpp
-    src/core/BackendRtspProbe.cpp
-    src/core/BackendSunapiPtz.cpp
-    src/core/BackendCctv3dMap.cpp
-    src/core/BackendSunapiDisplay.cpp
-    src/core/BackendSunapiTimeline.cpp
-    src/core/BackendSunapiTimelineMonth.cpp
-    src/core/BackendSunapiExportHttp.cpp
-    src/core/BackendSunapiExportDownload.cpp
-    src/core/BackendSunapiExportParse.cpp
-    src/core/BackendSunapiExportFfmpeg.cpp
-    src/core/BackendSunapiExportWsPrep.cpp
-    src/core/BackendSunapiExportWsRtsp.cpp
-    src/core/BackendSunapiExportWsSession.cpp
-    src/core/BackendSunapiExportWsMux.cpp
-    src/core/BackendStreamingWs.cpp
-    src/core/BackendThermal.cpp
+    src/core/core/BackendInit.cpp
+    src/core/core/BackendInitService.cpp
+    src/core/stream/BackendPlaybackWsRuntime.cpp
+    src/core/stream/BackendPlaybackWsRuntimeService.cpp
+    src/core/core/BackendCoreEnv.cpp
+    src/core/core/BackendCoreEnvService.cpp
+    src/core/core/BackendCoreSsl.cpp
+    src/core/core/BackendCoreSslService.cpp
+    src/core/core/BackendCoreMqtt.cpp
+    src/core/core/BackendCoreMqttService.cpp
+    src/core/core/BackendCoreApi.cpp
+    src/core/core/BackendCoreApiService.cpp
+    src/core/core/BackendCoreState.cpp
+    src/core/core/BackendCoreStateService.cpp
+    src/core/auth/BackendAuthLogin.cpp
+    src/core/auth/BackendAuthRegister.cpp
+    src/core/auth/BackendAuthRequestService.cpp
+    src/core/auth/BackendAuthSession.cpp
+    src/core/auth/BackendAuthSessionService.cpp
+    src/core/media/BackendMediaRecordings.cpp
+    src/core/media/BackendMediaRecordingsService.cpp
+    src/core/media/BackendMediaStorage.cpp
+    src/core/media/BackendMediaStorageService.cpp
+    src/core/rtsp/BackendRtspConfig.cpp
+    src/core/rtsp/BackendRtspConfigService.cpp
+    src/core/rtsp/BackendRtspPlayback.cpp
+    src/core/rtsp/BackendRtspPlaybackService.cpp
+    src/core/rtsp/BackendRtspProbe.cpp
+    src/core/rtsp/BackendRtspProbeService.cpp
+    src/core/sunapi/BackendSunapiPtz.cpp
+    src/core/sunapi/BackendSunapiPtzService.cpp
+    src/core/cctv/BackendCctv3dMap.cpp
+    src/core/cctv/BackendCctv3dMapService.cpp
+    src/core/sunapi/BackendSunapiDisplay.cpp
+    src/core/sunapi/BackendSunapiDisplayService.cpp
+    src/core/sunapi/BackendSunapiTimeline.cpp
+    src/core/sunapi/BackendSunapiTimelineMonth.cpp
+    src/core/sunapi/BackendSunapiTimelineService.cpp
+    src/core/sunapi/BackendSunapiExportHttp.cpp
+    src/core/sunapi/BackendSunapiExportHttpService.cpp
+    src/core/sunapi/BackendSunapiExportDownload.cpp
+    src/core/sunapi/BackendSunapiExportDownloadService.cpp
+    src/core/sunapi/BackendSunapiExportParse.cpp
+    src/core/sunapi/BackendSunapiExportParseService.cpp
+    src/core/sunapi/BackendSunapiExportFfmpeg.cpp
+    src/core/sunapi/BackendSunapiExportFfmpegService.cpp
+    src/core/sunapi/BackendSunapiExportWsPrep.cpp
+    src/core/sunapi/BackendSunapiExportWsPrepService.cpp
+    src/core/sunapi/BackendSunapiExportWsRtsp.cpp
+    src/core/sunapi/BackendSunapiExportWsRtspService.cpp
+    src/core/sunapi/BackendSunapiExportWsSession.cpp
+    src/core/sunapi/BackendSunapiExportWsSessionService.cpp
+    src/core/sunapi/BackendSunapiExportWsMux.cpp
+    src/core/sunapi/BackendSunapiExportWsMuxService.cpp
+    src/core/stream/BackendStreamingWs.cpp
+    src/core/stream/BackendStreamingWsService.cpp
+    src/core/thermal/BackendThermal.cpp
+    src/core/thermal/BackendThermalService.cpp
     include/core/Backend.h
     .env
 )
@@ -62,6 +90,8 @@ qt_add_executable(Team3VideoReceiver
 # Force UTF-8 source/execution charset so Korean literals do not break.
 if (MSVC)
     target_compile_options(Team3VideoReceiver PRIVATE /utf-8)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(Team3VideoReceiver PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
 
 qt_add_qml_module(Team3VideoReceiver
@@ -69,24 +99,24 @@ qt_add_qml_module(Team3VideoReceiver
     VERSION 1.0
     QML_FILES
         src/ui/qml/Main.qml
-        src/ui/qml/Sidebar.qml
-        src/ui/qml/SidebarStore.qml
-        src/ui/qml/Header.qml
-        src/ui/qml/VideoGrid.qml
-        src/ui/qml/LoginScreen.qml
-        src/ui/qml/PlaybackScreen.qml
-        src/ui/qml/VideoPlayer.qml
-        src/ui/qml/ThermalViewer.qml
-        src/ui/qml/ViewGridContent.qml
-        src/ui/qml/PlaybackContent.qml
-        src/ui/qml/ThermalContent.qml
-        src/ui/qml/InlineMainViewContent.qml
-        src/ui/qml/PlaybackExportSaveDialog.qml
-        src/ui/qml/RtspSettingsDialog.qml
-        src/ui/qml/StatusDialog.qml
-        src/ui/qml/SidebarPlaybackControlsPanel.qml
-        src/ui/qml/SidebarCameraControlsPanel.qml
-        src/ui/qml/SidebarSystemMetricsPanel.qml
+        src/ui/qml/common/Header.qml
+        src/ui/qml/common/LoginScreen.qml
+        src/ui/qml/view/VideoGrid.qml
+        src/ui/qml/view/ViewGridContent.qml
+        src/ui/qml/view/InlineMainViewContent.qml
+        src/ui/qml/playback/PlaybackScreen.qml
+        src/ui/qml/playback/PlaybackContent.qml
+        src/ui/qml/playback/VideoPlayer.qml
+        src/ui/qml/thermal/ThermalViewer.qml
+        src/ui/qml/thermal/ThermalContent.qml
+        src/ui/qml/sidebar/Sidebar.qml
+        src/ui/qml/sidebar/SidebarStore.qml
+        src/ui/qml/sidebar/SidebarPlaybackControlsPanel.qml
+        src/ui/qml/sidebar/SidebarCameraControlsPanel.qml
+        src/ui/qml/sidebar/SidebarSystemMetricsPanel.qml
+        src/ui/qml/dialogs/PlaybackExportSaveDialog.qml
+        src/ui/qml/dialogs/RtspSettingsDialog.qml
+        src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/components/IconButton.qml
         src/ui/qml/components/SidebarControlButton.qml
         src/ui/qml/components/SidebarDisplaySlider.qml
@@ -154,6 +184,7 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
+
 
 
 
