@@ -31,6 +31,7 @@ find_package(OpenSSL REQUIRED)
 add_executable(
   crow_server
   src/main.cpp
+  src/MotorManager.cpp
   src/MqttManager.cpp
   src/SunapiProxy.cpp
   src/SunapiWsProxy.cpp

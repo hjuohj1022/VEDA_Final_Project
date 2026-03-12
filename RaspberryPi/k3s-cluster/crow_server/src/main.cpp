@@ -3,6 +3,7 @@
 #include "../include/SunapiWsProxy.h"
 #include "../include/CctvManager.h"
 #include "../include/CctvProxy.h"
+#include "../include/MotorManager.h"
 #include <jwt-cpp/jwt.h> 
 #include <filesystem>
 #include <iostream>
@@ -201,6 +202,23 @@ int main()
     
     // CCTV 라우트 등록
     registerCctvProxyRoutes(app, cctv_mgr);
+
+    const char* mqtt_host = std::getenv("MQTT_HOST") ? std::getenv("MQTT_HOST") : "mqtt-service";
+    int mqtt_port = std::getenv("MQTT_PORT") ? std::atoi(std::getenv("MQTT_PORT")) : 1883;
+    const char* motor_client_id = std::getenv("MOTOR_MQTT_CLIENT_ID") ? std::getenv("MOTOR_MQTT_CLIENT_ID") : "crow_motor_api";
+    const char* motor_control_topic = std::getenv("MOTOR_CONTROL_TOPIC") ? std::getenv("MOTOR_CONTROL_TOPIC") : "motor/control";
+    const char* motor_response_topic = std::getenv("MOTOR_RESPONSE_TOPIC") ? std::getenv("MOTOR_RESPONSE_TOPIC") : "motor/response";
+    int motor_timeout_ms = std::getenv("MOTOR_COMMAND_TIMEOUT_MS") ? std::atoi(std::getenv("MOTOR_COMMAND_TIMEOUT_MS")) : 3000;
+
+    MotorManager motor_mgr(
+        mqtt_host,
+        mqtt_port,
+        motor_client_id,
+        motor_control_topic,
+        motor_response_topic,
+        motor_timeout_ms
+    );
+    registerMotorRoutes(app, motor_mgr);
 
     // ==========================================
     // 회원가입 API
