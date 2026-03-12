@@ -141,7 +141,11 @@ STM32는 UART 라인 기반 ASCII 명령을 사용한다.
 - `ERR`
 - `ERR overflow`
 
+<<<<<<< HEAD
 상세 명령 설명은 [command.md](/C:/Users/1-21/Desktop/MyGitMISRA/VEDA_Final_Project/Hardware/command.md)에 정리되어 있다.
+=======
+상세 명령 정리는 [command.md](VEDA_Final_Project/Hardware/command.md)에 있다.
+>>>>>>> bb92532d4a8a3e822185a7a9969ae0cbbe14e7ff
 
 ## 각 보드 역할
 

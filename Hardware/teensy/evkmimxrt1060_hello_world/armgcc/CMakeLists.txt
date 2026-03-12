@@ -64,8 +64,13 @@ target_include_directories(${MCUX_SDK_PROJECT_NAME} PRIVATE
 set_source_files_properties("${ProjDirPath}/../usb_device_config.h" PROPERTIES COMPONENT_CONFIG_FILE "middleware_usb_device_ehci_config_header")
 
 target_compile_definitions(${MCUX_SDK_PROJECT_NAME} PRIVATE
+    BOARD_USE_VIRTUALCOM=1
+    DEBUG_CONSOLE_IO_USBCDC=1
+    SDK_OS_BAREMETAL
+    SERIAL_PORT_TYPE_UART=1
     SERIAL_PORT_TYPE_USBCDC=1
     USB_DEVICE_CONFIG_CDC_ACM=1
+    USB_STACK_BM
     DEBUG_CONSOLE_TRANSFER_NON_BLOCKING
 )
 
