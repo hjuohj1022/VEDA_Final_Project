@@ -170,6 +170,8 @@ public:
                                               int colorLevel,
                                               bool sharpnessEnabled);
     Q_INVOKABLE bool sunapiResetDisplaySettings(int cameraIndex);
+    Q_INVOKABLE bool startCctv3dMapSequence(int cameraIndex);
+    Q_INVOKABLE void stopCctv3dMapSequence();
 
 signals:
     // 상태 변경(Property NOTIFY)
@@ -264,6 +266,12 @@ private:
     bool sendSunapiPtzFocusCommand(int cameraIndex,
                                    const QString &command,
                                    const QString &actionLabel);
+    void runCctv3dMapSequenceStep(int sequenceToken, int step);
+    void pollCctv3dMapMoveStatus(int sequenceToken);
+    bool postCctvControlStart(int sequenceToken);
+    bool postCctvControlStream(int sequenceToken);
+    void connectCctvStreamWs(int sequenceToken);
+    void disconnectCctvStreamWs(bool expectedStop = false);
     QString ensurePlaybackWsSdpSource();
     void forwardPlaybackInterleavedRtp(const QByteArray &bytes);
     void parsePlaybackH264ConfigFromRtp(const QByteArray &rtpPacket);
@@ -459,6 +467,19 @@ private:
     int m_displaySharpnessLevel = 12;
     bool m_displaySharpnessEnabled = true;
     int m_displayColorLevel = 50;
+
+    // CCTV 3D map state (phase 1: API + WS receive)
+    QPointer<QWebSocket> m_cctvStreamWs;
+    QPointer<QTimer> m_cctv3dMapStepTimer;
+    int m_cctv3dMapSequenceToken = 0;
+    int m_cctv3dMapPendingStep = 0;
+    int m_cctv3dMapMoveStatusPollCount = 0;
+    int m_cctv3dMapStartRetryCount = 0;
+    int m_cctv3dMapCameraIndex = -1;
+    int m_cctv3dMapWsActiveToken = 0;
+    bool m_cctv3dMapStoppingExpected = false;
+    qint64 m_cctv3dMapFrameCount = 0;
+    qint64 m_cctv3dMapTotalBytes = 0;
 };
 
 #endif // BACKEND_H

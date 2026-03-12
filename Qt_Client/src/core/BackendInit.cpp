@@ -56,7 +56,7 @@ Backend::Backend(QObject *parent) : QObject(parent)
     // 저장소 갱신 타이머 시작
     m_storageTimer = new QTimer(this);
     connect(m_storageTimer, &QTimer::timeout, this, &Backend::checkStorage);
-    m_storageTimer->start(5000);
+    m_storageTimer->start(60000);
     checkStorage();
 
     // Playback WS keepalive 타이머 초기화
