@@ -186,12 +186,27 @@ std::string CctvManager::readLine() {
 }
 
 bool CctvManager::connect() {
-    std::lock_guard<std::mutex> lock(socket_mutex_);
+    std::unique_lock<std::mutex> lock(socket_mutex_);
     if (connected_) {
         return true;
     }
 
+    // Recover from stale state after previous stream ACK/read failure.
+    // Reassigning a joinable std::thread would call std::terminate().
+    stop_thread_ = true;
+    lock.unlock();
+    if (reader_thread_.joinable()) {
+        reader_thread_.join();
+    }
+    lock.lock();
+
+    closeTlsConnection(ssl_, socket_fd_);
+    ssl_ = nullptr;
+    socket_fd_ = -1;
+    stream_mode_ = CctvStreamMode::NONE;
+
     if (!openTlsConnection(&ssl_, &socket_fd_)) {
+        connected_ = false;
         return false;
     }
 
@@ -285,6 +300,8 @@ std::string CctvManager::startStreamCommand(const std::string& command) {
 
     if (ack.empty()) {
         connected_ = false;
+        stream_mode_ = CctvStreamMode::NONE;
+        stop_thread_ = true;
         std::cerr << "[CCTV] Failed to receive stream ACK for: " << command << std::endl;
         return "Error: Failed to read stream ACK";
     }
