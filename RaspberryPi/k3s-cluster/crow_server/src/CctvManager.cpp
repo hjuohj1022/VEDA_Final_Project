@@ -12,8 +12,13 @@
 #include <iostream>
 #include <vector>
 
+// CCTV 백엔드와의 실제 TLS 입출력 담당부.
+// 제어 명령은 짧은 연결, 스트림은 장기 연결 + reader thread 분리 처리 구조.
 namespace {
+// 일반 제어 명령 및 스트림 ACK의 단기 응답 시간 상한.
 constexpr int kCommandResponseTimeoutMs = 3000;
+// 비정상 헤더 기반 메모리 급증 방지용 상한.
+constexpr size_t kMaxCctvFramePayloadBytes = 32U * 1024U * 1024U;
 }
 
 CctvManager::CctvManager(const std::string& host, int port,
@@ -30,6 +35,7 @@ CctvManager::~CctvManager() {
 }
 
 void CctvManager::initSsl() {
+    // 프로세스 내 OpenSSL 사용 준비 및 매니저 전용 SSL_CTX 생성.
     SSL_library_init();
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
@@ -75,6 +81,7 @@ bool CctvManager::setSocketRecvTimeoutMs(int timeout_ms) {
 }
 
 bool CctvManager::openTlsConnection(SSL** out_ssl, int* out_socket_fd) {
+    // 제어 명령용 단발 연결과 스트림용 장기 연결의 공통 생성 헬퍼.
     if (!out_ssl || !out_socket_fd || !ssl_ctx_) {
         std::cerr << "[CCTV] TLS connection setup skipped: SSL context is not ready" << std::endl;
         return false;
@@ -191,8 +198,8 @@ bool CctvManager::connect() {
         return true;
     }
 
-    // Recover from stale state after previous stream ACK/read failure.
-    // Reassigning a joinable std::thread would call std::terminate().
+    // 이전 stream ACK/read 실패 뒤 남은 stale 상태 정리 목적.
+    // 새 thread 생성 전 join 가능한 reader thread 정리 필요.
     stop_thread_ = true;
     lock.unlock();
     if (reader_thread_.joinable()) {
@@ -217,6 +224,7 @@ bool CctvManager::connect() {
 }
 
 void CctvManager::disconnect() {
+    // 소멸자 경로 포함, thread 종료 후 소켓/SSL 리소스 추가 정리.
     stop_thread_ = true;
     if (reader_thread_.joinable()) {
         reader_thread_.join();
@@ -231,6 +239,7 @@ void CctvManager::disconnect() {
 }
 
 std::string CctvManager::sendControlCommand(const std::string& command) {
+    // 스트림 연결과 분리된 전용 소켓 기반 요청/응답 1회 처리.
     SSL* control_ssl = nullptr;
     int control_fd = -1;
     if (!openTlsConnection(&control_ssl, &control_fd)) {
@@ -279,6 +288,7 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
 }
 
 std::string CctvManager::startStreamCommand(const std::string& command) {
+    // 장기 연결 상태 진입 및 streamLoop 읽기 모드 결정.
     if (!connected_ && !connect()) {
         return "Error: Not connected";
     }
@@ -331,6 +341,8 @@ std::string CctvManager::sendCommand(const std::string& command) {
 }
 
 void CctvManager::streamLoop() {
+    // stream_mode_ 기준 헤더 선행 읽기 후 payload 연속 읽기.
+    // reader thread의 역할은 해석이 아닌 프레임 단위 바이트 배열 전달.
     while (!stop_thread_) {
         if (stream_mode_ == CctvStreamMode::NONE) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -351,10 +363,28 @@ void CctvManager::streamLoop() {
 
         size_t payload_total = 0;
         if ((stream_mode_ == CctvStreamMode::PC_IMAGE) || (stream_mode_ == CctvStreamMode::DEPTH_RAW)) {
-            payload_total = reinterpret_cast<FrameHeader*>(full_data.data())->payload_size;
+            payload_total = static_cast<size_t>(reinterpret_cast<FrameHeader*>(full_data.data())->payload_size);
         } else {
             auto* h = reinterpret_cast<RgbdHeader*>(full_data.data());
-            payload_total = h->depth_size + h->bgr_size;
+            const size_t depth_size = static_cast<size_t>(h->depth_size);
+            const size_t bgr_size = static_cast<size_t>(h->bgr_size);
+            if ((depth_size > kMaxCctvFramePayloadBytes) ||
+                (bgr_size > kMaxCctvFramePayloadBytes) ||
+                (depth_size + bgr_size > kMaxCctvFramePayloadBytes)) {
+                connected_ = false;
+                stream_mode_ = CctvStreamMode::NONE;
+                std::cerr << "[CCTV] Rejected oversized RGBD payload: depth=" << depth_size
+                          << ", bgr=" << bgr_size << std::endl;
+                break;
+            }
+            payload_total = depth_size + bgr_size;
+        }
+
+        if (payload_total > kMaxCctvFramePayloadBytes) {
+            connected_ = false;
+            stream_mode_ = CctvStreamMode::NONE;
+            std::cerr << "[CCTV] Rejected oversized stream payload: " << payload_total << std::endl;
+            break;
         }
 
         if (payload_total > 0) {

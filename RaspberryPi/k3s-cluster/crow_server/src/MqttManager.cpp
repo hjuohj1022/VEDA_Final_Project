@@ -4,11 +4,21 @@
 #include <cstring>
 #include <iostream>
 
+// mosquitto C 라이브러리의 프로세스 전역 초기화/정리 요구 사항 반영.
+// main.cpp의 MqttLibraryGuard 수명을 앱 전체 수명과 일치.
+MqttLibraryGuard::MqttLibraryGuard() {
+    mosqpp::lib_init();
+}
+
+MqttLibraryGuard::~MqttLibraryGuard() {
+    mosqpp::lib_cleanup();
+}
+
 MqttManager::MqttManager(const char* id, const char* host, int port)
     : mosqpp::mosquittopp(id) {
+    // 기본 사용 토픽의 사전 기억.
+    // 실제 subscribe 시점은 connect 완료 후 on_connect 경로.
     subscriptions_.push_back({"lepton/frame/#", 0});
-
-    mosqpp::lib_init();
 
     constexpr int keepalive = 60;
     connect(host, port, keepalive);
@@ -18,8 +28,8 @@ MqttManager::MqttManager(const char* id, const char* host, int port)
 }
 
 MqttManager::~MqttManager() {
+    disconnect();
     loop_stop();
-    mosqpp::lib_cleanup();
 }
 
 bool MqttManager::publishMessage(const std::string& topic, const std::string& payload) {
@@ -64,6 +74,7 @@ bool MqttManager::subscribeTopic(const std::string& topic, int qos) {
 }
 
 void MqttManager::on_connect(int rc) {
+    // 재연결 시 이전 구독 유지를 위한 subscriptions_ 전체 재등록.
     if (rc != 0) {
         connected_ = false;
         std::cerr << "[MQTT] Connection failed. Error: " << rc << std::endl;
@@ -91,6 +102,7 @@ void MqttManager::on_disconnect(int rc) {
 }
 
 void MqttManager::on_message(const struct mosquitto_message* message) {
+    // mosquittopp 콜백 시그니처의 프로젝트 공통 콜백 형태 변환.
     if (!message_cb_) {
         return;
     }

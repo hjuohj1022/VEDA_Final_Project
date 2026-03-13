@@ -1,6 +1,7 @@
 #include "../include/CctvProxy.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <iostream>
 #include <algorithm>
 #include <cctype>
@@ -8,10 +9,14 @@
 #include <mutex>
 #include <set>
 
+// CCTV 제어용 REST API와 스트림 중계용 WebSocket API 등록부.
+// 핵심 관심사: HTTP 요청의 명령 문자열 변환, 단일 백그라운드 worker 유지.
 namespace {
+// 현재 CCTV 바이너리 스트림을 구독 중인 Crow WebSocket 클라이언트 목록.
 std::set<crow::websocket::connection*> cctv_clients;
 std::mutex clients_mutex;
 
+// 한 번에 하나만 실행되는 백그라운드 CCTV 제어 명령의 상태.
 struct AsyncCommandStatus {
     bool running = false;
     bool last_ok = true;
@@ -25,6 +30,129 @@ std::mutex async_command_mutex;
 std::mutex view_rotation_throttle_mutex;
 std::chrono::steady_clock::time_point last_view_rotation_command_at;
 bool has_last_view_rotation_command = false;
+
+// 비동기 CCTV 제어 명령의 단일 실행 worker.
+// detach() 미사용, join 가능한 단일 thread 유지 기반 종료 시점 정리 단순화.
+class AsyncCommandWorker {
+public:
+    // 첫 비동기 요청 진입 시 worker thread 시작.
+    void start(CctvManager& cctv_mgr) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cctv_mgr_ = &cctv_mgr;
+        if (worker_thread_.joinable()) {
+            return;
+        }
+
+        stopping_ = false;
+        worker_thread_ = std::thread(&AsyncCommandWorker::run, this);
+    }
+
+    // 실행 중 작업 부재 시에만 새 명령 큐 적재.
+    bool schedule(const std::string& command) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stopping_ || !worker_thread_.joinable() || running_ || has_pending_command_ || !cctv_mgr_) {
+                return false;
+            }
+
+            pending_command_ = command;
+            has_pending_command_ = true;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(async_command_mutex);
+            async_command_status.running = true;
+            async_command_status.active_command = command;
+            async_command_status.last_command = command;
+            async_command_status.last_result = "Command is running";
+        }
+
+        cv_.notify_one();
+        return true;
+    }
+
+    // 서버 종료 시 대기 중 명령 정리 및 worker thread join.
+    void shutdown() {
+        std::string cancelled_command;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+            if (has_pending_command_) {
+                cancelled_command = pending_command_;
+                pending_command_.clear();
+                has_pending_command_ = false;
+            }
+        }
+
+        if (!cancelled_command.empty()) {
+            std::lock_guard<std::mutex> lock(async_command_mutex);
+            async_command_status.running = false;
+            async_command_status.last_ok = false;
+            async_command_status.active_command.clear();
+            async_command_status.last_command = cancelled_command;
+            async_command_status.last_result = "Command cancelled during shutdown";
+        }
+
+        cv_.notify_all();
+        if (worker_thread_.joinable()) {
+            worker_thread_.join();
+        }
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        cctv_mgr_ = nullptr;
+        running_ = false;
+        stopping_ = false;
+    }
+
+private:
+    // condition_variable 기반 새 명령 대기 후 sendCommand() 호출.
+    void run() {
+        while (true) {
+            std::string command;
+            CctvManager* cctv_mgr = nullptr;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this]() { return stopping_ || has_pending_command_; });
+                if (stopping_ && !has_pending_command_) {
+                    break;
+                }
+
+                command = std::move(pending_command_);
+                pending_command_.clear();
+                has_pending_command_ = false;
+                running_ = true;
+                cctv_mgr = cctv_mgr_;
+            }
+
+            const std::string result = cctv_mgr ? cctv_mgr->sendCommand(command)
+                                                : "Error: CCTV async worker is unavailable";
+            const bool ok = result.rfind("Error:", 0) != 0;
+
+            {
+                std::lock_guard<std::mutex> lock(async_command_mutex);
+                async_command_status.running = false;
+                async_command_status.last_ok = ok;
+                async_command_status.active_command.clear();
+                async_command_status.last_command = command;
+                async_command_status.last_result = result;
+            }
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            running_ = false;
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread worker_thread_;
+    CctvManager* cctv_mgr_ = nullptr;
+    bool stopping_ = false;
+    bool running_ = false;
+    bool has_pending_command_ = false;
+    std::string pending_command_;
+};
+
+AsyncCommandWorker async_command_worker;
 
 constexpr auto kViewRotationThrottleWindow = std::chrono::milliseconds(500);
 
@@ -70,32 +198,11 @@ bool isAsyncPreferredCommand(const std::string& command) {
 }
 
 bool tryScheduleAsyncCommand(CctvManager& cctv_mgr, const std::string& command) {
-    {
-        std::lock_guard<std::mutex> lock(async_command_mutex);
-        if (async_command_status.running) {
-            return false;
-        }
-        async_command_status.running = true;
-        async_command_status.active_command = command;
-        async_command_status.last_command = command;
-        async_command_status.last_result = "Command is running";
-    }
-
-    std::thread([&cctv_mgr, command]() {
-        const std::string result = cctv_mgr.sendCommand(command);
-        const bool ok = result.rfind("Error:", 0) != 0;
-
-        std::lock_guard<std::mutex> lock(async_command_mutex);
-        async_command_status.running = false;
-        async_command_status.last_ok = ok;
-        async_command_status.active_command.clear();
-        async_command_status.last_command = command;
-        async_command_status.last_result = result;
-    }).detach();
-
-    return true;
+    async_command_worker.start(cctv_mgr);
+    return async_command_worker.schedule(command);
 }
 
+// 명령 특성별 즉시 실행/worker 위임 결정.
 crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command, bool force_async = false) {
     if (force_async || isAsyncPreferredCommand(command)) {
         if (!tryScheduleAsyncCommand(cctv_mgr, command)) {
@@ -108,6 +215,7 @@ crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command
     return makeCommandResponse(command, cctv_mgr.sendCommand(command));
 }
 
+// view 회전 명령의 과도한 연속 입력 방지용 별도 쿨다운.
 crow::response dispatchViewCommand(CctvManager& cctv_mgr, const std::string& command, bool has_rotation_update) {
     if (!has_rotation_update) {
         return dispatchCommand(cctv_mgr, command, true);
@@ -135,9 +243,10 @@ crow::response dispatchViewCommand(CctvManager& cctv_mgr, const std::string& com
     last_view_rotation_command_at = now;
     return makeAcceptedResponse(command);
 }
-}  // namespace
+}  // 익명 네임스페이스
 
 void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
+    // CCTV 매니저 수신 바이너리 프레임의 현재 접속 중 모든 WebSocket 클라이언트 전달.
     cctv_mgr.setStreamCallback([](const std::vector<uint8_t>& full_frame) {
         std::vector<crow::websocket::connection*> clients;
         {
@@ -254,8 +363,21 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         }
 
         std::cout << "[CCTV_API] /cctv/control/stream request stream=" << stream << std::endl;
-        const std::string result = cctv_mgr.sendCommand(stream);
-        const bool ok = (result.rfind("Error:", 0) != 0);
+        std::string result;
+        bool ok = false;
+        try {
+            result = cctv_mgr.sendCommand(command);
+            ok = (result.rfind("Error:", 0) != 0);
+        } catch (const std::exception& e) {
+            result = std::string("Error: Exception in async command thread: ") + e.what();
+            ok = false;
+            std::cerr << "[CCTV_API][ASYNC] exception command=" << command
+                      << " what=" << e.what() << std::endl;
+        } catch (...) {
+            result = "Error: Unknown exception in async command thread";
+            ok = false;
+            std::cerr << "[CCTV_API][ASYNC] unknown exception command=" << command << std::endl;
+        }
         std::cout << "[CCTV_API] /cctv/control/stream response stream=" << stream
                   << " ok=" << (ok ? "true" : "false")
                   << " result=" << result.substr(0, 180) << std::endl;
@@ -271,6 +393,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
                 should_start_default_stream = (cctv_mgr.getStreamMode() == CctvStreamMode::NONE);
             }
 
+            // 첫 클라이언트 접속 + 스트림 모드 부재 시 기본 pc_stream 기동.
             if (should_start_default_stream) {
                 const std::string result = cctv_mgr.sendCommand("pc_stream");
                 if (result.rfind("Error:", 0) == 0) {
@@ -300,4 +423,8 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         }
         return crow::response(result);
     });
+}
+
+void shutdownCctvProxyWorker() {
+    async_command_worker.shutdown();
 }

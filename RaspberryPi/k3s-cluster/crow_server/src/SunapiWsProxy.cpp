@@ -19,6 +19,8 @@
 
 #include <openssl/ssl.h>
 
+// Crow WebSocket과 SUNAPI StreamingServer 사이의 직접 중계부.
+// 클라이언트 하나당 업스트림 연결 하나, reader thread 하나의 대응 구조.
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -26,6 +28,7 @@ using tcp = asio::ip::tcp;
 
 namespace {
 
+// Crow WebSocket 클라이언트 1개 대응 업스트림 연결 수명 및 입출력 상태 보관.
 struct WsBridge {
     std::unique_ptr<asio::io_context> ioc;
     std::unique_ptr<asio::ssl::context> sslCtx;
@@ -39,6 +42,7 @@ struct WsBridge {
 std::mutex g_bridgeMutex;
 std::unordered_map<crow::websocket::connection*, std::shared_ptr<WsBridge>> g_bridges;
 
+// SUNAPI WebSocket 주소의 전용 환경변수 또는 SUNAPI_BASE_URL 기반 유도.
 std::string envOrDefault(const char* key, const std::string& def) {
     const char* v = std::getenv(key);
     return v ? std::string(v) : def;
@@ -58,6 +62,7 @@ std::string trimTrailingSlash(std::string s) {
 }
 
 bool parseWsUrl(const std::string& url, std::string& scheme, std::string& host, std::string& port, std::string& target) {
+    // ws://host:port/path 형태의 Crow 처리용 조각 분리.
     static const std::regex re(R"(^(ws|wss)://([^/:]+)(?::([0-9]+))?(\/.*)?$)", std::regex::icase);
     std::smatch m;
     if (!std::regex_match(url, m, re)) return false;
@@ -86,6 +91,8 @@ void eraseBridge(crow::websocket::connection* conn) {
 }
 
 void stopBridge(crow::websocket::connection* conn) {
+    // onclose, write 실패, 업스트림 read 실패의 공통 정리 경로.
+    // stopped 플래그 설정 및 업스트림/reader thread 정리 담당.
     std::shared_ptr<WsBridge> bridge;
     {
         std::lock_guard<std::mutex> lock(g_bridgeMutex);
@@ -117,11 +124,12 @@ std::shared_ptr<WsBridge> getBridge(crow::websocket::connection* conn) {
     return it == g_bridges.end() ? nullptr : it->second;
 }
 
-} // namespace
+}  // 익명 네임스페이스
 
 void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
     CROW_WEBSOCKET_ROUTE(app, "/sunapi/StreamingServer")
         .onopen([](crow::websocket::connection& conn) {
+            // 클라이언트 접속 시 업스트림 SUNAPI WebSocket 동시 연결.
             const std::string upstreamUrl = resolveUpstreamWsUrl();
             if (upstreamUrl.empty()) {
                 conn.send_text("SUNAPI_WS_URL or SUNAPI_BASE_URL is not configured");
@@ -187,6 +195,7 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
             }
 
             bridge->readerThread = std::thread([bridge, &conn]() {
+                // 업스트림 수신 프레임의 가공 없는 Crow WebSocket 전달.
                 try {
                     while (!bridge->stopped) {
                         beast::flat_buffer buffer;
@@ -214,6 +223,7 @@ void registerSunapiWsProxyRoutes(crow::SimpleApp& app) {
             if (!bridge->upstreamWs && !bridge->upstreamWss) return;
 
             try {
+                // 업스트림 write의 writeMutex 기반 직렬화, 프레임 순서 및 thread 안전성 확보.
                 std::lock_guard<std::mutex> lock(bridge->writeMutex);
                 if (bridge->upstreamWss) {
                     bridge->upstreamWss->binary(is_binary);

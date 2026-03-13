@@ -4,23 +4,378 @@
 #include "../include/CctvManager.h"
 #include "../include/CctvProxy.h"
 #include "../include/EspHealthManager.h"
+#include "../include/MqttManager.h"
 #include "../include/MotorManager.h"
 #include <jwt-cpp/jwt.h> 
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <array>
+#include <cstring>
 #include <filesystem>
-#include <iostream>
-#include <vector>
 #include <cstdlib> 
-#include <mysql/mysql.h> 
 #include <fstream> 
+#include <iostream>
+#include <memory>
+#include <mysql/mysql.h>
+#include <optional>
 #include <sstream> 
 #include <sys/statvfs.h> 
-#include <chrono>
-#include <optional>
-#include <system_error>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <system_error>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
+// crow_server의 진입점.
+// 인증, 파일 스트리밍, SUNAPI 프록시, CCTV, MQTT 기반 장치 제어 라우트의 단일 프로세스 집약.
 namespace fs = std::filesystem;
+
+namespace {
+// 인증/DB/파일 스트리밍 헬퍼의 라우트 바깥 배치.
+// main()의 서비스 등록 흐름 집중 목적 구조.
+constexpr char kDatabaseName[] = "veda_db";
+constexpr size_t kMaxUserIdLength = 64;
+constexpr size_t kMaxPasswordLength = 128;
+constexpr size_t kStoredPasswordBufferBytes = 256;
+constexpr int kPasswordHashIterations = 120000;
+constexpr size_t kPasswordSaltBytes = 16;
+constexpr size_t kPasswordHashBytes = 32;
+constexpr char kPasswordHashPrefix[] = "pbkdf2_sha256";
+constexpr long long kMaxStreamResponseBytes = 8LL * 1024LL * 1024LL;
+
+using MysqlBindFlag = std::remove_pointer_t<decltype(std::declval<MYSQL_BIND>().is_null)>;
+
+struct MysqlConnectionCloser {
+    void operator()(MYSQL* connection) const {
+        if (connection) {
+            mysql_close(connection);
+        }
+    }
+};
+
+struct MysqlStatementCloser {
+    void operator()(MYSQL_STMT* statement) const {
+        if (statement) {
+            mysql_stmt_close(statement);
+        }
+    }
+};
+
+using MysqlConnectionPtr = std::unique_ptr<MYSQL, MysqlConnectionCloser>;
+using MysqlStatementPtr = std::unique_ptr<MYSQL_STMT, MysqlStatementCloser>;
+
+std::optional<std::string> validateCredentials(const std::string& user_id,
+                                               const std::string& password) {
+    if (user_id.empty() || password.empty()) {
+        return "ID and password are required";
+    }
+    if (user_id.size() > kMaxUserIdLength) {
+        return "ID is too long";
+    }
+    if (password.size() > kMaxPasswordLength) {
+        return "Password is too long";
+    }
+    return std::nullopt;
+}
+
+MysqlConnectionPtr openDatabaseConnection() {
+    const char* db_host = std::getenv("DB_HOST");
+    const char* db_user = std::getenv("DB_USER");
+    const char* db_pass = std::getenv("DB_PASSWORD");
+
+    if (!db_host || !db_user || !db_pass) {
+        std::cerr << "[DB Error] Missing DB_HOST, DB_USER, or DB_PASSWORD" << std::endl;
+        return {};
+    }
+
+    MysqlConnectionPtr connection(mysql_init(nullptr));
+    if (!connection) {
+        std::cerr << "[DB Error] mysql_init failed" << std::endl;
+        return {};
+    }
+
+    if (!mysql_real_connect(connection.get(), db_host, db_user, db_pass, kDatabaseName, 3306, nullptr, 0)) {
+        std::cerr << "[DB Error] " << mysql_error(connection.get()) << std::endl;
+        return {};
+    }
+
+    return connection;
+}
+
+MysqlStatementPtr prepareStatement(MYSQL* connection, const char* sql) {
+    if (!connection) {
+        return {};
+    }
+
+    MysqlStatementPtr statement(mysql_stmt_init(connection));
+    if (!statement) {
+        std::cerr << "[DB Error] mysql_stmt_init failed" << std::endl;
+        return {};
+    }
+
+    if (mysql_stmt_prepare(statement.get(), sql, static_cast<unsigned long>(std::strlen(sql))) != 0) {
+        std::cerr << "[DB Error] Failed to prepare statement: " << mysql_stmt_error(statement.get()) << std::endl;
+        return {};
+    }
+
+    return statement;
+}
+
+std::string bytesToHex(const unsigned char* data, size_t size) {
+    static constexpr char kHexDigits[] = "0123456789abcdef";
+
+    std::string hex;
+    hex.resize(size * 2);
+    for (size_t index = 0; index < size; ++index) {
+        hex[index * 2] = kHexDigits[(data[index] >> 4) & 0x0F];
+        hex[index * 2 + 1] = kHexDigits[data[index] & 0x0F];
+    }
+    return hex;
+}
+
+bool hexToBytes(const std::string& hex, std::vector<unsigned char>* bytes) {
+    if (!bytes || (hex.size() % 2) != 0) {
+        return false;
+    }
+
+    auto hexValue = [](char ch, unsigned char* value) {
+        if ((ch >= '0') && (ch <= '9')) {
+            *value = static_cast<unsigned char>(ch - '0');
+            return true;
+        }
+        if ((ch >= 'a') && (ch <= 'f')) {
+            *value = static_cast<unsigned char>(ch - 'a' + 10);
+            return true;
+        }
+        if ((ch >= 'A') && (ch <= 'F')) {
+            *value = static_cast<unsigned char>(ch - 'A' + 10);
+            return true;
+        }
+        return false;
+    };
+
+    bytes->clear();
+    bytes->reserve(hex.size() / 2);
+    for (size_t index = 0; index < hex.size(); index += 2) {
+        unsigned char high = 0;
+        unsigned char low = 0;
+        if (!hexValue(hex[index], &high) || !hexValue(hex[index + 1], &low)) {
+            bytes->clear();
+            return false;
+        }
+        bytes->push_back(static_cast<unsigned char>((high << 4) | low));
+    }
+    return true;
+}
+
+std::vector<std::string> splitString(const std::string& text, char delimiter) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t delimiter_pos = text.find(delimiter, start);
+        if (delimiter_pos == std::string::npos) {
+            parts.push_back(text.substr(start));
+            break;
+        }
+
+        parts.push_back(text.substr(start, delimiter_pos - start));
+        start = delimiter_pos + 1;
+    }
+    return parts;
+}
+
+std::string hashPassword(const std::string& password) {
+    std::array<unsigned char, kPasswordSaltBytes> salt{};
+    std::array<unsigned char, kPasswordHashBytes> digest{};
+
+    if (RAND_bytes(salt.data(), static_cast<int>(salt.size())) != 1) {
+        std::cerr << "[AUTH] RAND_bytes failed" << std::endl;
+        return {};
+    }
+
+    if (PKCS5_PBKDF2_HMAC(password.c_str(),
+                          static_cast<int>(password.size()),
+                          salt.data(),
+                          static_cast<int>(salt.size()),
+                          kPasswordHashIterations,
+                          EVP_sha256(),
+                          static_cast<int>(digest.size()),
+                          digest.data()) != 1) {
+        std::cerr << "[AUTH] PKCS5_PBKDF2_HMAC failed" << std::endl;
+        return {};
+    }
+
+    return std::string(kPasswordHashPrefix) + "$" +
+           std::to_string(kPasswordHashIterations) + "$" +
+           bytesToHex(salt.data(), salt.size()) + "$" +
+           bytesToHex(digest.data(), digest.size());
+}
+
+bool verifyPasswordHash(const std::string& password, const std::string& stored_password) {
+    const auto parts = splitString(stored_password, '$');
+    if (parts.size() != 4 || parts[0] != kPasswordHashPrefix) {
+        return false;
+    }
+
+    int iterations = 0;
+    try {
+        iterations = std::stoi(parts[1]);
+    } catch (const std::exception&) {
+        return false;
+    }
+
+    if (iterations <= 0) {
+        return false;
+    }
+
+    std::vector<unsigned char> salt;
+    std::vector<unsigned char> expected_digest;
+    if (!hexToBytes(parts[2], &salt) || !hexToBytes(parts[3], &expected_digest) || expected_digest.empty()) {
+        return false;
+    }
+
+    std::vector<unsigned char> derived_digest(expected_digest.size());
+    if (PKCS5_PBKDF2_HMAC(password.c_str(),
+                          static_cast<int>(password.size()),
+                          salt.data(),
+                          static_cast<int>(salt.size()),
+                          iterations,
+                          EVP_sha256(),
+                          static_cast<int>(derived_digest.size()),
+                          derived_digest.data()) != 1) {
+        return false;
+    }
+
+    return CRYPTO_memcmp(derived_digest.data(), expected_digest.data(), expected_digest.size()) == 0;
+}
+
+bool loadStoredPassword(MYSQL* connection,
+                        const std::string& user_id,
+                        std::string* stored_password) {
+    if (!stored_password) {
+        return false;
+    }
+
+    auto statement = prepareStatement(connection, "SELECT password FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind user lookup param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to execute user lookup: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    std::array<char, kStoredPasswordBufferBytes> stored_password_buffer{};
+    unsigned long stored_password_length = 0;
+    MysqlBindFlag is_null = 0;
+    MysqlBindFlag bind_error = 0;
+    MYSQL_BIND result_bind[1] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[0].buffer = stored_password_buffer.data();
+    result_bind[0].buffer_length = static_cast<unsigned long>(stored_password_buffer.size());
+    result_bind[0].length = &stored_password_length;
+    result_bind[0].is_null = &is_null;
+    result_bind[0].error = &bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind user lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to store user lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if ((fetch_result == MYSQL_NO_DATA) || is_null) {
+        return false;
+    }
+    if ((fetch_result == 1) || (fetch_result == MYSQL_DATA_TRUNCATED) || bind_error) {
+        std::cerr << "[DB Error] Failed to fetch stored password hash" << std::endl;
+        return false;
+    }
+
+    stored_password->assign(stored_password_buffer.data(), stored_password_length);
+    return true;
+}
+
+bool updateStoredPasswordHash(MYSQL* connection,
+                              const std::string& user_id,
+                              const std::string& password_hash) {
+    auto statement = prepareStatement(connection, "UPDATE users SET password = ? WHERE id = ?");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long password_hash_length = static_cast<unsigned long>(password_hash.size());
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(password_hash.c_str());
+    param_bind[0].buffer_length = password_hash_length;
+    param_bind[0].length = &password_hash_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[1].buffer_length = user_id_length;
+    param_bind[1].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind password upgrade params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to upgrade legacy password hash: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+bool parseLongLong(const std::string& text, long long* value) {
+    if (!value || text.empty()) {
+        return false;
+    }
+
+    try {
+        size_t parsed_length = 0;
+        const long long parsed_value = std::stoll(text, &parsed_length);
+        if (parsed_length != text.size()) {
+            return false;
+        }
+
+        *value = parsed_value;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+}  // namespace
 
 // -------------------------------------------------------
 // JWT 관련 설정 및 함수
@@ -75,7 +430,7 @@ std::string resolveSafeRecordingPath(const std::string& filename) {
 // -------------------------------------------------------
 // MariaDB에서 ID/PW 확인
 // -------------------------------------------------------
-bool checkUserFromDB(std::string inputId, std::string inputPw) {
+[[maybe_unused]] bool checkUserFromDBLegacy(std::string inputId, std::string inputPw) {
     MYSQL *conn;
     MYSQL_RES *res;
     MYSQL_ROW row;
@@ -129,7 +484,7 @@ bool checkUserFromDB(std::string inputId, std::string inputPw) {
 // -------------------------------------------------------
 // MariaDB에 새로운 사용자 등록
 // -------------------------------------------------------
-bool registerUserToDB(std::string inputId, std::string inputPw) {
+[[maybe_unused]] bool registerUserToDBLegacy(std::string inputId, std::string inputPw) {
     MYSQL *conn;
     
     const char* db_host = std::getenv("DB_HOST");
@@ -177,8 +532,92 @@ bool registerUserToDB(std::string inputId, std::string inputPw) {
     return true;
 }
 
+bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputPw) {
+    // 현재 저장값이 해시인 경우 해시 검증 경로.
+    // 과거 평문 계정인 경우 로그인 성공 시 해시 자동 승격 경로.
+    if (validateCredentials(inputId, inputPw)) {
+        return false;
+    }
+
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        return false;
+    }
+
+    std::string stored_password;
+    if (!loadStoredPassword(connection.get(), inputId, &stored_password)) {
+        return false;
+    }
+
+    if (verifyPasswordHash(inputPw, stored_password)) {
+        return true;
+    }
+
+    if (stored_password != inputPw) {
+        return false;
+    }
+
+    const std::string upgraded_hash = hashPassword(inputPw);
+    if (!upgraded_hash.empty()) {
+        updateStoredPasswordHash(connection.get(), inputId, upgraded_hash);
+    }
+    return true;
+}
+
+bool registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
+    // 신규 계정의 prepared statement + PBKDF2 해시 형태 저장.
+    if (validateCredentials(inputId, inputPw)) {
+        return false;
+    }
+
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        return false;
+    }
+
+    const std::string password_hash = hashPassword(inputPw);
+    if (password_hash.empty()) {
+        return false;
+    }
+
+    auto statement = prepareStatement(connection.get(), "INSERT INTO users (id, password) VALUES (?, ?)");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(inputId.size());
+    unsigned long password_hash_length = static_cast<unsigned long>(password_hash.size());
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(inputId.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(password_hash.c_str());
+    param_bind[1].buffer_length = password_hash_length;
+    param_bind[1].length = &password_hash_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind register params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to register user: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 int main()
 {
+    // mosquitto 전역 초기화의 앱 수명 동안 1회 유지.
+    MqttLibraryGuard mqtt_library_guard;
     crow::SimpleApp app;
 
     // SUNAPI 프록시 라우트 등록 (/sunapi/stw-cgi/*)
@@ -249,7 +688,11 @@ int main()
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
 
-        if (registerUserToDB(id, pw)) {
+        if (const auto credential_error = validateCredentials(id, pw)) {
+            return crow::response(400, *credential_error);
+        }
+
+        if (registerUserToDBSecure(id, pw)) {
             crow::json::wvalue res;
             res["status"] = "success";
             res["message"] = "User registered successfully";
@@ -267,15 +710,23 @@ int main()
         auto x = crow::json::load(req.body);
         if (!x) return crow::response(400, "Invalid JSON");
 
+        if (!x.has("id") || !x.has("password")) {
+            return crow::response(400, "Missing id or password");
+        }
+
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
+
+        if (const auto credential_error = validateCredentials(id, pw)) {
+            return crow::response(400, *credential_error);
+        }
 
         // mTLS 정보 확인 (로깅용)
         std::string device_id = req.get_header_value("X-Device-ID");
         if (!device_id.empty()) std::cout << "[mTLS Device] " << device_id << std::endl;
 
         // DB 확인 후 토큰 생성
-        if (checkUserFromDB(id, pw)) {
+        if (checkUserFromDBSecure(id, pw)) {
             std::string token = generateJWT(id);
             
             crow::json::wvalue res;
@@ -400,7 +851,7 @@ int main()
             return; 
         }
         
-        long long file_size = static_cast<long long>(ifs.tellg());
+        const long long file_size = static_cast<long long>(ifs.tellg());
         ifs.seekg(0, std::ios::beg); // 다시 처음으로 돌림
 
         // Range 헤더 파싱
@@ -408,50 +859,81 @@ int main()
         long long end = file_size - 1;
         bool is_range = false;
 
-        std::string range_header = req.get_header_value("Range");
+        const std::string range_header = req.get_header_value("Range");
         if (!range_header.empty()) {
+            if (range_header.rfind("bytes=", 0) != 0) {
+                res.code = 416;
+                res.write("Invalid Range header");
+                res.end();
+                return;
+            }
+
             is_range = true;
             // 예: "bytes=1024-" 또는 "bytes=1024-2048"
-            if (range_header.find("bytes=") == 0) {
-                std::string range_val = range_header.substr(6);
-                size_t dash_pos = range_val.find('-');
-                if (dash_pos != std::string::npos) {
-                    std::string start_str = range_val.substr(0, dash_pos);
-                    std::string end_str = range_val.substr(dash_pos + 1);
-                    
-                    if (!start_str.empty()) start = std::stoll(start_str);
-                    if (!end_str.empty()) end = std::stoll(end_str);
-                }
+            const std::string range_value = range_header.substr(6);
+            const size_t dash_pos = range_value.find('-');
+            if (dash_pos == std::string::npos) {
+                res.code = 416;
+                res.write("Invalid Range header");
+                res.end();
+                return;
+            }
+
+            const std::string start_str = range_value.substr(0, dash_pos);
+            const std::string end_str = range_value.substr(dash_pos + 1);
+            if ((!start_str.empty() && !parseLongLong(start_str, &start)) ||
+                (!end_str.empty() && !parseLongLong(end_str, &end))) {
+                res.code = 416;
+                res.write("Invalid Range header");
+                res.end();
+                return;
             }
         }
 
         // 범위 유효성 검사
         if (start < 0 || start > end || start >= file_size) {
-            res.code = 416; // Range Not Satisfiable
+            res.code = 416; // 요청한 범위를 만족할 수 없음
             res.end();
             return;
         }
 
-        long long content_length = end - start + 1;
+        if (end >= file_size) {
+            end = file_size - 1;
+        }
+
+        const long long content_length = end - start + 1;
+        if ((content_length <= 0) || (content_length > kMaxStreamResponseBytes)) {
+            res.code = 416;
+            res.write("Requested range is too large");
+            res.end();
+            return;
+        }
 
         // 응답 헤더 설정
         res.add_header("Accept-Ranges", "bytes");
         res.add_header("Content-Type", "video/mp4");
+        res.add_header("Content-Length", std::to_string(content_length));
         
         if (is_range) {
-            res.code = 206; // Partial Content
+            res.code = 206; // 부분 응답
             std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
             res.add_header("Content-Range", content_range);
         } else {
-            res.code = 200; // OK
+            res.code = 200; // 전체 응답 성공
         }
         
         // 요청된 부분만 읽어서 전송
         std::vector<char> buffer(static_cast<size_t>(content_length));
         ifs.seekg(start);
-        ifs.read(buffer.data(), content_length);
+        ifs.read(buffer.data(), static_cast<std::streamsize>(content_length));
+        if (ifs.gcount() != static_cast<std::streamsize>(content_length)) {
+            res.code = 500;
+            res.write("Failed to read requested range");
+            res.end();
+            return;
+        }
 
-        res.body = std::string(buffer.begin(), buffer.end());
+        res.body.assign(buffer.begin(), buffer.end());
         res.end();
     });
     
@@ -543,4 +1025,5 @@ int main()
     });
         
     app.port(8080).multithreaded().run();
+    shutdownCctvProxyWorker();
 }
