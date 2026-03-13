@@ -243,22 +243,35 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
     setsockopt(control_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     setsockopt(control_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
+    const std::string full_cmd = command + "\n";
     std::cout << "[CCTV] Sending control command: " << command << std::endl;
-    const int write_result = SSL_write(control_ssl, command.c_str(), static_cast<int>(command.length()));
+    const int write_result = SSL_write(control_ssl, full_cmd.c_str(), static_cast<int>(full_cmd.length()));
     if (write_result <= 0) {
         closeTlsConnection(control_ssl, control_fd);
         std::cerr << "[CCTV] Failed to write control command: " << command << std::endl;
         return "Error: Failed to send CCTV command";
     }
 
-    char buf[1024];
-    const int n = SSL_read(control_ssl, buf, sizeof(buf) - 1);
+    std::string line;
+    char ch = '\0';
+    while (true) {
+        const int n = SSL_read(control_ssl, &ch, 1);
+        if (n <= 0) {
+            break;
+        }
+        line.push_back(ch);
+        if (ch == '\n') {
+            break;
+        }
+        if (line.size() >= 4096) {
+            break;
+        }
+    }
     closeTlsConnection(control_ssl, control_fd);
 
-    if (n > 0) {
-        buf[n] = '\0';
-        std::cout << "[CCTV] Control response for [" << command << "]: " << buf << std::endl;
-        return std::string(buf);
+    if (!line.empty()) {
+        std::cout << "[CCTV] Control response for [" << command << "]: " << line;
+        return line;
     }
 
     std::cerr << "[CCTV] Timed out waiting for control response: " << command << std::endl;
