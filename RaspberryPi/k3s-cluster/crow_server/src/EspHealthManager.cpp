@@ -2,7 +2,9 @@
 
 #include <atomic>
 
+// ESP32 watchdog 관련 REST API의 MQTT publish/subscribe 래핑부.
 namespace {
+// request_id 충돌 방지용 프로세스 전역 증가값.
 std::atomic<unsigned long long> g_request_counter{0};
 
 crow::response makeCommandResponse(const EspHealthCommandResult& result) {
@@ -17,7 +19,7 @@ crow::response makeCommandResponse(const EspHealthCommandResult& result) {
 
     return crow::response(result.published ? 202 : 503, body);
 }
-}  // namespace
+}  // 익명 네임스페이스
 
 EspHealthManager::EspHealthManager(const std::string& broker_host,
                                    int broker_port,
@@ -27,6 +29,7 @@ EspHealthManager::EspHealthManager(const std::string& broker_host,
     : mqtt_(std::make_unique<MqttManager>(client_id.c_str(), broker_host.c_str(), broker_port)),
       control_topic_(control_topic),
       status_topic_(status_topic) {
+    // 최신 watchdog 상태 추적용 status topic 구독.
     mqtt_->set_message_callback([this](const std::string& topic, const std::string& payload) {
         handleMessage(topic, payload);
     });
@@ -34,6 +37,7 @@ EspHealthManager::EspHealthManager(const std::string& broker_host,
 }
 
 EspHealthCommandResult EspHealthManager::requestPublishNow() {
+    // ESP32 즉시 상태 재발행 요청용 제어 메시지 생성.
     EspHealthCommandResult result;
     result.control_topic = control_topic_;
     result.broker_connected = mqtt_->isConnected();
@@ -83,6 +87,7 @@ EspHealthStatusSnapshot EspHealthManager::getStatusSnapshot() const {
 }
 
 void EspHealthManager::handleMessage(const std::string& topic, const std::string& payload) {
+    // 수신 payload 원문 저장 및 JSON 파싱 가능 여부 병행 기록.
     if (topic != status_topic_) {
         return;
     }
@@ -105,6 +110,8 @@ std::string EspHealthManager::generateRequestId() const {
 }
 
 void registerEspHealthRoutes(crow::SimpleApp& app, EspHealthManager& esp_health_mgr) {
+    // request 라우트: 제어 메시지 발행.
+    // latest/status 라우트: 최근 수신 상태 스냅샷의 서로 다른 형태 노출.
     CROW_ROUTE(app, "/esp32/watchdog/request").methods(crow::HTTPMethod::POST)
     ([&esp_health_mgr]() {
         return makeCommandResponse(esp_health_mgr.requestPublishNow());

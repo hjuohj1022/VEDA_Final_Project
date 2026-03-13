@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+// 모터 제어용 REST API의 MQTT request-response 래핑부.
+// 라우트는 JSON 검증 담당, MotorManager는 publish/응답대기/상태보관 담당.
 namespace {
 constexpr int kMinMotorIndex = 1;
 constexpr int kMaxMotorIndex = 3;
@@ -103,7 +105,7 @@ crow::response makeInvalidBodyResponse(const std::string& message) {
     body["message"] = message;
     return crow::response(400, body);
 }
-}  // namespace
+}  // 익명 네임스페이스
 
 MotorManager::MotorManager(const std::string& broker_host,
                            int broker_port,
@@ -115,6 +117,7 @@ MotorManager::MotorManager(const std::string& broker_host,
       control_topic_(control_topic),
       response_topic_(response_topic),
       timeout_ms_(timeout_ms) {
+    // response topic 선구독 및 도착 응답의 handleMessage() 집계.
     mqtt_->set_message_callback([this](const std::string& topic, const std::string& payload) {
         handleMessage(topic, payload);
     });
@@ -122,6 +125,8 @@ MotorManager::MotorManager(const std::string& broker_host,
 }
 
 MotorCommandResult MotorManager::sendCommand(const std::string& command) {
+    // 외부 노출 형태는 동기식 함수.
+    // 내부 처리 순서: publish -> response topic 수신 대기 -> 최신 응답 반환.
     MotorCommandResult result;
     result.command = trimLineEndings(command);
     result.broker_connected = mqtt_->isConnected();
@@ -227,6 +232,7 @@ MotorStatusSnapshot MotorManager::getStatus() const {
 }
 
 void MotorManager::handleMessage(const std::string& topic, const std::string& payload) {
+    // 현재 사용 대상은 response topic 하나, 해당 topic 메시지만 최신 응답으로 기록.
     if (topic != response_topic_) {
         return;
     }
@@ -244,6 +250,7 @@ void MotorManager::handleMessage(const std::string& topic, const std::string& pa
 }
 
 void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr) {
+    // 아래 라우트들의 공통 구조: JSON 본문 검증 후 MotorManager 공통 sendCommand 경로 진입.
     CROW_ROUTE(app, "/motor/control/command").methods(crow::HTTPMethod::POST)
     ([&motor_mgr](const crow::request& req) {
         const auto body = crow::json::load(req.body);

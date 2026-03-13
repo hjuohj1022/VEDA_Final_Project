@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+// SUNAPI HTTP API의 Crow 라우트 뒤 어댑터 계층.
 // main.cpp에 정의된 JWT 검증 함수
 extern bool verifyJWT(const std::string& token);
 
@@ -20,6 +21,7 @@ namespace {
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 
+// 환경변수 파싱, 쿼리 인코딩, 입력 검증용 소형 헬퍼 집합.
 std::string envOrDefault(const char* key, const std::string& defaultValue) {
     const char* value = std::getenv(key);
     return value ? std::string(value) : defaultValue;
@@ -561,7 +563,7 @@ std::string buildExportForwardPath(const crow::request& req,
     return "/stw-cgi/" + cgi + "?" + q;
 }
 
-} // namespace
+}  // 익명 네임스페이스
 
 void registerSunapiProxyRoutes(crow::SimpleApp& app) {
     static const bool curlReady = []() {
@@ -607,7 +609,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         .methods(crow::HTTPMethod::Get)
     ([](const crow::request& req) {
         const char* ch = req.url_params.get("channel");
-        const char* date = req.url_params.get("date"); // YYYY-MM-DD
+        const char* date = req.url_params.get("date"); // YYYY-MM-DD 형식
         if (!ch || !date) {
             return crow::response(400, "missing query: channel, date");
         }
@@ -674,7 +676,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, "/stw-cgi/recording.cgi?" + q);
     });
 
-    // Crow fixed spec: export create request
+    // Crow 고정 스펙: export 생성 요청
     CROW_ROUTE(app, "/api/sunapi/export/create")
         .methods(crow::HTTPMethod::Get)
     ([](const crow::request& req) {
@@ -686,7 +688,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, path);
     });
 
-    // Crow fixed spec: export status polling request
+    // Crow 고정 스펙: export 상태 조회 요청
     CROW_ROUTE(app, "/api/sunapi/export/status")
         .methods(crow::HTTPMethod::Get)
     ([](const crow::request& req) {
@@ -698,7 +700,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, path);
     });
 
-    // Crow fixed spec: export download request
+    // Crow 고정 스펙: export 다운로드 요청
     CROW_ROUTE(app, "/api/sunapi/export/download")
         .methods(crow::HTTPMethod::Get)
     ([](const crow::request& req) {
@@ -710,7 +712,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, path);
     });
 
-    // Crow fixed spec: PTZ/Focus control
+    // Crow 고정 스펙: PTZ/Focus 제어
     CROW_ROUTE(app, "/api/sunapi/ptz/focus")
         .methods(crow::HTTPMethod::Post)
     ([](const crow::request& req) {
@@ -757,7 +759,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
     });
 
-    // Crow fixed spec: display settings view
+    // Crow 고정 스펙: 디스플레이 설정 조회
     CROW_ROUTE(app, "/api/sunapi/display/settings")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)
     ([](const crow::request& req) {
@@ -803,7 +805,7 @@ void registerSunapiProxyRoutes(crow::SimpleApp& app) {
         return forwardToSunapi(req, "/stw-cgi/image.cgi?" + q);
     });
 
-    // Crow fixed spec: display settings reset (50,50,12,50)
+    // Crow 고정 스펙: 디스플레이 설정 초기화 (50,50,12,50)
     CROW_ROUTE(app, "/api/sunapi/display/reset")
         .methods(crow::HTTPMethod::Post)
     ([](const crow::request& req) {

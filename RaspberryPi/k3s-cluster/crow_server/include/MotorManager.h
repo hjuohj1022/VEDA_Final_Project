@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 
+// 모터 명령 1회 실행 결과의 REST 응답 표현용 구조체.
 struct MotorCommandResult {
     bool ok = false;
     bool published = false;
@@ -19,6 +20,7 @@ struct MotorCommandResult {
     std::string response;
 };
 
+// 최근 모터 제어 상태의 진단용 API 노출 스냅샷.
 struct MotorStatusSnapshot {
     bool broker_connected = false;
     bool awaiting_response = false;
@@ -32,6 +34,14 @@ struct MotorStatusSnapshot {
     long long last_response_age_ms = -1;
 };
 
+// 역할:
+// - REST 요청의 MQTT 제어 명령 변환
+// - 응답 topic 메시지 대기 후 동기식 결과 형태 반환
+// - 최근 명령/응답 상태의 진단용 보관
+//
+// 동시성:
+// - request_mutex_ 기반 단일 요청 직렬화
+// - state_mutex_ 기반 응답 도착 여부와 마지막 상태 보호
 class MotorManager {
 public:
     MotorManager(const std::string& broker_host,
@@ -45,6 +55,7 @@ public:
     MotorManager(const MotorManager&) = delete;
     MotorManager& operator=(const MotorManager&) = delete;
 
+    // MQTT publish 후 response topic 응답 또는 timeout까지 대기.
     MotorCommandResult sendCommand(const std::string& command);
     MotorCommandResult press(int motor, const std::string& direction);
     MotorCommandResult release(int motor);
@@ -54,6 +65,7 @@ public:
     MotorCommandResult readAngles();
     MotorCommandResult ping();
     MotorCommandResult stopAll();
+    // 최근 상태 복사본의 라우트 전달용 반환.
     MotorStatusSnapshot getStatus() const;
 
 private:
@@ -76,4 +88,5 @@ private:
     std::chrono::steady_clock::time_point last_response_time_{};
 };
 
+// MotorManager 기반 모터 제어/상태 REST 라우트 등록.
 void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr);
