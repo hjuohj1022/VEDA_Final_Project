@@ -1010,7 +1010,9 @@ paths:
   /cctv/control/view:
     post:
       summary: Update View Parameters
-      description: Update point cloud view settings (rotation, flip, etc.)
+      description: |
+        Update point cloud view settings (rotation, flip, etc.).
+        Requests that include `rx` or `ry` are throttled to one accepted command every 500ms.
       requestBody:
         required: true
         content:
@@ -1034,7 +1036,7 @@ paths:
                   type: boolean
       responses:
         '202':
-          description: Accepted for background execution
+          description: Accepted for background execution, or throttled with `status=THROTTLED`
   /cctv/control/stream:
     post:
       summary: Start CCTV stream mode
