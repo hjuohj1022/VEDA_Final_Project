@@ -366,17 +366,17 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
         std::string result;
         bool ok = false;
         try {
-            result = cctv_mgr.sendCommand(command);
+            result = cctv_mgr.sendCommand(stream);
             ok = (result.rfind("Error:", 0) != 0);
         } catch (const std::exception& e) {
             result = std::string("Error: Exception in async command thread: ") + e.what();
             ok = false;
-            std::cerr << "[CCTV_API][ASYNC] exception command=" << command
+            std::cerr << "[CCTV_API][ASYNC] exception command=" << stream
                       << " what=" << e.what() << std::endl;
         } catch (...) {
             result = "Error: Unknown exception in async command thread";
             ok = false;
-            std::cerr << "[CCTV_API][ASYNC] unknown exception command=" << command << std::endl;
+            std::cerr << "[CCTV_API][ASYNC] unknown exception command=" << stream << std::endl;
         }
         std::cout << "[CCTV_API] /cctv/control/stream response stream=" << stream
                   << " ok=" << (ok ? "true" : "false")
