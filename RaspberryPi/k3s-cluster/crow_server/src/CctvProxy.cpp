@@ -1,5 +1,6 @@
 #include "../include/CctvProxy.h"
 
+#include <chrono>
 #include <iostream>
 #include <algorithm>
 #include <cctype>
@@ -21,6 +22,11 @@ struct AsyncCommandStatus {
 
 AsyncCommandStatus async_command_status;
 std::mutex async_command_mutex;
+std::mutex view_rotation_throttle_mutex;
+std::chrono::steady_clock::time_point last_view_rotation_command_at;
+bool has_last_view_rotation_command = false;
+
+constexpr auto kViewRotationThrottleWindow = std::chrono::milliseconds(500);
 
 crow::response makeCommandResponse(const std::string& command, const std::string& result) {
     crow::json::wvalue body;
@@ -35,6 +41,15 @@ crow::response makeAcceptedResponse(const std::string& command) {
     body["status"] = "ACCEPTED";
     body["command"] = command;
     body["message"] = "Command queued for background execution";
+    return crow::response(202, body);
+}
+
+crow::response makeThrottledViewResponse(const std::string& command, int retry_after_ms) {
+    crow::json::wvalue body;
+    body["status"] = "THROTTLED";
+    body["command"] = command;
+    body["message"] = "View rotation command ignored due to 500ms cooldown";
+    body["retry_after_ms"] = retry_after_ms;
     return crow::response(202, body);
 }
 
@@ -91,6 +106,34 @@ crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command
     }
 
     return makeCommandResponse(command, cctv_mgr.sendCommand(command));
+}
+
+crow::response dispatchViewCommand(CctvManager& cctv_mgr, const std::string& command, bool has_rotation_update) {
+    if (!has_rotation_update) {
+        return dispatchCommand(cctv_mgr, command, true);
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> throttle_lock(view_rotation_throttle_mutex);
+
+    if (has_last_view_rotation_command) {
+        const auto elapsed = now - last_view_rotation_command_at;
+        if (elapsed < kViewRotationThrottleWindow) {
+            const auto retry_after = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         kViewRotationThrottleWindow - elapsed)
+                                         .count();
+            return makeThrottledViewResponse(command, static_cast<int>(retry_after));
+        }
+    }
+
+    if (!tryScheduleAsyncCommand(cctv_mgr, command)) {
+        std::lock_guard<std::mutex> async_lock(async_command_mutex);
+        return makeBusyResponse(async_command_status.active_command);
+    }
+
+    has_last_view_rotation_command = true;
+    last_view_rotation_command_at = now;
+    return makeAcceptedResponse(command);
 }
 }  // namespace
 
@@ -169,6 +212,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
             return crow::response(400, "Invalid JSON");
         }
 
+        const bool has_rotation_update = x.has("rx") || x.has("ry");
         std::string cmd = "pc_view";
         if (x.has("rx")) {
             cmd += " rx=" + std::to_string(x["rx"].d());
@@ -192,7 +236,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
             cmd += " mesh=" + std::to_string(x["mesh"].b() ? 1 : 0);
         }
 
-        return dispatchCommand(cctv_mgr, cmd, true);
+        return dispatchViewCommand(cctv_mgr, cmd, has_rotation_update);
     });
 
     CROW_ROUTE(app, "/cctv/control/stream").methods(crow::HTTPMethod::POST)
