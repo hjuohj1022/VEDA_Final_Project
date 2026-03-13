@@ -192,7 +192,9 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
 
     CROW_ROUTE(app, "/cctv/control/stop").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        return dispatchCommand(cctv_mgr, "stop", true);
+        // Stop should preempt stream/control flow immediately.
+        // Avoid async BUSY gating so the command always reaches CCTV relay.
+        return makeCommandResponse("stop", cctv_mgr.sendCommand("stop"));
     });
 
     CROW_ROUTE(app, "/cctv/control/pause").methods(crow::HTTPMethod::POST)
