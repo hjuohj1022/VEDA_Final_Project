@@ -18,6 +18,7 @@ int BackendCoreStateService::detectedObjects(const BackendPrivate *state) { retu
 QString BackendCoreStateService::networkStatus(const BackendPrivate *state) { return state->m_networkStatus; }
 
 QString BackendCoreStateService::thermalFrameDataUrl(const BackendPrivate *state) { return state->m_thermalFrameDataUrl; }
+QString BackendCoreStateService::cctv3dMapFrameDataUrl(const BackendPrivate *state) { return state->m_cctv3dMapFrameDataUrl; }
 QString BackendCoreStateService::thermalInfoText(const BackendPrivate *state) { return state->m_thermalInfoText; }
 bool BackendCoreStateService::thermalStreaming(const BackendPrivate *state) { return state->m_thermalStreaming; }
 QString BackendCoreStateService::thermalPalette(const BackendPrivate *state) { return state->m_thermalPalette; }

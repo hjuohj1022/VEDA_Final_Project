@@ -72,6 +72,7 @@ class Backend : public QObject
 
     // Thermal/display info
     Q_PROPERTY(QString thermalFrameDataUrl READ thermalFrameDataUrl NOTIFY thermalFrameDataUrlChanged)
+    Q_PROPERTY(QString cctv3dMapFrameDataUrl READ cctv3dMapFrameDataUrl NOTIFY cctv3dMapFrameDataUrlChanged)
     Q_PROPERTY(QString thermalInfoText READ thermalInfoText NOTIFY thermalInfoTextChanged)
     Q_PROPERTY(bool thermalStreaming READ thermalStreaming NOTIFY thermalStreamingChanged)
     Q_PROPERTY(QString thermalPalette READ thermalPalette NOTIFY thermalPaletteChanged)
@@ -118,6 +119,7 @@ public:
     QString networkStatus() const;
 
     QString thermalFrameDataUrl() const;
+    QString cctv3dMapFrameDataUrl() const;
     QString thermalInfoText() const;
     bool thermalStreaming() const;
     QString thermalPalette() const;
@@ -199,8 +201,12 @@ public:
                                               int colorLevel,
                                               bool sharpnessEnabled);
     Q_INVOKABLE bool sunapiResetDisplaySettings(int cameraIndex);
+    Q_INVOKABLE bool startCctv3dMapPrepareSequence(int cameraIndex);
     Q_INVOKABLE bool startCctv3dMapSequence(int cameraIndex);
+    Q_INVOKABLE bool pauseCctv3dMapSequence();
+    Q_INVOKABLE bool resumeCctv3dMapSequence();
     Q_INVOKABLE void stopCctv3dMapSequence();
+    Q_INVOKABLE bool updateCctv3dMapView(double rx, double ry);
 
 signals:
     // Property notify
@@ -262,6 +268,7 @@ signals:
 
     // Thermal/display notify
     void thermalFrameDataUrlChanged();
+    void cctv3dMapFrameDataUrlChanged();
     void thermalInfoTextChanged();
     void thermalStreamingChanged();
     void thermalPaletteChanged();

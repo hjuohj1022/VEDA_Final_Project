@@ -135,11 +135,24 @@ struct BackendPrivate
     int m_cctv3dMapPendingStep = 0;
     int m_cctv3dMapMoveStatusPollCount = 0;
     int m_cctv3dMapStartRetryCount = 0;
+    int m_cctv3dMapStreamRetryCount = 0;
+    bool m_cctv3dMapStopInFlight = false;
+    qint64 m_cctv3dMapLastStopRequestMs = 0;
     int m_cctv3dMapCameraIndex = -1;
+    bool m_cctv3dMapPrepareOnly = false;
     int m_cctv3dMapWsActiveToken = 0;
     bool m_cctv3dMapStoppingExpected = false;
     qint64 m_cctv3dMapFrameCount = 0;
     qint64 m_cctv3dMapTotalBytes = 0;
+    qint64 m_cctv3dMapLastRenderMs = 0;
+    QString m_cctv3dMapFrameDataUrl;
+    double m_cctv3dMapViewRx = -20.0;
+    double m_cctv3dMapViewRy = 35.0;
+    int m_cctv3dMapRgbdWidth = 0;
+    int m_cctv3dMapRgbdHeight = 0;
+    QByteArray m_cctv3dMapRgbdDepthBytes;
+    QByteArray m_cctv3dMapRgbdBgrBytes;
+    QByteArray m_cctv3dMapWsStreamBuffer;
 };
 
 #endif // BACKEND_P_H

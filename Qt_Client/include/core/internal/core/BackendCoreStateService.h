@@ -23,6 +23,7 @@ public:
     static QString networkStatus(const BackendPrivate *state);
 
     static QString thermalFrameDataUrl(const BackendPrivate *state);
+    static QString cctv3dMapFrameDataUrl(const BackendPrivate *state);
     static QString thermalInfoText(const BackendPrivate *state);
     static bool thermalStreaming(const BackendPrivate *state);
     static QString thermalPalette(const BackendPrivate *state);
