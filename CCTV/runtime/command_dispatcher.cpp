@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <string>
 #include <mutex>
 
@@ -153,6 +154,22 @@ void HandleStatusRequest(const ServerClient& client, ServerRuntimeContext& ctx) 
                      " paused=" + std::to_string(pausedNow ? 1 : 0) + "\n");
 }
 
+template <typename StartFn>
+void LaunchStreamThreadOrReply(const char* streamName,
+                               std::atomic<bool>& streamActive,
+                               ServerClient streamClient,
+                               StartFn&& startFn) {
+    streamActive.store(true);
+    try {
+        startFn();
+    } catch (const std::system_error& ex) {
+        streamActive.store(false);
+        LogError(std::string(streamName) + " thread launch failed: " + ex.what());
+        SendResponse(streamClient, std::string("ERR ") + streamName + " launch failed\n");
+        CloseServerClient(streamClient);
+    }
+}
+
 void ResetWorkerStartupState(WorkerStartupState& state) {
     std::lock_guard<std::mutex> lock(state.mu);
     state.finished = false;
@@ -208,8 +225,10 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     if (req.depthStream) {
         StopDepthStreamThread(ctx);
         ServerClient streamClient = clientSocket.Release();
-        ctx.depthStreamThread = std::thread([streamClient, &ctx]() {
-            DepthStreamWorker(streamClient, &ctx.depthStream, &ctx.depthStreamActive);
+        LaunchStreamThreadOrReply("depth_stream", ctx.depthStreamActive, streamClient, [&ctx, streamClient]() {
+            ctx.depthStreamThread = std::thread([streamClient, &ctx]() {
+                DepthStreamWorker(streamClient, &ctx.depthStream, &ctx.depthStreamActive);
+            });
         });
         return;
     }
@@ -217,8 +236,10 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     if (req.rgbdStream) {
         StopRgbdStreamThread(ctx);
         ServerClient streamClient = clientSocket.Release();
-        ctx.rgbdStreamThread = std::thread([streamClient, &ctx]() {
-            RgbdStreamWorker(streamClient, &ctx.rgbdStream, &ctx.rgbdStreamActive);
+        LaunchStreamThreadOrReply("rgbd_stream", ctx.rgbdStreamActive, streamClient, [&ctx, streamClient]() {
+            ctx.rgbdStreamThread = std::thread([streamClient, &ctx]() {
+                RgbdStreamWorker(streamClient, &ctx.rgbdStream, &ctx.rgbdStreamActive);
+            });
         });
         return;
     }
@@ -226,8 +247,10 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     if (req.pcStream) {
         StopPcStreamThread(ctx);
         ServerClient streamClient = clientSocket.Release();
-        ctx.pcStreamThread = std::thread([streamClient, &ctx]() {
-            PcImageStreamWorker(streamClient, &ctx.pcStream, &ctx.pcStreamActive);
+        LaunchStreamThreadOrReply("pc_stream", ctx.pcStreamActive, streamClient, [&ctx, streamClient]() {
+            ctx.pcStreamThread = std::thread([streamClient, &ctx]() {
+                PcImageStreamWorker(streamClient, &ctx.pcStream, &ctx.pcStreamActive);
+            });
         });
         return;
     }
