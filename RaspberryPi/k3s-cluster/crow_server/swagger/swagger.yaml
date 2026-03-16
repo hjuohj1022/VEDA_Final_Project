@@ -37,9 +37,17 @@ paths:
   /login:
     post:
       summary: 사용자 로그인 및 JWT 발급
-      description: 사용자 인증에 성공하면 보호된 API 호출에 사용할 JWT를 발급합니다.
+      description: |
+        로그인 테스트의 시작점입니다.
+        2FA가 비활성화된 계정은 최종 JWT를 바로 반환합니다.
+        2FA가 활성화된 계정은 최종 JWT 대신 `pre_auth_token`을 반환하며,
+        이 경우 `/2fa/verify`에 OTP를 보내서 최종 로그인을 완료해야 합니다.
       requestBody:
         required: true
+        description: |
+          먼저 이 요청을 실행해서 계정의 기본 인증 상태를 확인합니다.
+          응답에 `token`이 있으면 로그인 완료,
+          `pre_auth_token`이 있으면 OTP 추가 인증이 필요한 상태입니다.
         content:
           application/json:
             schema:
@@ -50,13 +58,279 @@ paths:
               properties:
                 id:
                   type: string
+                  example: testuser
                 password:
                   type: string
+                  example: testpw1234
+            examples:
+              basicLogin:
+                summary: 기본 로그인 요청
+                value:
+                  id: testuser
+                  password: testpw1234
       responses:
         '200':
           description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  requires_2fa:
+                    type: boolean
+                  token:
+                    type: string
+                  pre_auth_token:
+                    type: string
+                  expires_in:
+                    type: integer
+              examples:
+                without2fa:
+                  summary: 2FA 비활성 사용자 로그인 성공
+                  value:
+                    status: success
+                    requires_2fa: false
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.full_access_token
+                with2fa:
+                  summary: 비밀번호 통과 후 OTP 필요
+                  value:
+                    status: 2fa_required
+                    requires_2fa: true
+                    pre_auth_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                    expires_in: 300
         '401':
           description: 인증 실패
+          content:
+            text/plain:
+              example: Login Failed: Check ID or Password
+
+  /2fa/setup/init:
+    post:
+      summary: Start TOTP 2FA setup
+      description: |
+        TOTP 2FA 설정을 시작합니다.
+        이 요청은 이미 로그인된 상태의 최종 JWT가 필요합니다.
+        응답으로 받은 `manual_key`를 Google Authenticator 등에 등록하고,
+        이어서 `/2fa/setup/confirm`으로 첫 OTP를 확인하면 2FA가 활성화됩니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Pending 2FA setup created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  manual_key:
+                    type: string
+                  otpauth_url:
+                    type: string
+                  expires_in:
+                    type: integer
+              example:
+                status: pending
+                manual_key: JBSWY3DPEHPK3PXP
+                otpauth_url: otpauth://totp/VEDA%3Atestuser?secret=JBSWY3DPEHPK3PXP&issuer=VEDA&algorithm=SHA1&digits=6&period=30
+                expires_in: 300
+        '401':
+          description: Unauthorized
+          content:
+            text/plain:
+              example: Unauthorized
+        '409':
+          description: 2FA already enabled
+          content:
+            text/plain:
+              example: 2FA is already enabled
+
+  /2fa/setup/confirm:
+    post:
+      summary: Confirm TOTP 2FA setup
+      description: |
+        `/2fa/setup/init`으로 받은 secret을 앱에 등록한 뒤,
+        앱에 표시된 첫 6자리 OTP를 보내 2FA를 최종 활성화합니다.
+        Authorization 헤더에는 최종 JWT가 필요합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - otp
+              properties:
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              confirmSetup:
+                summary: 앱에 표시된 첫 OTP
+                value:
+                  otp: '123456'
+      responses:
+        '200':
+          description: 2FA enabled
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: true
+        '400':
+          description: Missing or invalid setup state
+          content:
+            text/plain:
+              examples:
+                missingOtp:
+                  summary: 요청 바디에 otp가 없음
+                  value: Missing otp
+                noPendingSetup:
+                  summary: setup/init을 먼저 하지 않음
+                  value: No pending 2FA setup found
+        '401':
+          description: Invalid OTP
+          content:
+            text/plain:
+              example: Invalid OTP
+        '410':
+          description: Pending setup expired
+          content:
+            text/plain:
+              example: Pending 2FA setup expired
+
+  /2fa/verify:
+    post:
+      summary: Verify OTP after password login
+      description: |
+        `/login` 결과가 `requires_2fa=true`일 때 사용하는 2차 인증 엔드포인트입니다.
+        `/login`에서 받은 `pre_auth_token`과 현재 OTP를 보내면
+        최종 JWT를 발급받을 수 있습니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pre_auth_token
+                - otp
+              properties:
+                pre_auth_token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              verify2fa:
+                summary: pre_auth_token과 OTP로 최종 JWT 발급
+                value:
+                  pre_auth_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                  otp: '123456'
+      responses:
+        '200':
+          description: OTP verified and JWT issued
+          content:
+            application/json:
+              example:
+                status: success
+                requires_2fa: false
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.full_access_token
+        '400':
+          description: Missing request field or 2FA not enabled
+          content:
+            text/plain:
+              examples:
+                missingBody:
+                  summary: pre_auth_token 또는 otp 누락
+                  value: Missing pre_auth_token or otp
+                notEnabled:
+                  summary: 계정에 2FA가 켜져 있지 않음
+                  value: 2FA is not enabled
+        '401':
+          description: Invalid pre_auth_token or OTP
+          content:
+            text/plain:
+              examples:
+                invalidToken:
+                  summary: pre_auth_token이 만료되었거나 유효하지 않음
+                  value: Invalid pre-auth token
+                invalidOtp:
+                  summary: OTP가 일치하지 않음
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+
+  /2fa/disable:
+    post:
+      summary: Disable TOTP 2FA
+      description: |
+        현재 로그인한 사용자의 TOTP 2FA를 비활성화합니다.
+        Authorization 헤더에는 최종 JWT가 필요하며,
+        현재 Authenticator 앱에 표시되는 OTP도 함께 보내야 합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - otp
+              properties:
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              disable2fa:
+                summary: 현재 OTP로 2FA 비활성화
+                value:
+                  otp: '123456'
+      responses:
+        '200':
+          description: 2FA disabled
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: false
+        '400':
+          description: Missing OTP or 2FA already disabled
+          content:
+            text/plain:
+              examples:
+                missingOtp:
+                  summary: otp 누락
+                  value: Missing otp
+                alreadyDisabled:
+                  summary: 이미 2FA가 꺼져 있음
+                  value: 2FA is already disabled
+        '401':
+          description: Unauthorized or invalid OTP
+          content:
+            text/plain:
+              examples:
+                unauthorized:
+                  summary: JWT가 없거나 유효하지 않음
+                  value: Unauthorized
+                invalidOtp:
+                  summary: OTP가 일치하지 않음
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
 
   /recordings:
     get:
