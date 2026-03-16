@@ -38,6 +38,9 @@
 namespace fs = std::filesystem;
 
 std::string getJwtSecret();
+bool verifyTokenStage(const std::string& token,
+                      const std::string& expected_stage,
+                      std::string* user_id_out);
 
 namespace {
 // 인증/DB/파일 스트리밍 헬퍼의 라우트 바깥 배치.
