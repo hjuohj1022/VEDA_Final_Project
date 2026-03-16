@@ -12,10 +12,15 @@ Item {
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     
     property bool isLoggedIn: backend.isLoggedIn
+    property bool twoFactorRequired: backend.twoFactorRequired
     signal requestReturnLiveView()
     
     function triggerSignIn() {
         if (root.signupMode || backend.loginLocked) {
+            return
+        }
+        if (backend.twoFactorRequired) {
+            backend.verifyTwoFactorOtp(otpField.text)
             return
         }
         backend.login(idField.text, pwField.text)
@@ -79,6 +84,8 @@ Item {
                     placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                     Layout.fillWidth: true
                     height: 40
+                    enabled: !backend.twoFactorRequired
+                    opacity: backend.twoFactorRequired ? 0.65 : 1.0
                     color: theme ? theme.textPrimary : "white"
                     background: Rectangle {
                         color: theme ? theme.bgComponent : "#18181b"
@@ -95,6 +102,8 @@ Item {
                     echoMode: TextInput.Password
                     Layout.fillWidth: true
                     height: 40
+                    enabled: !backend.twoFactorRequired
+                    opacity: backend.twoFactorRequired ? 0.65 : 1.0
                     color: theme ? theme.textPrimary : "white"
                     background: Rectangle {
                         color: theme ? theme.bgComponent : "#18181b"
@@ -119,9 +128,50 @@ Item {
                         radius: 6
                     }
                 }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    visible: backend.twoFactorRequired && !root.signupMode
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        color: theme ? theme.bgComponent : "#18181b"
+                        border.color: theme ? theme.border : "#27272a"
+                        radius: 8
+                        implicitHeight: otpHint.implicitHeight + 24
+
+                        Text {
+                            id: otpHint
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            color: theme ? theme.textSecondary : "#d4d4d8"
+                            wrapMode: Text.WordWrap
+                            text: "비밀번호 확인이 완료되었습니다. Authenticator 앱의 6자리 OTP를 입력해 로그인하세요."
+                        }
+                    }
+
+                    TextField {
+                        id: otpField
+                        placeholderText: "6-digit OTP"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        Layout.fillWidth: true
+                        height: 40
+                        maximumLength: 6
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        validator: RegularExpressionValidator { regularExpression: /[0-9]{0,6}/ }
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: otpField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onAccepted: triggerSignIn()
+                    }
+                }
                 
                 Button {
-                    text: "Sign In"
+                    text: backend.twoFactorRequired ? "Verify OTP" : "Sign In"
                     Layout.fillWidth: true
                     height: 40
                     visible: !root.signupMode
@@ -153,6 +203,7 @@ Item {
                     text: root.signupMode ? "Create Account" : "Sign Up"
                     Layout.fillWidth: true
                     height: 40
+                    visible: !backend.twoFactorRequired
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
 
@@ -195,10 +246,10 @@ Item {
                 }
 
                 Button {
-                    text: "Back to Sign In"
+                    text: root.signupMode ? "Back to Sign In" : "Cancel OTP"
                     Layout.fillWidth: true
                     height: 36
-                    visible: root.signupMode
+                    visible: root.signupMode || backend.twoFactorRequired
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     background: Rectangle {
@@ -213,10 +264,16 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     onClicked: {
-                        root.signupMode = false
-                        idField.text = ""
-                        pwField.text = ""
-                        pwConfirmField.text = ""
+                        if (root.signupMode) {
+                            root.signupMode = false
+                            idField.text = ""
+                            pwField.text = ""
+                            pwConfirmField.text = ""
+                            otpField.text = ""
+                            return
+                        }
+                        backend.cancelTwoFactorLogin()
+                        otpField.text = ""
                     }
                 }
 
@@ -224,7 +281,7 @@ Item {
                     text: "Skip (Temporary)"
                     Layout.fillWidth: true
                     height: 36
-                    visible: !root.signupMode
+                    visible: !root.signupMode && !backend.twoFactorRequired
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     background: Rectangle {
@@ -243,7 +300,7 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
-                    visible: !root.signupMode
+                    visible: !root.signupMode && !backend.twoFactorRequired
                     color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -255,7 +312,7 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    visible: backend.loginLocked && !root.signupMode
+                    visible: backend.loginLocked && !root.signupMode && !backend.twoFactorRequired
 
                     TextField {
                         id: adminUnlockField
@@ -307,7 +364,7 @@ Item {
                 }
                 
                 Button {
-                    text: "Clear"
+                    text: backend.twoFactorRequired ? "Clear OTP" : "Clear"
                     Layout.fillWidth: true
                     height: 40
                     scale: down ? 0.97 : 1.0
@@ -327,6 +384,10 @@ Item {
                     }
                     
                     onClicked: {
+                        if (backend.twoFactorRequired) {
+                            otpField.text = ""
+                            return
+                        }
                         idField.text = ""
                         pwField.text = ""
                         pwConfirmField.text = ""
@@ -582,19 +643,30 @@ Item {
             if (!backend.isLoggedIn) {
                 idField.text = ""
                 pwField.text = ""
+                otpField.text = ""
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
                 backend.stopThermalStream()
             }
         }
+
+        function onTwoFactorRequiredChanged() {
+            if (backend.twoFactorRequired) {
+                otpField.text = ""
+                otpField.forceActiveFocus()
+            } else {
+                otpField.text = ""
+            }
+        }
         
         function onLoginFailed(error) {
-            errorDialog.title = "Login Failed"
+            errorDialog.title = backend.twoFactorRequired ? "OTP Verification Failed" : "Login Failed"
             errorDialog.text = error
             errorDialog.open()
         }
         
         function onLoginSuccess() {
+            otpField.text = ""
             backend.startThermalStream()
         }
 
@@ -606,6 +678,7 @@ Item {
             idField.text = ""
             pwField.text = ""
             pwConfirmField.text = ""
+            otpField.text = ""
         }
 
         function onRegisterFailed(error) {

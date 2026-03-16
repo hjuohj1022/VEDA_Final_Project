@@ -3,6 +3,8 @@
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
 
+bool BackendCoreStateService::twoFactorRequired(const BackendPrivate *state) { return state->m_twoFactorRequired; }
+bool BackendCoreStateService::twoFactorEnabled(const BackendPrivate *state) { return state->m_twoFactorEnabled; }
 QString BackendCoreStateService::userId(const BackendPrivate *state) { return state->m_userId; }
 int BackendCoreStateService::sessionRemainingSeconds(const BackendPrivate *state) { return state->m_sessionRemainingSeconds; }
 bool BackendCoreStateService::loginLocked(const BackendPrivate *state) { return state->m_loginLocked; }

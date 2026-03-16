@@ -81,6 +81,31 @@
 - `POST /register` 성공 시 로그인 화면으로 자동 복귀 및 입력값 초기화
 - `Back to Sign In` 클릭 시 회원가입 입력값 초기화
 - 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
+- `/login` 응답이 `token`이면 즉시 로그인 완료, `pre_auth_token + requires_2fa=true`이면 OTP 입력 단계로 전환
+- 로그인 화면에서 OTP 6자리 입력 후 `POST /2fa/verify`로 최종 JWT 발급
+- 로그인 잠금/세션 타이머/SSL 설정은 기존 인증 흐름과 동일하게 유지
+
+### 6-1. 2FA 및 계정 관리
+- 우측 상단 프로필 버튼에 현재 로그인한 계정 ID를 표시
+- 프로필 메뉴를 열 때마다 `GET /2fa/status`를 호출해 서버 기준 2FA 상태를 동기화
+- 2FA 미사용 계정은 `OTP 생성`만, 사용 중인 계정은 `OTP 삭제`만 노출
+- `OTP 생성` 다이얼로그
+  - `POST /2fa/setup/init`으로 `manual_key`를 수신
+  - Authenticator 앱 등록 후 `POST /2fa/setup/confirm`으로 활성화 완료
+  - 성공 후 현재 로그인은 유지되고, 메뉴 상태만 다시 동기화
+- `OTP 삭제` 다이얼로그
+  - 현재 OTP 6자리를 입력받아 `POST /2fa/disable` 호출
+  - 성공 후 현재 로그인은 유지되고, 메뉴 상태만 다시 동기화
+- `회원탈퇴` 다이얼로그
+  - 비밀번호를 다시 입력받아 `POST /account/delete` 호출
+  - 2FA 사용 계정이면 OTP 6자리도 함께 요구
+  - 성공 시 현재 세션을 정리하고 로그인 화면으로 복귀
+- 관련 구현:
+  - `src/ui/qml/common/LoginScreen.qml`
+  - `src/ui/qml/common/Header.qml`
+  - `src/ui/qml/dialogs/TwoFactorDialog.qml`
+  - `src/ui/qml/dialogs/AccountDeleteDialog.qml`
+  - `src/core/auth/BackendAuthRequestService.cpp`
 
 ### 7. 클라이언트 사양(System Specs) 팝업
 - 헤더 좌측 홈 아이콘 클릭 시 클라이언트 사양 다이얼로그 표시
@@ -223,6 +248,12 @@ ffmpeg 배치/버전 관리:
 | :--- | :--- | :--- |
 | `POST` | `/login` | 로그인 |
 | `POST` | `/register` | 회원가입 |
+| `POST` | `/2fa/verify` | 비밀번호 로그인 후 OTP 검증 및 최종 JWT 발급 |
+| `GET` | `/2fa/status` | 현재 로그인 사용자 2FA 상태 조회 |
+| `POST` | `/2fa/setup/init` | OTP 등록용 `manual_key`/`otpauth_url` 발급 |
+| `POST` | `/2fa/setup/confirm` | OTP 등록 완료(첫 OTP 검증) |
+| `POST` | `/2fa/disable` | 현재 OTP로 2FA 비활성화 |
+| `POST` | `/account/delete` | 비밀번호 재입력 기반 회원탈퇴(2FA 계정은 OTP 추가) |
 | `GET` | `/api/sunapi/storage` | 카메라 SD 저장소 조회 (Crow 프록시) |
 | `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
 | `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |

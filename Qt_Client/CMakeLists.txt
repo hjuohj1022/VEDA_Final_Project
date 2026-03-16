@@ -129,6 +129,8 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/dialogs/MotorControlDialog.qml
         src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/dialogs/SystemSpecsDialog.qml
+        src/ui/qml/dialogs/TwoFactorDialog.qml
+        src/ui/qml/dialogs/AccountDeleteDialog.qml
         src/ui/qml/components/IconButton.qml
         src/ui/qml/components/SidebarControlButton.qml
         src/ui/qml/components/SidebarDisplaySlider.qml

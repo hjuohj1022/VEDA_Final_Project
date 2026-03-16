@@ -10,6 +10,16 @@ void BackendAuthSessionService::skipLoginTemporarily(Backend *backend, BackendPr
     }
 
     state->m_isLoggedIn = true;
+    if (state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty()) {
+        state->m_twoFactorRequired = false;
+        state->m_preAuthToken.clear();
+        state->m_pendingLoginId.clear();
+        emit backend->twoFactorRequiredChanged();
+    }
+    if (state->m_twoFactorEnabled) {
+        state->m_twoFactorEnabled = false;
+        emit backend->twoFactorEnabledChanged();
+    }
     state->m_userId = "Skip";
     state->m_authToken.clear();
     state->m_sessionRemainingSeconds = state->m_sessionTimeoutSeconds;
@@ -33,7 +43,43 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
         return;
     }
 
+    if (state->m_twoFactorStatusReply && state->m_twoFactorStatusReply->isRunning()) {
+        state->m_twoFactorStatusReply->abort();
+    }
+    state->m_twoFactorStatusReply = nullptr;
+    state->m_twoFactorStatusInProgress = false;
+    if (state->m_twoFactorSetupReply && state->m_twoFactorSetupReply->isRunning()) {
+        state->m_twoFactorSetupReply->abort();
+    }
+    state->m_twoFactorSetupReply = nullptr;
+    state->m_twoFactorSetupInProgress = false;
+    if (state->m_twoFactorConfirmReply && state->m_twoFactorConfirmReply->isRunning()) {
+        state->m_twoFactorConfirmReply->abort();
+    }
+    state->m_twoFactorConfirmReply = nullptr;
+    state->m_twoFactorConfirmInProgress = false;
+    if (state->m_twoFactorDisableReply && state->m_twoFactorDisableReply->isRunning()) {
+        state->m_twoFactorDisableReply->abort();
+    }
+    state->m_twoFactorDisableReply = nullptr;
+    state->m_twoFactorDisableInProgress = false;
+    if (state->m_accountDeleteReply && state->m_accountDeleteReply->isRunning()) {
+        state->m_accountDeleteReply->abort();
+    }
+    state->m_accountDeleteReply = nullptr;
+    state->m_accountDeleteInProgress = false;
+
     state->m_isLoggedIn = false;
+    if (state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty()) {
+        state->m_twoFactorRequired = false;
+        state->m_preAuthToken.clear();
+        state->m_pendingLoginId.clear();
+        emit backend->twoFactorRequiredChanged();
+    }
+    if (state->m_twoFactorEnabled) {
+        state->m_twoFactorEnabled = false;
+        emit backend->twoFactorEnabledChanged();
+    }
     state->m_userId.clear();
     state->m_authToken.clear();
     state->m_sessionTimer->stop();

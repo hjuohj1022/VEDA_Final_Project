@@ -9,6 +9,12 @@ class BackendAuthRequestService
 {
 public:
     static void login(Backend *backend, BackendPrivate *state, QString id, QString pw);
+    static void verifyTwoFactorOtp(Backend *backend, BackendPrivate *state, QString otp);
+    static void refreshTwoFactorStatus(Backend *backend, BackendPrivate *state);
+    static void startTwoFactorSetup(Backend *backend, BackendPrivate *state);
+    static void confirmTwoFactorSetup(Backend *backend, BackendPrivate *state, QString otp);
+    static void disableTwoFactor(Backend *backend, BackendPrivate *state, QString otp);
+    static void deleteAccount(Backend *backend, BackendPrivate *state, QString password, QString otp);
     static void registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw);
 };
 

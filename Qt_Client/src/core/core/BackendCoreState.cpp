@@ -2,6 +2,8 @@
 #include "internal/core/BackendCoreStateService.h"
 #include "internal/core/Backend_p.h"
 
+bool Backend::twoFactorRequired() const { return BackendCoreStateService::twoFactorRequired(d_ptr.get()); }
+bool Backend::twoFactorEnabled() const { return BackendCoreStateService::twoFactorEnabled(d_ptr.get()); }
 QString Backend::userId() const { return BackendCoreStateService::userId(d_ptr.get()); }
 int Backend::sessionRemainingSeconds() const { return BackendCoreStateService::sessionRemainingSeconds(d_ptr.get()); }
 bool Backend::loginLocked() const { return BackendCoreStateService::loginLocked(d_ptr.get()); }

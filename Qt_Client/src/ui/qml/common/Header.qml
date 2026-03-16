@@ -8,6 +8,8 @@ Rectangle {
     property var theme
     property bool isDarkMode: true
     property bool isLoggedIn: false
+    property bool twoFactorEnabled: false
+    property string userId: ""
     property int currentSection: 0
     property int sessionRemainingSeconds: 0
     property bool exportProgressVisible: false
@@ -16,6 +18,9 @@ Rectangle {
     signal toggleTheme()
     signal requestLogin()
     signal requestLogout()
+    signal requestTwoFactorSetup()
+    signal requestTwoFactorDisable()
+    signal requestAccountDelete()
     signal requestHome()
     signal requestRtspSettings()
     signal requestMotorControl()
@@ -26,6 +31,27 @@ Rectangle {
         var m = Math.floor(s / 60)
         var r = s % 60
         return (m < 10 ? "0" + m : "" + m) + ":" + (r < 10 ? "0" + r : "" + r)
+    }
+
+    function displayUserName() {
+        var raw = (root.userId || "").trim()
+        if (raw.length === 0)
+            return "Guest"
+        return raw
+    }
+
+    function displayUserInitial() {
+        var name = displayUserName()
+        return name.length > 0 ? name.charAt(0).toUpperCase() : "G"
+    }
+
+    function clampAccountMenuX(value, menuWidth) {
+        return Math.max(12, Math.min(root.width - menuWidth - 12, value))
+    }
+
+    function clampAccountMenuY(value, menuHeight) {
+        var maxY = Math.max(8, root.height - menuHeight - 8)
+        return Math.max(8, Math.min(maxY, value))
     }
 
     function screenGuideText() {
@@ -368,8 +394,8 @@ Rectangle {
             Rectangle {
                 id: authBtn
                 Layout.preferredHeight: 34
-                Layout.preferredWidth: 92
-                radius: 10
+                Layout.preferredWidth: root.isLoggedIn ? 214 : 110
+                radius: 12
                 color: authMouse.pressed
                        ? (theme ? theme.border : "#27272a")
                        : (theme ? theme.bgComponent : "#18181b")
@@ -384,43 +410,459 @@ Rectangle {
                     spacing: 8
 
                     Rectangle {
-                        width: 24
-                        height: 24
-                        radius: 12
+                        width: 26
+                        height: 26
+                        radius: 13
                         color: theme ? theme.accent : "#f97316"
 
                         Text {
                             anchors.centerIn: parent
-                            text: "\uE77B"
+                            text: root.isLoggedIn ? displayUserInitial() : "\uE77B"
                             color: "white"
-                            font.family: "Segoe MDL2 Assets"
-                            font.pixelSize: 10
+                            font.family: root.isLoggedIn ? Qt.application.font.family : "Segoe MDL2 Assets"
+                            font.bold: root.isLoggedIn
+                            font.pixelSize: root.isLoggedIn ? 11 : 10
                         }
                     }
 
-                    Text {
-                        text: root.isLoggedIn ? "Logout" : "Login"
-                        color: theme ? theme.textPrimary : "white"
-                        font.bold: true
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
+                    Column {
                         Layout.fillWidth: true
+                        spacing: 1
+
+                        Text {
+                            text: root.isLoggedIn ? displayUserName() : "Login"
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+
+                        Text {
+                            text: root.isLoggedIn ? "Secure account" : "Sign in"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            font.pixelSize: 9
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                    }
+
+                    Rectangle {
+                        visible: root.isLoggedIn
+                        width: 18
+                        height: 18
+                        radius: 9
+                        color: authMouse.containsMouse
+                               ? (theme ? theme.bgSecondary : "#0f172a")
+                               : "transparent"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "\uE70D"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            font.family: "Segoe MDL2 Assets"
+                            font.pixelSize: 9
+                        }
                     }
                 }
 
                 MouseArea {
                     id: authMouse
                     anchors.fill: parent
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         backend.resetSessionTimer()
                         if (root.isLoggedIn) {
-                            root.requestLogout()
+                            if (accountMenu.opened) {
+                                accountMenu.close()
+                            } else {
+                                backend.refreshTwoFactorStatus()
+                                accountMenu.open()
+                            }
                         } else {
                             root.requestLogin()
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Popup {
+        id: accountMenu
+        parent: root
+        modal: false
+        focus: true
+        width: 286
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: {
+            var point = authBtn.mapToItem(root, authBtn.width - width, authBtn.height + 10)
+            return clampAccountMenuX(point.x, width)
+        }
+        y: {
+            var point = authBtn.mapToItem(root, 0, authBtn.height + 10)
+            return clampAccountMenuY(point.y, implicitHeight)
+        }
+
+        background: Rectangle {
+            radius: 18
+            color: theme ? theme.bgComponent : "#18181b"
+            border.color: theme ? theme.border : "#27272a"
+            border.width: 1
+        }
+
+        contentItem: Column {
+            width: accountMenu.width
+            spacing: 12
+
+            Item {
+                width: parent.width
+                height: 10
+            }
+
+            Rectangle {
+                width: parent.width - 22
+                height: 94
+                x: (parent.width - width) / 2
+                radius: 18
+                color: theme ? theme.bgSecondary : "#151518"
+                border.color: theme ? theme.border : "#2a2a30"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    anchors.topMargin: 14
+                    anchors.bottomMargin: 10
+                    spacing: 14
+
+                    Rectangle {
+                        width: 46
+                        height: 46
+                        radius: 23
+                        color: theme ? theme.accent : "#f97316"
+                        border.color: "#ffffff22"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: displayUserInitial()
+                            color: "white"
+                            font.bold: true
+                            font.pixelSize: 18
+                        }
+                    }
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 5
+
+                        Text {
+                            text: displayUserName()
+                            color: theme ? theme.textPrimary : "white"
+                            font.bold: true
+                            font.pixelSize: 15
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+
+                        Text {
+                            text: "Signed in account"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            font.pixelSize: 11
+                        }
+
+                        Rectangle {
+                            width: 88
+                            height: 22
+                            radius: 11
+                            color: theme ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18) : "#22f97316"
+                            border.color: theme ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.35) : "#55f97316"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 6
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: theme ? theme.accent : "#f97316"
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    text: "Authenticated"
+                                    color: theme ? theme.textPrimary : "white"
+                                    font.bold: true
+                                    font.pixelSize: 10
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            Rectangle {
+                width: parent.width - 30
+                x: (parent.width - width) / 2
+                height: 1
+                color: theme ? theme.border : "#27272a"
+                opacity: 0.75
+            }
+
+            Rectangle {
+                width: parent.width - 28
+                height: visible ? 64 : 0
+                x: (parent.width - width) / 2
+                visible: !root.twoFactorEnabled
+                radius: 14
+                color: otpCreateMouse.containsMouse ? (theme ? theme.bgSecondary : "#0f172a")
+                                                    : Qt.rgba(1, 1, 1, 0.02)
+                border.color: otpCreateMouse.containsMouse
+                              ? (theme ? theme.accent : "#f97316")
+                              : (theme ? theme.border : "#27272a")
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
+                    spacing: 12
+
+                    Rectangle {
+                        width: 34
+                        height: 34
+                        radius: 10
+                        color: theme ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16) : "#22f97316"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "+"
+                            color: theme ? theme.accent : "#f97316"
+                            font.bold: true
+                            font.pixelSize: 18
+                        }
+                    }
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 3
+
+                        Text {
+                            text: "OTP 생성"
+                            color: theme ? theme.textPrimary : "white"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Text {
+                            text: "Authenticator 앱 연동 시작"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            font.pixelSize: 10
+                        }
+                    }
+
+                    Text {
+                        text: "\uE72A"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.family: "Segoe MDL2 Assets"
+                        font.pixelSize: 10
+                    }
+                }
+
+                MouseArea {
+                    id: otpCreateMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        accountMenu.close()
+                        root.requestTwoFactorSetup()
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width - 28
+                height: visible ? 64 : 0
+                x: (parent.width - width) / 2
+                visible: root.twoFactorEnabled
+                radius: 14
+                color: otpDeleteMouse.containsMouse ? (theme ? theme.bgSecondary : "#0f172a")
+                                                    : Qt.rgba(1, 1, 1, 0.02)
+                border.color: otpDeleteMouse.containsMouse
+                              ? "#f59e0b"
+                              : (theme ? theme.border : "#27272a")
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
+                    spacing: 12
+
+                    Rectangle {
+                        width: 34
+                        height: 34
+                        radius: 10
+                        color: "#22f59e0b"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "\uE74D"
+                            color: "#f59e0b"
+                            font.family: "Segoe MDL2 Assets"
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 3
+
+                        Text {
+                            text: "OTP 삭제"
+                            color: theme ? theme.textPrimary : "white"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Text {
+                            text: "현재 2단계 인증 비활성화"
+                            color: theme ? theme.textSecondary : "#a1a1aa"
+                            font.pixelSize: 10
+                        }
+                    }
+
+                    Text {
+                        text: "\uE72A"
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.family: "Segoe MDL2 Assets"
+                        font.pixelSize: 10
+                    }
+                }
+
+                MouseArea {
+                    id: otpDeleteMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        accountMenu.close()
+                        root.requestTwoFactorDisable()
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width - 30
+                x: (parent.width - width) / 2
+                height: 1
+                color: theme ? theme.border : "#27272a"
+                opacity: 0.75
+            }
+
+            Item {
+                width: parent.width
+                height: 2
+            }
+
+            RowLayout {
+                width: parent.width - 28
+                x: (parent.width - width) / 2
+                height: 54
+                spacing: 10
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 14
+                    color: logoutMouse.containsMouse ? (theme ? theme.bgSecondary : "#0f172a")
+                                                     : Qt.rgba(1, 1, 1, 0.02)
+                    border.color: theme ? theme.border : "#27272a"
+                    border.width: 1
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Text {
+                            text: "\uE8AC"
+                            color: theme ? theme.textPrimary : "white"
+                            font.family: "Segoe MDL2 Assets"
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            text: "로그아웃"
+                            color: theme ? theme.textPrimary : "white"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                    }
+
+                    MouseArea {
+                        id: logoutMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            accountMenu.close()
+                            root.requestLogout()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 14
+                    color: deleteAccountMouse.containsMouse ? "#3f1d1d" : Qt.rgba(251/255, 113/255, 133/255, 0.05)
+                    border.color: deleteAccountMouse.containsMouse ? "#fb7185" : "#5b2330"
+                    border.width: 1
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Text {
+                            text: "\uE74D"
+                            color: deleteAccountMouse.containsMouse ? "#fda4af" : "#fb7185"
+                            font.family: "Segoe MDL2 Assets"
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            text: "회원탈퇴"
+                            color: deleteAccountMouse.containsMouse ? "#fda4af" : "#fb7185"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                    }
+
+                    MouseArea {
+                        id: deleteAccountMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            accountMenu.close()
+                            root.requestAccountDelete()
+                        }
+                    }
+                }
+            }
+
+            Item {
+                width: parent.width
+                height: 14
             }
         }
     }

@@ -23,6 +23,8 @@ class Backend : public QObject
 
     // Login/session/server info
     Q_PROPERTY(bool isLoggedIn READ isLoggedIn NOTIFY isLoggedInChanged)
+    Q_PROPERTY(bool twoFactorRequired READ twoFactorRequired NOTIFY twoFactorRequiredChanged)
+    Q_PROPERTY(bool twoFactorEnabled READ twoFactorEnabled NOTIFY twoFactorEnabledChanged)
     Q_PROPERTY(QString userId READ userId NOTIFY userIdChanged)
     Q_PROPERTY(int sessionRemainingSeconds READ sessionRemainingSeconds NOTIFY sessionRemainingSecondsChanged)
     Q_PROPERTY(bool loginLocked READ loginLocked NOTIFY loginLockChanged)
@@ -65,6 +67,8 @@ public:
     ~Backend();
 
     bool isLoggedIn() const;
+    bool twoFactorRequired() const;
+    bool twoFactorEnabled() const;
     QString userId() const;
     int sessionRemainingSeconds() const;
     bool loginLocked() const;
@@ -109,6 +113,13 @@ public:
 
     // Auth/session
     Q_INVOKABLE void login(QString id, QString pw);
+    Q_INVOKABLE void verifyTwoFactorOtp(QString otp);
+    Q_INVOKABLE void cancelTwoFactorLogin();
+    Q_INVOKABLE void refreshTwoFactorStatus();
+    Q_INVOKABLE void startTwoFactorSetup();
+    Q_INVOKABLE void confirmTwoFactorSetup(QString otp);
+    Q_INVOKABLE void disableTwoFactor(QString otp);
+    Q_INVOKABLE void deleteAccount(QString password, QString otp = QString());
     Q_INVOKABLE void registerUser(QString id, QString pw);
     Q_INVOKABLE void skipLoginTemporarily();
     Q_INVOKABLE void logout();
@@ -185,6 +196,8 @@ public:
 signals:
     // Property notify
     void isLoggedInChanged();
+    void twoFactorRequiredChanged();
+    void twoFactorEnabledChanged();
     void userIdChanged();
     void sessionRemainingSecondsChanged();
     void loginLockChanged();
@@ -200,6 +213,13 @@ signals:
     // Auth/session events
     void loginSuccess();
     void loginFailed(QString error);
+    void twoFactorSetupReady(QString manualKey, QString otpAuthUrl);
+    void twoFactorSetupCompleted();
+    void twoFactorSetupFailed(QString error);
+    void twoFactorDisableCompleted();
+    void twoFactorDisableFailed(QString error);
+    void accountDeleteCompleted();
+    void accountDeleteFailed(QString error);
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();

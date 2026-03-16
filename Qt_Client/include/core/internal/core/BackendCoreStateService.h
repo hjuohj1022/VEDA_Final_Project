@@ -8,6 +8,8 @@ class QString;
 class BackendCoreStateService
 {
 public:
+    static bool twoFactorRequired(const BackendPrivate *state);
+    static bool twoFactorEnabled(const BackendPrivate *state);
     static QString userId(const BackendPrivate *state);
     static int sessionRemainingSeconds(const BackendPrivate *state);
     static bool loginLocked(const BackendPrivate *state);

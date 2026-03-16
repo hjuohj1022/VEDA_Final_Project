@@ -8,8 +8,11 @@ Dialog {
     property string text: ""
 
     modal: true
+    parent: Overlay.overlay
     width: 360
     closePolicy: Popup.NoAutoClose
+    x: Math.round((((parent ? parent.width : 0) - width) / 2))
+    y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
 
     header: Rectangle {
         implicitHeight: 44
