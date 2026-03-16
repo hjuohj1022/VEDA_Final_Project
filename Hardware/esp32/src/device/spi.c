@@ -1,16 +1,13 @@
 /* spi.c - 32바이트 패킷 (CMD+LEN+DATA30) */
 
 #include "spi.h"
+#include "board_pins.h"
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/spi_master.h"
 
-#define PIN_SCK      4
-#define PIN_MISO     5
-#define PIN_MOSI     6
-#define PIN_CS       7
 #define SPI_CLOCK_HZ (1000000U)
 
 #define CMD_WRITE    0x01U
@@ -23,22 +20,22 @@ QueueHandle_t spi_cmd_queue = NULL;
 esp_err_t spiMasterInit(void)
 {
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num   = PIN_MOSI,
-        .miso_io_num   = PIN_MISO,
-        .sclk_io_num   = PIN_SCK,
+        .mosi_io_num   = BOARD_SPI_PIN_MOSI,
+        .miso_io_num   = BOARD_SPI_PIN_MISO,
+        .sclk_io_num   = BOARD_SPI_PIN_SCK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = (int32_t)SPI_PKT_SIZE,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(BOARD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
     spi_device_interface_config_t dev_cfg = {
         .mode           = 0U,
         .clock_speed_hz = (int32_t)SPI_CLOCK_HZ,
-        .spics_io_num   = PIN_CS,
+        .spics_io_num   = BOARD_SPI_PIN_CS,
         .queue_size     = 1,
     };
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev_cfg, &s_spi));
+    ESP_ERROR_CHECK(spi_bus_add_device(BOARD_SPI_HOST, &dev_cfg, &s_spi));
 
     spi_cmd_queue = xQueueCreate(10U, sizeof(spi_cmd_t));
     if (spi_cmd_queue == NULL) 
@@ -46,7 +43,11 @@ esp_err_t spiMasterInit(void)
         (void)printf("SPI queue create failed\n");
     }
 
-    (void)printf("SPI Master init OK\n");
+    (void)printf("SPI Master init OK (pins sck=%d miso=%d mosi=%d cs=%d)\n",
+                 BOARD_SPI_PIN_SCK,
+                 BOARD_SPI_PIN_MISO,
+                 BOARD_SPI_PIN_MOSI,
+                 BOARD_SPI_PIN_CS);
     return ESP_OK;
 }
 

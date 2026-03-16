@@ -1,6 +1,26 @@
 #include "wifi.h"
 #include "mqtt.h"
 #include "../device/cmd_uart.h"
+
+static void wifiConfigurePreferredBand(void)
+{
+#if CONFIG_SOC_WIFI_SUPPORT_5G
+    wifi_protocols_t protocols = {
+        .ghz_2g = 0,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = 0,
+        .ghz_5g = WIFI_BW_HT20,
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
+    ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &protocols));
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &bandwidths));
+    (void)printf("[WiFi] Preferred band: 5 GHz only\n");
+#endif
+}
+
 static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     (void)arg;
@@ -10,6 +30,7 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
     {
         if (event_id == (int32_t)WIFI_EVENT_STA_START) 
         {
+            wifiConfigurePreferredBand();
             (void)esp_wifi_connect();
         }
         else if (event_id == (int32_t)WIFI_EVENT_STA_DISCONNECTED) 

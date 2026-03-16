@@ -28,8 +28,11 @@ I2C_HandleTypeDef  hi2c1;
 
 static uint8_t uart_rx_byte;
 static char uart_cmd_buf[UART_RX_BUF_SIZE];
+static char uart_ready_buf[UART_RX_BUF_SIZE];
 static uint8_t uart_cmd_len;
+static volatile uint8_t uart_ready_len;
 static volatile bool uart_cmd_ready;
+static volatile bool uart_cmd_overflow;
 /* USER CODE END PV */
 
 void SystemClock_Config(void);
@@ -93,7 +96,7 @@ int main(void)
         /* USER CODE BEGIN WHILE */
         Motor_Update();
 
-        if (uart_cmd_ready)
+        if (uart_cmd_ready || uart_cmd_overflow)
         {
             processUartCommand();
         }
@@ -187,17 +190,36 @@ static void uartStartReceiveIT(void)
 
 static void processUartCommand(void)
 {
+    char local_buf[UART_RX_BUF_SIZE];
     char *cmd;
+    uint8_t local_len = 0U;
 
-    uart_cmd_ready = false;
-
-    if (uart_cmd_len == 0U)
+    __disable_irq();
+    if (uart_cmd_ready)
     {
-        uartStartReceiveIT();
+        local_len = uart_ready_len;
+        if (local_len >= UART_RX_BUF_SIZE)
+        {
+            local_len = UART_RX_BUF_SIZE - 1U;
+        }
+        (void)memcpy(local_buf, uart_ready_buf, local_len);
+        local_buf[local_len] = '\0';
+        uart_ready_len = 0U;
+        uart_cmd_ready = false;
+    }
+    __enable_irq();
+
+    if (local_len == 0U)
+    {
+        if (uart_cmd_overflow)
+        {
+            uart_cmd_overflow = false;
+            uartSendText("ERR overflow\r\n");
+        }
         return;
     }
 
-    cmd = trimCommand(uart_cmd_buf);
+    cmd = trimCommand(local_buf);
 
     if ((strcmp(cmd, "read") == 0) || (strcmp(cmd, "READ") == 0))
     {
@@ -233,9 +255,14 @@ static void processUartCommand(void)
         }
     }
 
+    if (uart_cmd_overflow)
+    {
+        uart_cmd_overflow = false;
+        uartSendText("ERR overflow\r\n");
+    }
+
     uart_cmd_len = 0U;
-    (void)memset(uart_cmd_buf, 0, sizeof(uart_cmd_buf));
-    uartStartReceiveIT();
+    (void)memset(uart_ready_buf, 0, sizeof(uart_ready_buf));
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -247,8 +274,18 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             if (uart_cmd_len > 0U)
             {
                 uart_cmd_buf[uart_cmd_len] = '\0';
-                uart_cmd_ready = true;
-                return;
+                if (!uart_cmd_ready)
+                {
+                    (void)memcpy(uart_ready_buf, uart_cmd_buf, uart_cmd_len + 1U);
+                    uart_ready_len = uart_cmd_len;
+                    uart_cmd_ready = true;
+                }
+                else
+                {
+                    uart_cmd_overflow = true;
+                }
+                uart_cmd_len = 0U;
+                (void)memset(uart_cmd_buf, 0, sizeof(uart_cmd_buf));
             }
         }
         else if (uart_cmd_len < (UART_RX_BUF_SIZE - 1U))
@@ -260,7 +297,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         {
             uart_cmd_len = 0U;
             (void)memset(uart_cmd_buf, 0, sizeof(uart_cmd_buf));
-            uartSendText("ERR overflow\r\n");
+            uart_cmd_overflow = true;
         }
 
         uartStartReceiveIT();

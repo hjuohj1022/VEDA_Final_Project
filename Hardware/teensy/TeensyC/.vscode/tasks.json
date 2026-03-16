@@ -1,0 +1,41 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "west-build-teensy41",
+            "type": "shell",
+            "command": "west",
+            "args": [
+                "build",
+                "-b",
+                "teensy41",
+                ".",
+                "-d",
+                "build/teensy41-debug",
+                "--pristine=auto"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "west-flash-teensy41",
+            "type": "shell",
+            "command": "west",
+            "args": [
+                "flash",
+                "-d",
+                "build/teensy41-debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

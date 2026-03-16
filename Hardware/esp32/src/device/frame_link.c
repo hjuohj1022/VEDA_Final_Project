@@ -1,4 +1,5 @@
 #include "frame_link.h"
+#include "board_pins.h"
 
 #include "driver/spi_slave.h"
 #include "esp_heap_caps.h"
@@ -6,12 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define FRAME_SPI_HOST          SPI2_HOST
-#define FRAME_SPI_PIN_SCK       4
-#define FRAME_SPI_PIN_MISO      5
-#define FRAME_SPI_PIN_MOSI      6
-#define FRAME_SPI_PIN_CS        7
 
 #define FRAME_SPI_PKT_SIZE      256U
 #define FRAME_SPI_HEADER_SIZE   (14U)
@@ -171,9 +166,9 @@ void frameLinkInit(void)
     }
 
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = FRAME_SPI_PIN_MOSI,
-        .miso_io_num = FRAME_SPI_PIN_MISO,
-        .sclk_io_num = FRAME_SPI_PIN_SCK,
+        .mosi_io_num = BOARD_SPI_PIN_MOSI,
+        .miso_io_num = BOARD_SPI_PIN_MISO,
+        .sclk_io_num = BOARD_SPI_PIN_SCK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = FRAME_SPI_PKT_SIZE,
@@ -181,18 +176,18 @@ void frameLinkInit(void)
 
     spi_slave_interface_config_t slave_cfg = {
         .mode = 0,
-        .spics_io_num = FRAME_SPI_PIN_CS,
+        .spics_io_num = BOARD_SPI_PIN_CS,
         .queue_size = 4,
         .flags = 0,
     };
 
-    ESP_ERROR_CHECK(spi_slave_initialize(FRAME_SPI_HOST, &bus_cfg, &slave_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_slave_initialize(BOARD_SPI_HOST, &bus_cfg, &slave_cfg, SPI_DMA_CH_AUTO));
 
     (void)printf("Frame link SPI slave init OK (pins sck=%d miso=%d mosi=%d cs=%d, frame_bufs=%u)\n",
-                 FRAME_SPI_PIN_SCK,
-                 FRAME_SPI_PIN_MISO,
-                 FRAME_SPI_PIN_MOSI,
-                 FRAME_SPI_PIN_CS,
+                 BOARD_SPI_PIN_SCK,
+                 BOARD_SPI_PIN_MISO,
+                 BOARD_SPI_PIN_MOSI,
+                 BOARD_SPI_PIN_CS,
                  (unsigned int)s_allocated_buffers);
     (void)printf("Heap after frame link init: free=%lu min=%lu\n",
                  (unsigned long)esp_get_free_heap_size(),
@@ -237,7 +232,7 @@ void frameLinkTask(void *arg)
             continue;
         }
 
-        const esp_err_t ret = spi_slave_transmit(FRAME_SPI_HOST, &trans, pdMS_TO_TICKS(1000U));
+        const esp_err_t ret = spi_slave_transmit(BOARD_SPI_HOST, &trans, pdMS_TO_TICKS(1000U));
         if (ret != ESP_OK) {
             if (ret == ESP_ERR_TIMEOUT) {
                 s_spi_timeouts++;

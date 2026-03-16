@@ -1,0 +1,15 @@
+{
+  "version": "25.3",
+  "toolchainPath": "C:/NXP/MCUXpressoIDE_25.6.136/ide/tools",
+  "linkedProjects": [],
+  "trustZoneType": "none",
+  "multicoreType": "none",
+  "projectType": "sdk-freestanding",
+  "sdk": {
+    "version": "2.16.000",
+    "path": "c:\\mcux\\SDK_2_16_000_EVK-MIMXRT1060",
+    "boardId": "evkmimxrt1060",
+    "deviceId": "MIMXRT1062xxxxA",
+    "coreId": "core0_MIMXRT1062xxxxA"
+  }
+}

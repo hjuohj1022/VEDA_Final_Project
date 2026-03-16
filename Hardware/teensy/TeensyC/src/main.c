@@ -58,6 +58,8 @@ static const struct device *lepton_cs_gpio;
 static const struct device *frame_cs_gpio;
 static bool frame_spi_ready = false;
 
+static void resetLepton(void);
+
 static struct spi_config lepton_spi_cfg = {
 	.frequency = 18000000U,
 	.operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8U) | SPI_MODE_CPOL | SPI_MODE_CPHA, /* SPI_MODE3 */
@@ -127,28 +129,42 @@ static void ensureFrameSpiReady(void)
 	printk("Frame SPI pinmux ready\n");
 }
 
-static void cciWriteReg(uint16_t reg, uint16_t val) {
+static bool cciWriteReg(uint16_t reg, uint16_t val) {
 	uint8_t data[4];
+
 	data[0] = (uint8_t)(reg >> 8U);
 	data[1] = (uint8_t)(reg & 0xFFU);
 	data[2] = (uint8_t)(val >> 8U);
 	data[3] = (uint8_t)(val & 0xFFU);
-	(void)i2c_write(i2c_dev, data, 4U, LEP_CCI_ADDRESS);
+	if (i2c_write(i2c_dev, data, 4U, LEP_CCI_ADDRESS) != 0) {
+		return false;
+	}
 	(void)k_msleep(5U);
+	return true;
 }
 
-static uint16_t cciReadReg(uint16_t reg) {
+static bool cciReadReg(uint16_t reg, uint16_t *out_val) {
 	uint8_t reg_addr[2] = { (uint8_t)(reg >> 8U), (uint8_t)(reg & 0xFFU) };
 	uint8_t data[2] = {0U, 0U};
-	(void)i2c_write_read(i2c_dev, LEP_CCI_ADDRESS, reg_addr, 2U, data, 2U);
-	return (uint16_t)(((uint16_t)data[0] << 8U) | (uint16_t)data[1]);
+
+	if ((out_val == NULL) ||
+	    (i2c_write_read(i2c_dev, LEP_CCI_ADDRESS, reg_addr, 2U, data, 2U) != 0)) {
+		return false;
+	}
+
+	*out_val = (uint16_t)(((uint16_t)data[0] << 8U) | (uint16_t)data[1]);
+	return true;
 }
 
 static bool cciWaitBusy(uint32_t ms) {
 	bool is_ready = false;
 	uint32_t start = k_uptime_get_32();
+	uint16_t status = 0U;
 	while ((k_uptime_get_32() - start) < ms) {
-		if ((cciReadReg(LEP_REG_STATUS) & 0x0001U) == 0U) {
+		if (!cciReadReg(LEP_REG_STATUS, &status)) {
+			break;
+		}
+		if ((status & 0x0001U) == 0U) {
 			is_ready = true;
 			break;
 		}
@@ -160,12 +176,28 @@ static bool cciWaitBusy(uint32_t ms) {
 static bool cciSet(uint16_t cmdId, uint16_t value) {
 	bool success = false;
 	if (cciWaitBusy(2000U)) {
-		cciWriteReg(LEP_REG_DATA0, value);
-		cciWriteReg(LEP_REG_LENGTH, 1U);
-		cciWriteReg(LEP_REG_COMMAND, (uint16_t)(cmdId | 0x02U));
-		success = cciWaitBusy(2000U);
+		success = cciWriteReg(LEP_REG_DATA0, value) &&
+		          cciWriteReg(LEP_REG_LENGTH, 1U) &&
+		          cciWriteReg(LEP_REG_COMMAND, (uint16_t)(cmdId | 0x02U)) &&
+		          cciWaitBusy(2000U);
 	}
 	return success;
+}
+
+static bool configureLepton(void)
+{
+	for (uint8_t attempt = 1U; attempt <= 3U; attempt++) {
+		if (cciSet(LEP_CMD_AGC_ENABLE, 0x0000U) &&
+		    cciSet(LEP_CMD_VID_OUTPUT, 0x0007U)) {
+			return true;
+		}
+
+		printk("Lepton config attempt %u failed\n", attempt);
+		resetLepton();
+		(void)k_msleep(200U);
+	}
+
+	return false;
 }
 
 static void resetLepton(void) {
@@ -230,6 +262,10 @@ static int sendFrameOverSpi(uint16_t frame_id)
 		(void)k_busy_wait(FRAME_SPI_CS_SETUP_US);
 		if (spi_write(frame_spi_dev, &frame_spi_cfg, &tx_bufs) != 0) {
 			(void)gpio_pin_set(frame_cs_gpio, FRAME_CS_PIN, 1);
+			printk("Frame SPI write failed: frame=%u chunk=%u/%u\n",
+			       frame_id,
+			       chunk_idx + 1U,
+			       total_chunks);
 			return -1;
 		}
 		(void)k_busy_wait(FRAME_SPI_CS_HOLD_US);
@@ -248,6 +284,8 @@ static bool captureFrame(uint32_t *discard_count)
 	uint32_t local_discards = 0U;
 
 	while (true) {
+		int spi_ret;
+
 		if ((k_uptime_get_32() - start_ms) > 3000U) {
 			*discard_count = local_discards;
 			return false;
@@ -256,8 +294,16 @@ static bool captureFrame(uint32_t *discard_count)
 		(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 0);
 		struct spi_buf rx_buf = { .buf = rawPacket, .len = PACKET_SIZE };
 		struct spi_buf_set rx_bufs = { .buffers = &rx_buf, .count = 1U };
-		(void)spi_read(lepton_spi_dev, &lepton_spi_cfg, &rx_bufs);
+		spi_ret = spi_read(lepton_spi_dev, &lepton_spi_cfg, &rx_bufs);
 		(void)gpio_pin_set(lepton_cs_gpio, LEPTON_CS_PIN, 1);
+		if (spi_ret != 0) {
+			local_discards++;
+			if ((local_discards % 20U) == 0U) {
+				printk("Lepton SPI read failed: ret=%d discards=%u\n", spi_ret, local_discards);
+			}
+			(void)k_msleep(5U);
+			continue;
+		}
 
 		if ((rawPacket[0] & 0x0FU) == 0x0FU) {
 			local_discards++;
@@ -265,15 +311,14 @@ static bool captureFrame(uint32_t *discard_count)
 			continue;
 		}
 
-		const uint8_t packet_id = rawPacket[1];
-		if (packet_id >= PACKETS_PER_SEG) {
+		if (rawPacket[1] >= PACKETS_PER_SEG) {
 			local_discards++;
 			continue;
 		}
 
-		if (packet_id == 20U) {
+		if (rawPacket[1] == 20U) {
 			const uint8_t seg_bits = (uint8_t)((rawPacket[0] >> 4U) & 0x07U);
-			if ((seg_bits > 0U) && (seg_bits <= 4U)) {
+			if ((seg_bits > 0U) && (seg_bits <= NUM_SEGMENTS)) {
 				current_seg = seg_bits;
 			}
 		}
@@ -281,7 +326,7 @@ static bool captureFrame(uint32_t *discard_count)
 		if (current_seg > 0U) {
 			const uint32_t base_idx =
 				(((uint32_t)(current_seg - 1U) * (uint32_t)PACKETS_PER_SEG * (uint32_t)PIXELS_PER_PKT) +
-				 ((uint32_t)packet_id * (uint32_t)PIXELS_PER_PKT));
+				 ((uint32_t)rawPacket[1] * (uint32_t)PIXELS_PER_PKT));
 
 			if ((base_idx + PIXELS_PER_PKT) <= (uint32_t)FRAME_SIZE) {
 				for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
@@ -291,8 +336,8 @@ static bool captureFrame(uint32_t *discard_count)
 				}
 			}
 
-			if (packet_id == 59U) {
-				if (current_seg == 4U) {
+			if (rawPacket[1] == 59U) {
+				if (current_seg == NUM_SEGMENTS) {
 					*discard_count = local_discards;
 					return true;
 				}
@@ -328,8 +373,12 @@ void main(void) {
 
 		(void)k_msleep(1000U);
 
-		(void)cciSet(LEP_CMD_AGC_ENABLE, 0x0000U);
-		(void)cciSet(LEP_CMD_VID_OUTPUT, 0x0007U);
+		if (!configureLepton()) {
+			printk("Lepton init failed after retries\n");
+			while (true) {
+				(void)k_msleep(1000U);
+			}
+		}
 		printk("Lepton init complete, SPI frame link ready\n");
 
 		while (true) {
