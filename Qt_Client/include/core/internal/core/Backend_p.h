@@ -54,12 +54,10 @@ struct BackendPrivate
     QString m_networkStatus = "Disconnected";
 
     // Request runtime state
-    QPointer<QNetworkReply> m_downloadReply;
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
     QPointer<QNetworkReply> m_registerReply;
     bool m_registerInProgress = false;
-    QString m_tempFilePath;
 
     // TLS/SSL runtime state
     QSslConfiguration m_sslConfig;

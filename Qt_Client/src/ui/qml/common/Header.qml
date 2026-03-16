@@ -102,7 +102,7 @@ Rectangle {
                 }
 
                 ToolTip.visible: homeMouse.containsMouse
-                ToolTip.text: "대시보드 홈"
+                ToolTip.text: "클라이언트 사양"
                 ToolTip.delay: 350
                 ToolTip.timeout: 2000
             }
