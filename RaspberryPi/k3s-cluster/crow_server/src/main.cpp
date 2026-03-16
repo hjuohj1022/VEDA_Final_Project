@@ -50,6 +50,7 @@ constexpr int kPasswordHashIterations = 120000;
 constexpr size_t kPasswordSaltBytes = 16;
 constexpr size_t kPasswordHashBytes = 32;
 constexpr char kPasswordHashPrefix[] = "pbkdf2_sha256";
+constexpr unsigned int kMysqlErrDuplicateEntry = 1062;
 constexpr long long kMaxStreamResponseBytes = 8LL * 1024LL * 1024LL;
 // TOTP 2FA는 Authenticator 앱과 서버가 동일한 규칙을 공유해야 하므로 상수로 고정한다.
 constexpr size_t kTotpSecretBufferBytes = 128;
@@ -92,6 +93,13 @@ struct UserTwoFactorInfo {
     std::string pending_secret;
     long long pending_expires_at = 0;
     long long last_used_step = -1;
+};
+
+enum class RegisterUserStatus {
+    Success,
+    DuplicateId,
+    InvalidInput,
+    DbError,
 };
 
 std::optional<std::string> validateCredentials(const std::string& user_id,
@@ -900,6 +908,37 @@ bool disableUserTwoFactor(MYSQL* connection,
     return true;
 }
 
+// Account deletion is intentionally a separate helper so the route can stay focused
+// on security checks: authenticated user, password re-entry, optional OTP, then delete.
+bool deleteUserAccount(MYSQL* connection,
+                       const std::string& user_id) {
+    auto statement = prepareStatement(connection, "DELETE FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind account delete params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to delete account: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return mysql_stmt_affected_rows(statement.get()) > 0;
+}
+
 bool verifyUserPassword(MYSQL* connection,
                         const std::string& inputId,
                         const std::string& inputPw) {
@@ -923,6 +962,96 @@ bool verifyUserPassword(MYSQL* connection,
     const std::string upgraded_hash = hashPassword(inputPw);
     if (!upgraded_hash.empty()) {
         updateStoredPasswordHash(connection, inputId, upgraded_hash);
+    }
+    return true;
+}
+
+// A signed JWT is not enough on its own once account deletion is supported.
+// Protected APIs should also confirm that the user row still exists, otherwise
+// an old token issued before deletion could continue to work until expiry.
+bool doesUserExist(MYSQL* connection,
+                   const std::string& user_id) {
+    if (!connection) {
+        return false;
+    }
+
+    auto statement = prepareStatement(connection, "SELECT 1 FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind user-exists param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to execute user-exists lookup: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    int exists_value = 0;
+    MysqlBindFlag is_null = 0;
+    MysqlBindFlag bind_error = 0;
+    MYSQL_BIND result_bind[1] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_LONG;
+    result_bind[0].buffer = &exists_value;
+    result_bind[0].is_null = &is_null;
+    result_bind[0].error = &bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind user-exists result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to store user-exists result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA || is_null) {
+        return false;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED || bind_error) {
+        std::cerr << "[DB Error] Failed to fetch user-exists result" << std::endl;
+        return false;
+    }
+
+    return exists_value == 1;
+}
+
+bool loadExistingFullJwtUserId(const std::string& token,
+                               std::string* user_id_out) {
+    std::string user_id;
+    if (!verifyTokenStage(token, kJwtStageFull, &user_id)) {
+        return false;
+    }
+
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        std::cerr << "[AUTH] Failed to verify JWT user existence because DB connection failed" << std::endl;
+        return false;
+    }
+
+    if (!doesUserExist(connection.get(), user_id)) {
+        std::cerr << "[AUTH] JWT rejected because user no longer exists: " << user_id << std::endl;
+        return false;
+    }
+
+    if (user_id_out) {
+        *user_id_out = user_id;
     }
     return true;
 }
@@ -978,7 +1107,10 @@ std::optional<std::string> getAuthorizedUserId(const crow::request& req) {
     }
 
     std::string user_id;
-    if (!verifyTokenStage(*token, kJwtStageFull, &user_id)) {
+    // The token must be a full-access JWT and its owner must still exist.
+    // This closes the gap where a deleted account could keep using an old JWT
+    // until the token expiration time.
+    if (!loadExistingFullJwtUserId(*token, &user_id)) {
         return std::nullopt;
     }
 
@@ -1003,7 +1135,7 @@ std::string generatePreAuthJWT(const std::string& userId) {
 }
 
 bool verifyJWT(const std::string& token) {
-    return verifyTokenStage(token, kJwtStageFull, nullptr);
+    return loadExistingFullJwtUserId(token, nullptr);
 }
 
 bool verifyPreAuthJWT(const std::string& token, std::string* user_id_out) {
@@ -1146,25 +1278,25 @@ bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputP
     return verifyUserPassword(connection.get(), inputId, inputPw);
 }
 
-bool registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
+RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
     // 신규 계정의 prepared statement + PBKDF2 해시 형태 저장.
     if (validateCredentials(inputId, inputPw)) {
-        return false;
+        return RegisterUserStatus::InvalidInput;
     }
 
     auto connection = openDatabaseConnection();
     if (!connection) {
-        return false;
+        return RegisterUserStatus::DbError;
     }
 
     const std::string password_hash = hashPassword(inputPw);
     if (password_hash.empty()) {
-        return false;
+        return RegisterUserStatus::DbError;
     }
 
     auto statement = prepareStatement(connection.get(), "INSERT INTO users (id, password) VALUES (?, ?)");
     if (!statement) {
-        return false;
+        return RegisterUserStatus::DbError;
     }
 
     MYSQL_BIND param_bind[2] = {};
@@ -1184,16 +1316,20 @@ bool registerUserToDBSecure(const std::string& inputId, const std::string& input
     if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
         std::cerr << "[DB Error] Failed to bind register params: "
                   << mysql_stmt_error(statement.get()) << std::endl;
-        return false;
+        return RegisterUserStatus::DbError;
     }
 
     if (mysql_stmt_execute(statement.get()) != 0) {
-        std::cerr << "[DB Error] Failed to register user: "
+        const unsigned int error_code = mysql_stmt_errno(statement.get());
+        std::cerr << "[DB Error] Failed to register user (" << error_code << "): "
                   << mysql_stmt_error(statement.get()) << std::endl;
-        return false;
+        if (error_code == kMysqlErrDuplicateEntry) {
+            return RegisterUserStatus::DuplicateId;
+        }
+        return RegisterUserStatus::DbError;
     }
 
-    return true;
+    return RegisterUserStatus::Success;
 }
 
 int main()
@@ -1274,19 +1410,61 @@ int main()
             return crow::response(400, *credential_error);
         }
 
-        if (registerUserToDBSecure(id, pw)) {
+        const RegisterUserStatus register_status = registerUserToDBSecure(id, pw);
+        if (register_status == RegisterUserStatus::Success) {
             crow::json::wvalue res;
             res["status"] = "success";
             res["message"] = "User registered successfully";
             return crow::response(201, res);
-        } else {
-            return crow::response(409, "Registration Failed: ID already exists or DB error");
         }
+
+        if (register_status == RegisterUserStatus::DuplicateId) {
+            return crow::response(409, "Registration Failed: ID already exists");
+        }
+
+        if (register_status == RegisterUserStatus::InvalidInput) {
+            return crow::response(400, "Invalid id or password");
+        }
+
+        return crow::response(500, "Registration Failed: DB error");
     });
 
     // ==========================================
     // TOTP 2FA 설정/검증 API
     // ==========================================
+    CROW_ROUTE(app, "/2fa/status").methods(crow::HTTPMethod::GET)
+    ([](const crow::request& req){
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), *user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+
+        const long long now = static_cast<long long>(std::time(nullptr));
+        const bool has_pending_setup = !two_factor_info.pending_secret.empty()
+                                       && (two_factor_info.pending_expires_at <= 0
+                                           || now <= two_factor_info.pending_expires_at);
+        const long long pending_expires_in = has_pending_setup && two_factor_info.pending_expires_at > 0
+                                             ? std::max(0LL, two_factor_info.pending_expires_at - now)
+                                             : 0LL;
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["two_factor_enabled"] = two_factor_info.enabled && !two_factor_info.secret.empty();
+        res["has_pending_setup"] = has_pending_setup;
+        res["pending_expires_in"] = pending_expires_in;
+        return crow::response(res);
+    });
+
     CROW_ROUTE(app, "/2fa/setup/init").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
         const auto user_id = getAuthorizedUserId(req);
@@ -1467,6 +1645,80 @@ int main()
         crow::json::wvalue res;
         res["status"] = "success";
         res["two_factor_enabled"] = false;
+        return crow::response(res);
+    });
+
+    CROW_ROUTE(app, "/account/delete").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        // Account deletion is protected by the normal full JWT and then one more
+        // local proof step. Even if a session token is stolen, the attacker still
+        // needs the current password and, when 2FA is enabled, the live OTP code.
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto x = crow::json::load(req.body);
+        if (!x || !x.has("password")) {
+            return crow::response(400, "Missing password");
+        }
+
+        const std::string password = x["password"].s();
+        if (password.empty()) {
+            return crow::response(400, "Password is required");
+        }
+        if (password.size() > kMaxPasswordLength) {
+            return crow::response(400, "Password is too long");
+        }
+
+        const bool has_otp_field = x.has("otp");
+        const std::string otp = has_otp_field ? std::string(x["otp"].s()) : std::string{};
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        // First confirm that the caller still knows the current password for the
+        // authenticated account. This prevents "click once and delete" behavior
+        // from an already-open session.
+        if (!verifyUserPassword(connection.get(), *user_id, password)) {
+            return crow::response(401, "Invalid password");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), *user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+
+        const bool requires_otp = two_factor_info.enabled && !two_factor_info.secret.empty();
+        if (requires_otp) {
+            if (!has_otp_field) {
+                return crow::response(400, "Missing otp");
+            }
+
+            if (const auto otp_error = validateOtpCode(otp)) {
+                return crow::response(400, *otp_error);
+            }
+
+            long long matched_step = -1;
+            // When 2FA is enabled we require a fresh OTP from the authenticator app
+            // before deleting the account. The same replay protection rule used by
+            // login/disable is reused here through last_used_step.
+            if (!verifyTotpCode(two_factor_info.secret, otp, two_factor_info.last_used_step, &matched_step)) {
+                return crow::response(401, "Invalid OTP");
+            }
+        }
+
+        // At this point the requester passed all configured identity checks, so
+        // the actual row can be removed from the users table.
+        if (!deleteUserAccount(connection.get(), *user_id)) {
+            return crow::response(500, "Failed to delete user");
+        }
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["deleted"] = true;
         return crow::response(res);
     });
 
