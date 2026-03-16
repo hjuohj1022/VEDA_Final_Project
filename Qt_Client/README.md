@@ -85,6 +85,12 @@
   - `src/app/app_icon.rc`
 - CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘에 반영
 
+### 9. 앱 시작 로딩 오버레이
+- 앱 시작 직후 풀스크린 로딩 오버레이(스플래시) 표시
+- 최소 표시 시간 + 초기 UI 준비 완료 조건 충족 시 오버레이 자동 종료
+- 종료 후 기존 로그인 화면 노출(로그인/세션 동작 변경 없음)
+- 관련 구현: `src/ui/qml/Main.qml`
+
 ## Qt Client Architecture Diagram
 
 ```text
