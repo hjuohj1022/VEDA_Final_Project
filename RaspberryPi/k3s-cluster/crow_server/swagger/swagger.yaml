@@ -104,7 +104,7 @@ paths:
           description: 인증 실패
           content:
             text/plain:
-              example: Login Failed: Check ID or Password
+              example: "Login Failed: Check ID or Password"
 
   /2fa/setup/init:
     post:
