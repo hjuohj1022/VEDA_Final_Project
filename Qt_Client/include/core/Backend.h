@@ -16,32 +16,6 @@ class QFile;
 class QNetworkReply;
 class QNetworkRequest;
 class BackendPrivate;
-class BackendAuthSessionService;
-class BackendAuthRequestService;
-class BackendRtspConfigService;
-class BackendRtspPlaybackService;
-class BackendSunapiDisplayService;
-class BackendThermalService;
-class BackendSunapiPtzService;
-class BackendRtspProbeService;
-class BackendMediaRecordingsService;
-class BackendMediaStorageService;
-class BackendSunapiTimelineService;
-class BackendCctv3dMapService;
-class BackendStreamingWsService;
-class BackendPlaybackWsRuntimeService;
-class BackendCoreSslService;
-class BackendCoreMqttService;
-class BackendInitService;
-class BackendCoreApiService;
-class BackendCoreEnvService;
-class BackendCoreStateService;
-class BackendSunapiExportDownloadService;
-class BackendSunapiExportFfmpegService;
-class BackendSunapiExportHttpService;
-class BackendSunapiExportWsRtspService;
-class BackendSunapiExportWsSessionService;
-class BackendSunapiExportWsMuxService;
 
 class Backend : public QObject
 {
@@ -277,38 +251,11 @@ signals:
     void thermalManualRangeChanged();
     void displaySettingsChanged();
 
-private slots:
+public slots:
     void checkStorage();
     void onSessionTick();
 
-private:
-    friend class BackendAuthSessionService;
-    friend class BackendAuthRequestService;
-    friend class BackendRtspConfigService;
-    friend class BackendRtspPlaybackService;
-    friend class BackendSunapiDisplayService;
-    friend class BackendThermalService;
-    friend class BackendSunapiPtzService;
-    friend class BackendRtspProbeService;
-    friend class BackendMediaRecordingsService;
-    friend class BackendMediaStorageService;
-    friend class BackendSunapiTimelineService;
-    friend class BackendCctv3dMapService;
-    friend class BackendStreamingWsService;
-    friend class BackendPlaybackWsRuntimeService;
-    friend class BackendCoreSslService;
-    friend class BackendCoreMqttService;
-    friend class BackendInitService;
-    friend class BackendCoreApiService;
-    friend class BackendCoreEnvService;
-    friend class BackendCoreStateService;
-    friend class BackendSunapiExportDownloadService;
-    friend class BackendSunapiExportFfmpegService;
-    friend class BackendSunapiExportHttpService;
-    friend class BackendSunapiExportWsRtspService;
-    friend class BackendSunapiExportWsSessionService;
-    friend class BackendSunapiExportWsMuxService;
-
+public:
     // Core/SSL helpers
     void setupSslConfiguration();
     void applySslIfNeeded(QNetworkRequest &request) const;
@@ -431,6 +378,7 @@ private:
                              quint16 maxVal,
                              int frameId);
 
+private:
     std::unique_ptr<BackendPrivate> d_ptr;
 };
 
