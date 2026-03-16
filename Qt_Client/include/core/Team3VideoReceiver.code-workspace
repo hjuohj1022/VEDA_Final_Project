@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../Team3VideoReceiver_backup"
+		},
+		{
+			"path": "../../../../../../k3s-cluster"
+		},
+		{
+			"path": "../../../../../../Qt_Client"
+		},
+		{
+			"path": "../../../../../../CCTV"
+		}
+	],
+	"settings": {}
+}

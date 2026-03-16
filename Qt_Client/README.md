@@ -281,7 +281,7 @@ Team3VideoReceiver/
 └─ README.md
 ```
 
-## 헤더 리팩토링(1차) 요약
+## 헤더 리팩토링(friend 제거) 요약
 
 `Backend`를 QML용 퍼사드(API 계약)로 유지하고 내부 구현을 서비스 계층으로 분리했습니다.
 
@@ -293,6 +293,9 @@ Team3VideoReceiver/
   - `include/core/internal/<domain>/*Service.h`
 - 구현 파일은 도메인 폴더로 정리
   - `src/core/<domain>/*.cpp`
+- `friend` 선언 제거
+  - 서비스 클래스는 `Backend`의 서비스용 헬퍼 API를 통해 동작
+  - 클래스 간 결합도를 낮추고 접근 경로를 명시적으로 정리
 - 공개 인터페이스와 내부 구현의 의존성 경계 명확화
   - 빌드 영향 범위 축소
   - 헤더 include 충돌 감소

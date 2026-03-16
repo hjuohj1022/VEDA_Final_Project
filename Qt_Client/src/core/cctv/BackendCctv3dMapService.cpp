@@ -19,6 +19,7 @@
 #include <QSslError>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,100 @@ constexpr int kCctv3dMapStopRetryMaxAttempts = 0;
 constexpr qint64 kCctv3dMapStopMinIntervalMs = 3000;
 constexpr qint64 kCctv3dMapRenderIntervalMs = 66;
 constexpr int kCctv3dMapMaxWsBufferBytes = 64 * 1024 * 1024;
+
+int defaultPortForScheme(const QString &scheme)
+{
+    return (scheme.compare("https", Qt::CaseInsensitive) == 0) ? 443 : 80;
+}
+
+bool sameApiOrigin(const QUrl &requestUrl, const QUrl &apiBase)
+{
+    if (!requestUrl.isValid() || !apiBase.isValid()) {
+        return false;
+    }
+
+    const bool sameScheme = (requestUrl.scheme().compare(apiBase.scheme(), Qt::CaseInsensitive) == 0);
+    const bool sameHost = (requestUrl.host().compare(apiBase.host(), Qt::CaseInsensitive) == 0);
+    const bool samePort = (requestUrl.port(defaultPortForScheme(requestUrl.scheme()))
+                           == apiBase.port(defaultPortForScheme(apiBase.scheme())));
+    return sameScheme && sameHost && samePort;
+}
+
+void applyCctvAuthIfNeeded(Backend *backend, BackendPrivate *state, QNetworkRequest &request)
+{
+    if (!backend || !state) {
+        return;
+    }
+    if (state->m_authToken.trimmed().isEmpty()) {
+        return;
+    }
+
+    const QUrl apiBase(backend->serverUrl());
+    if (!sameApiOrigin(request.url(), apiBase)) {
+        return;
+    }
+
+    request.setRawHeader("Authorization", QByteArray("Bearer ") + state->m_authToken.toUtf8());
+}
+
+void applyCctvSslIfNeeded(BackendPrivate *state, QNetworkRequest &request)
+{
+    if (!state) {
+        return;
+    }
+    if (request.url().scheme().compare("https", Qt::CaseInsensitive) != 0) {
+        return;
+    }
+    if (state->m_sslConfigReady) {
+        request.setSslConfiguration(state->m_sslConfig);
+    }
+}
+
+void attachCctvIgnoreSslErrors(BackendPrivate *state, QNetworkReply *reply, const QString &tag)
+{
+    if (!reply || !state) {
+        return;
+    }
+    QObject::connect(reply, &QNetworkReply::sslErrors, reply, [reply, tag, state](const QList<QSslError> &errors) {
+        for (const auto &err : errors) {
+            qWarning() << "[" << tag << "][SSL]" << err.errorString();
+        }
+        if (state->m_sslIgnoreErrors) {
+            reply->ignoreSslErrors();
+        }
+    });
+}
+
+QUrl buildCctvApiUrl(Backend *backend,
+                     const QString &path,
+                     const QMap<QString, QString> &query = {})
+{
+    QUrl url(backend ? backend->serverUrl() : QString());
+    QString cleanPath = path.trimmed();
+    if (!cleanPath.startsWith('/')) {
+        cleanPath.prepend('/');
+    }
+    url.setPath(cleanPath);
+
+    QUrlQuery q(url);
+    for (auto it = query.constBegin(); it != query.constEnd(); ++it) {
+        q.addQueryItem(it.key(), it.value());
+    }
+    url.setQuery(q);
+    return url;
+}
+
+QNetworkRequest makeCctvApiJsonRequest(Backend *backend,
+                                       BackendPrivate *state,
+                                       const QString &path,
+                                       const QMap<QString, QString> &query = {})
+{
+    QNetworkRequest request(buildCctvApiUrl(backend, path, query));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    applyCctvSslIfNeeded(state, request);
+    applyCctvAuthIfNeeded(backend, state, request);
+    return request;
+}
 
 bool parseCctvControlApiResult(const QString &body, bool httpOk, QString *outApiStatus, QString *outApiMessage)
 {
@@ -687,11 +782,10 @@ bool BackendCctv3dMapService::pauseCctv3dMapSequence(Backend *backend, BackendPr
         return false;
     }
 
-    QNetworkRequest request = backend->makeApiJsonRequest("/cctv/control/pause");
-    backend->applyAuthIfNeeded(request);
+    QNetworkRequest request = makeCctvApiJsonRequest(backend, state, "/cctv/control/pause");
 
     QNetworkReply *reply = state->m_manager->post(request, QByteArray());
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_PAUSE");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_PAUSE");
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, reply]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
@@ -729,11 +823,10 @@ bool BackendCctv3dMapService::resumeCctv3dMapSequence(Backend *backend, BackendP
         return false;
     }
 
-    QNetworkRequest request = backend->makeApiJsonRequest("/cctv/control/resume");
-    backend->applyAuthIfNeeded(request);
+    QNetworkRequest request = makeCctvApiJsonRequest(backend, state, "/cctv/control/resume");
 
     QNetworkReply *reply = state->m_manager->post(request, QByteArray());
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_RESUME");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_RESUME");
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, reply]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
@@ -818,10 +911,9 @@ void BackendCctv3dMapService::postCctvControlStopWithRetry(Backend *backend, Bac
         return;
     }
 
-    QNetworkRequest request = backend->makeApiJsonRequest("/cctv/control/stop");
-    backend->applyAuthIfNeeded(request);
+    QNetworkRequest request = makeCctvApiJsonRequest(backend, state, "/cctv/control/stop");
     QNetworkReply *reply = state->m_manager->post(request, QByteArray());
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_STOP");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_STOP");
 
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, sequenceToken, attempt]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -950,16 +1042,16 @@ void BackendCctv3dMapService::pollCctv3dMapMoveStatus(Backend *backend, BackendP
     state->m_cctv3dMapMoveStatusPollCount += 1;
     const int attempt = state->m_cctv3dMapMoveStatusPollCount;
 
-    QNetworkRequest request(backend->buildApiUrl("/sunapi/stw-cgi/ptzcontrol.cgi", {
+    QNetworkRequest request(buildCctvApiUrl(backend, "/sunapi/stw-cgi/ptzcontrol.cgi", {
         {"msubmenu", "movestatus"},
         {"action", "view"},
         {"Channel", QString::number(state->m_cctv3dMapCameraIndex)},
     }));
-    backend->applySslIfNeeded(request);
-    backend->applyAuthIfNeeded(request);
+    applyCctvSslIfNeeded(state, request);
+    applyCctvAuthIfNeeded(backend, state, request);
 
     QNetworkReply *reply = state->m_manager->get(request);
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_MOVE_STATUS");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_MOVE_STATUS");
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, sequenceToken, attempt]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
@@ -1020,15 +1112,14 @@ bool BackendCctv3dMapService::postCctvControlStart(Backend *backend, BackendPriv
         return false;
     }
 
-    QNetworkRequest request = backend->makeApiJsonRequest("/cctv/control/start");
-    backend->applyAuthIfNeeded(request);
+    QNetworkRequest request = makeCctvApiJsonRequest(backend, state, "/cctv/control/start");
     const QJsonObject payload {
         {"channel", state->m_cctv3dMapCameraIndex},
         {"mode", "headless"},
     };
 
     QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_START");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_START");
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, sequenceToken]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
@@ -1086,8 +1177,7 @@ bool BackendCctv3dMapService::postCctvControlStream(Backend *backend, BackendPri
         return false;
     }
 
-    QNetworkRequest request = backend->makeApiJsonRequest("/cctv/control/stream");
-    backend->applyAuthIfNeeded(request);
+    QNetworkRequest request = makeCctvApiJsonRequest(backend, state, "/cctv/control/stream");
     const QJsonObject payload {
         {"stream", "rgbd_stream"},
     };
@@ -1098,7 +1188,7 @@ bool BackendCctv3dMapService::postCctvControlStream(Backend *backend, BackendPri
             << "body=" << QString::fromUtf8(bodyData);
 
     QNetworkReply *reply = state->m_manager->post(request, bodyData);
-    backend->attachIgnoreSslErrors(reply, "CCTV_3DMAP_STREAM");
+    attachCctvIgnoreSslErrors(state, reply, "CCTV_3DMAP_STREAM");
     QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, sequenceToken]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString body = QString::fromUtf8(reply->readAll()).trimmed();
