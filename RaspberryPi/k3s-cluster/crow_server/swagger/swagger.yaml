@@ -40,14 +40,14 @@ paths:
       description: |
         로그인 테스트의 시작점입니다.
         2FA가 비활성화된 계정은 최종 JWT를 바로 반환합니다.
-        2FA가 활성화된 계정은 최종 JWT 대신 `pre_auth_token`을 반환하며,
-        이 경우 `/2fa/verify`에 OTP를 보내서 최종 로그인을 완료해야 합니다.
+        2FA가 활성화된 계정은 최종 JWT 대신 'pre_auth_token'을 반환하며,
+        이 경우 '/2fa/verify'에 OTP를 보내서 최종 로그인을 완료해야 합니다.
       requestBody:
         required: true
         description: |
           먼저 이 요청을 실행해서 계정의 기본 인증 상태를 확인합니다.
-          응답에 `token`이 있으면 로그인 완료,
-          `pre_auth_token`이 있으면 OTP 추가 인증이 필요한 상태입니다.
+          응답에 'token'이 있으면 로그인 완료,
+          'pre_auth_token'이 있으면 OTP 추가 인증이 필요한 상태입니다.
         content:
           application/json:
             schema:
@@ -104,7 +104,7 @@ paths:
           description: 인증 실패
           content:
             text/plain:
-              example: "Login Failed: Check ID or Password"
+              example: 'Login Failed: Check ID or Password'
 
   /2fa/setup/init:
     post:
@@ -112,8 +112,8 @@ paths:
       description: |
         TOTP 2FA 설정을 시작합니다.
         이 요청은 이미 로그인된 상태의 최종 JWT가 필요합니다.
-        응답으로 받은 `manual_key`를 Google Authenticator 등에 등록하고,
-        이어서 `/2fa/setup/confirm`으로 첫 OTP를 확인하면 2FA가 활성화됩니다.
+        응답으로 받은 'manual_key'를 Google Authenticator 등에 등록하고,
+        이어서 '/2fa/setup/confirm'으로 첫 OTP를 확인하면 2FA가 활성화됩니다.
       security:
         - bearerAuth: []
       responses:
@@ -152,7 +152,7 @@ paths:
     post:
       summary: Confirm TOTP 2FA setup
       description: |
-        `/2fa/setup/init`으로 받은 secret을 앱에 등록한 뒤,
+        '/2fa/setup/init'으로 받은 secret을 앱에 등록한 뒤,
         앱에 표시된 첫 6자리 OTP를 보내 2FA를 최종 활성화합니다.
         Authorization 헤더에는 최종 JWT가 필요합니다.
       security:
@@ -208,8 +208,8 @@ paths:
     post:
       summary: Verify OTP after password login
       description: |
-        `/login` 결과가 `requires_2fa=true`일 때 사용하는 2차 인증 엔드포인트입니다.
-        `/login`에서 받은 `pre_auth_token`과 현재 OTP를 보내면
+        '/login' 결과가 'requires_2fa=true'일 때 사용하는 2차 인증 엔드포인트입니다.
+        '/login'에서 받은 'pre_auth_token'과 현재 OTP를 보내면
         최종 JWT를 발급받을 수 있습니다.
       requestBody:
         required: true
@@ -354,7 +354,7 @@ paths:
           required: true
           schema:
             type: string
-          description: 삭제할 파일명 예시 `recording_1.mp4`
+          description: "삭제할 파일명 예시 'recording_1.mp4'"
       responses:
         '200':
           description: 삭제 성공
@@ -946,7 +946,7 @@ paths:
           required: true
           schema:
             type: string
-          description: `stw-cgi` 뒤에 붙는 경로
+          description: "'stw-cgi' 뒤에 붙는 경로"
       responses:
         '200':
           description: 프록시 응답 전달 성공
@@ -1014,7 +1014,7 @@ paths:
   /esp32/watchdog/latest:
     get:
       summary: 최신 ESP32 상태 payload 조회
-      description: 최근 `system/status` 메시지와 메타데이터를 반환합니다.
+      description: 최근 'system/status' 메시지와 메타데이터를 반환합니다.
       responses:
         '200':
           description: 최신 상태 payload 및 메타데이터
@@ -1031,14 +1031,14 @@ paths:
     post:
       summary: 원시 모터 명령 전송
       description: |
-        `motor/control` 토픽으로 원시 ASCII 명령을 발행하고 다음 `motor/response` 응답을 기다립니다.
+        'motor/control' 토픽으로 원시 ASCII 명령을 발행하고 다음 'motor/response' 응답을 기다립니다.
         예시:
-        - `motor1 left press`
-        - `motor2 release`
-        - `motor3 set 120`
-        - `read`
-        - `ping`
-        - `stopall`
+        - 'motor1 left press'
+        - 'motor2 release'
+        - 'motor3 set 120'
+        - 'read'
+        - 'ping'
+        - 'stopall'
       requestBody:
         required: true
         content:
@@ -1294,7 +1294,7 @@ paths:
                   description: 채널 번호 (0-3)
                 mode:
                   type: string
-                  description: 실행 모드 `headless` 또는 `gui`
+                  description: "실행 모드 'headless' 또는 'gui'"
       responses:
         '200':
           description: 처리 성공
@@ -1309,15 +1309,15 @@ paths:
       description: |
         원시 명령 문자열을 CCTV 백엔드로 그대로 전달합니다.
         예시:
-        - `pause`
-        - `resume`
-        - `stop`
-        - `channel=0 headless`
-        - `channel=1 gui`
-        - `pc_view rx=-20 ry=35 flipx=0 flipy=0 flipz=0 wire=1 mesh=0`
-        - `depth_stream`
-        - `rgbd_stream`
-        - `pc_stream`
+        - 'pause'
+        - 'resume'
+        - 'stop'
+        - 'channel=0 headless'
+        - 'channel=1 gui'
+        - 'pc_view rx=-20 ry=35 flipx=0 flipy=0 flipz=0 wire=1 mesh=0'
+        - 'depth_stream'
+        - 'rgbd_stream'
+        - 'pc_stream'
       requestBody:
         required: true
         content:
@@ -1365,7 +1365,7 @@ paths:
       summary: 뷰 파라미터 변경
       description: |
         point cloud 뷰 설정(rotation, flip 등)을 변경합니다.
-        `rx` 또는 `ry`가 포함된 요청은 500ms마다 한 번만 수락됩니다.
+        'rx' 또는 'ry'가 포함된 요청은 500ms마다 한 번만 수락됩니다.
       requestBody:
         required: true
         content:
@@ -1389,17 +1389,17 @@ paths:
                   type: boolean
       responses:
         '202':
-          description: 백그라운드 실행 수락 또는 `status=THROTTLED` 제한 응답
+          description: "백그라운드 실행 수락 또는 'status=THROTTLED' 제한 응답"
 
   /cctv/control/stream:
     post:
       summary: CCTV 스트림 모드 시작
       description: |
-        `/cctv/stream` 사용 전에 백엔드 스트림 명령 하나를 먼저 선택합니다.
+        '/cctv/stream' 사용 전에 백엔드 스트림 명령 하나를 먼저 선택합니다.
         다음 중 하나만 선택해야 합니다.
-        - `pc_stream`: 서버 렌더링 PNG 스트림
-        - `rgbd_stream`: depth32f + bgr24 원시 스트림
-        - `depth_stream`: depth32f 전용 원시 스트림
+        - 'pc_stream': 서버 렌더링 PNG 스트림
+        - 'rgbd_stream': depth32f + bgr24 원시 스트림
+        - 'depth_stream': depth32f 전용 원시 스트림
         동시에 여러 스트림 명령을 혼합해서 사용하지 마십시오.
       requestBody:
         required: true
@@ -1448,7 +1448,7 @@ paths:
                     type: boolean
                   stream_mode:
                     type: integer
-                    description: `0=NONE`, `1=PC_IMAGE`, `2=RGBD_RAW`, `3=DEPTH_RAW`
+                    description: "'0=NONE', '1=PC_IMAGE', '2=RGBD_RAW', '3=DEPTH_RAW'"
 
   /cctv/stream:
     get:
@@ -1456,9 +1456,9 @@ paths:
       description: |
         WebSocket으로 CCTV 바이너리 스트림을 수신합니다.
         스트림 모드에 따라 다음 형식 중 하나가 전달됩니다.
-        - PC 이미지 스트림: `16B Header + Image`
-        - RGBD 스트림: `20B Header + Depth + BGR`
-        - Depth 전용 스트림: `16B Header + Depth`
+        - PC 이미지 스트림: '16B Header + Image'
+        - RGBD 스트림: '20B Header + Depth + BGR'
+        - Depth 전용 스트림: '16B Header + Depth'
       responses:
         '101':
           description: WebSocket 프로토콜 전환
