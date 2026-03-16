@@ -443,6 +443,8 @@ ApplicationWindow {
             theme: window.appTheme
             isDarkMode: window.isDarkMode
             isLoggedIn: backend.isLoggedIn
+            twoFactorEnabled: backend.twoFactorEnabled
+            userId: backend.userId
             currentSection: stackLayout.currentIndex
             sessionRemainingSeconds: backend.sessionRemainingSeconds
             exportProgressVisible: window.exportProgressVisible
@@ -455,6 +457,15 @@ ApplicationWindow {
                 inlineMainCameraIndex = -1
                 backend.logout()
                 stackLayout.currentIndex = 1
+            }
+            onRequestTwoFactorSetup: {
+                twoFactorDialog.openForSetup()
+            }
+            onRequestTwoFactorDisable: {
+                twoFactorDialog.openForDisable()
+            }
+            onRequestAccountDelete: {
+                accountDeleteDialog.openDialog()
             }
             onRequestHome: {
                 window.showClientSystemSpecs()
@@ -857,15 +868,36 @@ ApplicationWindow {
                 inlineMainViewVisible = false
                 inlineMainCameraIndex = -1
                 closeRtspSettingsPopup()
+                twoFactorDialog.close()
+                accountDeleteDialog.close()
             }
             stackLayout.currentIndex = backend.isLoggedIn
                                      ? (inlineMainViewVisible ? 3 : 0)
                                      : 1
         }
+        function onTwoFactorSetupCompleted() {
+            backend.refreshTwoFactorStatus()
+            accountActionDialog.title = "OTP 생성"
+            accountActionDialog.text = "OTP가 성공적으로 활성화되었습니다.\n현재 로그인은 유지되며, 다음 로그인부터 OTP 인증이 필요합니다."
+            accountActionDialog.open()
+        }
+        function onTwoFactorDisableCompleted() {
+            backend.refreshTwoFactorStatus()
+            accountActionDialog.title = "OTP 삭제"
+            accountActionDialog.text = "OTP가 성공적으로 비활성화되었습니다.\n현재 로그인은 유지됩니다."
+            accountActionDialog.open()
+        }
+        function onAccountDeleteCompleted() {
+            accountActionDialog.title = "회원탈퇴"
+            accountActionDialog.text = "계정이 삭제되었습니다.\n로그인 화면으로 이동합니다."
+            accountActionDialog.open()
+        }
         function onSessionExpired() {
             inlineMainViewVisible = false
             inlineMainCameraIndex = -1
             closeRtspSettingsPopup()
+            twoFactorDialog.close()
+            accountDeleteDialog.close()
             stackLayout.currentIndex = 1
         }
         function onRtspProbeFinished(success, error) {
@@ -1066,6 +1098,23 @@ ApplicationWindow {
         id: motorControlDialog
         theme: window.appTheme
         hostWindow: window
+    }
+
+    TwoFactorDialog {
+        id: twoFactorDialog
+        theme: window.appTheme
+        backendObject: backend
+    }
+
+    AccountDeleteDialog {
+        id: accountDeleteDialog
+        theme: window.appTheme
+        backendObject: backend
+    }
+
+    StatusDialog {
+        id: accountActionDialog
+        theme: window.appTheme
     }
 
     SystemSpecsDialog {

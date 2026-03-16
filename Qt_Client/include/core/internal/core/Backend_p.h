@@ -24,8 +24,12 @@ struct BackendPrivate
 
     // Auth/session state
     bool m_isLoggedIn = false;
+    bool m_twoFactorRequired = false;
+    bool m_twoFactorEnabled = false;
     QString m_userId;
     QString m_authToken;
+    QString m_preAuthToken;
+    QString m_pendingLoginId;
     int m_sessionRemainingSeconds = 0;
     int m_sessionTimeoutSeconds = 300;
     bool m_loginLocked = false;
@@ -56,6 +60,18 @@ struct BackendPrivate
     // Request runtime state
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
+    QPointer<QNetworkReply> m_twoFactorVerifyReply;
+    bool m_twoFactorVerifyInProgress = false;
+    QPointer<QNetworkReply> m_twoFactorStatusReply;
+    bool m_twoFactorStatusInProgress = false;
+    QPointer<QNetworkReply> m_twoFactorSetupReply;
+    bool m_twoFactorSetupInProgress = false;
+    QPointer<QNetworkReply> m_twoFactorConfirmReply;
+    bool m_twoFactorConfirmInProgress = false;
+    QPointer<QNetworkReply> m_twoFactorDisableReply;
+    bool m_twoFactorDisableInProgress = false;
+    QPointer<QNetworkReply> m_accountDeleteReply;
+    bool m_accountDeleteInProgress = false;
     QPointer<QNetworkReply> m_registerReply;
     bool m_registerInProgress = false;
 
