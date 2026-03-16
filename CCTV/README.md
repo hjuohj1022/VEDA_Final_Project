@@ -2,12 +2,13 @@
 
 RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 수행하고, TCP 제어/스트리밍 인터페이스를 제공하는 Windows 전용 서버입니다.
 
-현재 기본 설정은 `RTSPS` 입력과 제어 채널 `mTLS`를 전제로 합니다. 일반 `rtsp://` 또는 비TLS 제어 채널로 운영하려면 `runtime/runtime_config.h`와 인증서 구성을 환경에 맞게 조정해야 합니다.
+기본 구성은 `RTSPS` 입력과 제어 채널 `mTLS`를 전제로 하며, 운영 환경에 따라 `runtime/runtime_config.h`와 인증서 구성을 통해 전송 계층 정책을 조정할 수 있습니다.
 
 ## Overview
 | Component | Role | Main File |
 |---|---|---|
-| Inference Server | RTSP 수신, CUDA 전처리, TensorRT 추론, TCP 제어 | `runtime/main.cpp` |
+| Proxy Control Server | 외부 제어 채널 수신, worker lifecycle 관리, 요청 relay | `runtime/proxy_server.cpp` |
+| Worker Service | RTSP 수신, CUDA 전처리, TensorRT 추론, 스트림 송신 | `runtime/service_app.cpp` |
 | Desktop Client | 서버 제어 + 스트림 시각화 | `tools/client/client_gui.py` |
 | Model Export | DA3 safetensors -> ONNX | `tools/export/export_da3metric_onnx.py` |
 | Bootstrap Script | 의존성 다운로드 + 경로 설정 생성 | `tools/bootstrap/setup_dependencies.ps1` |
@@ -17,7 +18,10 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
 
 | Module | Responsibility |
 |---|---|
-| `runtime/main.cpp` | 엔트리포인트, accept loop, 요청 파싱/디스패치 호출 |
+| `runtime/main.cpp` | 엔트리포인트, proxy 모드 / worker 모드 분기 |
+| `runtime/proxy_server.*` | 외부 제어 채널 수신, worker process 관리, 요청 relay |
+| `runtime/service_app.*` | worker service 수명주기, 제어 요청 accept loop |
+| `runtime/worker_process.*` | worker process spawn / shutdown |
 | `runtime/server_runtime.*` | Winsock 초기화/바인드/리스닝/정리 |
 | `runtime/command_dispatcher.*` | 요청 분기 처리, worker/stream 스레드 제어 |
 | `runtime/depth_worker.cu` | CUDA 전처리 커널 + TensorRT 추론 루프 |
@@ -35,16 +39,27 @@ RTSP CCTV 영상을 입력으로 받아 TensorRT 엔진 기반 깊이 추론을 
                            |  - View PC (Server/Client)       |
                            +----------------+-----------------+
                                             | TCP commands
-                                            | (channel, mode, pc_view, ...)
+                                            | (start, stop, pause, stream, ...)
                                             v
-+-------------------+            +----------+-----------+            +------------------+
-| RTSP Cameras      | --RTSP-->  |    depth_trt.exe    | --depth--> | depth_stream     |
-| ch0..ch3          |            | (runtime/main.cpp, TCP 9090) | --rgbd---> | rgbd_stream      |
-+-------------------+            |  CUDA + TensorRT     | --png----> | pc_stream        |
-                                 +----------+-----------+            +------------------+
-                                            |
-                                            | load engine
-                                            v
++-------------------+            +------------------------+
+| RTSP Cameras      | --RTSP-->  | Worker Service         |
+| ch0..ch3          |            | depth_trt.exe --worker |
++-------------------+            | - CUDA + TensorRT      | --depth--> depth_stream
+                                 | - control dispatcher   | --rgbd---> rgbd_stream
+                                 | - stream workers       | --png----> pc_stream
+                                 +-----------+------------+
+                                             ^
+                                             | internal relay
+                                             |
+                           +-----------------+-----------------+
+                           | Proxy Control Server              |
+                           | depth_trt.exe                     |
+                           | - external control endpoint       |
+                           | - worker spawn / stop / restart   |
+                           +-----------------+-----------------+
+                                             |
+                                             | load engine
+                                             v
                             +---------------+----------------+
                             | TensorRT Engine (.engine)      |
                             | from DA3Metric ONNX export     |
@@ -82,6 +97,7 @@ python .\client_gui.py
 추가 검증은 아래 `Static Analysis`, `Test` 섹션을 참고합니다.
 
 ## Features
+- proxy / worker 분리 기반 제어 아키텍처
 - RTSP 채널 선택 실행 (`channel=0~3`)
 - 실행 모드 전환 (`headless`, `gui`)
 - 런타임 제어 (`pause`, `resume`, `stop`)
@@ -118,6 +134,8 @@ CCTV/
     rootCA.crt
     cctv.crt
     cctv.key
+  archive/
+    old/
   tools/
     bootstrap/setup_dependencies.ps1
     run_static_analysis.ps1
@@ -287,7 +305,30 @@ chmod +x ./tools/client/mtls_external_test.sh
   --port 9090 --timeout 8
 ```
 
-오버레이 네트워크(Tailscale, subnet routing, SSH tunnel 등)를 거쳐 접속하는 경우의 라우팅 방식은 환경마다 달라집니다. 먼저 로컬 또는 직접 TCP 경로에서 mTLS 연결을 검증한 뒤, 네트워크 토폴로지별 라우팅 문제를 별도로 확인하는 것을 권장합니다.
+제어 채널 앞단에 별도 라우팅 계층이나 터널링 계층이 존재하는 경우에는, 먼저 직접 TCP 경로에서 mTLS 연결을 검증한 뒤 네트워크 계층 문제를 분리해 점검하는 것을 권장합니다.
+
+## Control Lifecycle Semantics
+- 기본 실행은 `proxy` 모드이며, 외부 제어 요청은 proxy가 수신하고 내부 `worker service`에 relay합니다.
+- `channel=<n> [headless|gui]`
+  - 새 추론 세션을 시작합니다.
+  - 기존 worker가 실행 중이면 먼저 정리한 뒤 새 worker를 시작합니다.
+  - 응답 예: `OK started channel=0 mode=headless`
+- `pause`
+  - 실행 중인 worker에 대해 hard pause를 수행합니다.
+  - pause 상태에서는 새 프레임 read, inference, stream publish가 중단됩니다.
+  - 스트림 연결은 유지되며, 클라이언트는 마지막으로 수신한 프레임을 계속 표시할 수 있습니다.
+  - 실행 중인 worker가 없으면 `ERR worker not running`을 반환합니다.
+- `resume`
+  - pause 상태를 해제하고 read / inference / publish를 재개합니다.
+  - 실행 중인 worker가 없으면 `ERR worker not running`을 반환합니다.
+- `stop`
+  - 실행 중인 worker를 정지 요청 상태로 전환하고 즉시 `OK stopped`를 반환합니다.
+  - 실제 worker thread 및 worker process teardown은 백그라운드에서 완료됩니다.
+  - 따라서 응답 직후 짧은 정리 구간이 존재할 수 있습니다.
+- `depth_stream`, `rgbd_stream`, `pc_stream`
+  - 실행 중인 worker의 최신 결과를 스트리밍합니다.
+  - worker가 아직 준비 중이면 proxy가 짧은 준비 대기 후 연결을 시도합니다.
+  - 실행 중인 worker가 없으면 `ERR worker not running`을 반환합니다.
 
 ## TCP Command Reference
 기본 명령 예시:
@@ -306,8 +347,11 @@ pc_stream
 응답 예시:
 - `OK started channel=0 mode=headless`
 - `OK pause=1`
+- `OK pause=0`
 - `OK stopped`
 - `OK pc_view rx=... ry=... flipx=... flipy=... flipz=... wire=... mesh=...`
+- `ERR worker not running`
+- `ERR worker stopping`
 
 ## Stream Binary Format
 모든 헤더 정수는 little-endian `uint32`입니다.
@@ -345,6 +389,15 @@ python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 - RTSP 접속 실패: URL/계정/포트/네트워크/카메라 채널 점검
 - TensorRT 다운로드 실패: `-TensorRtUrl`로 직접 ZIP URL 지정
 - DLL 관련 실행 오류: 빌드 산출물 폴더에 TensorRT/OpenCV DLL 복사 여부 확인
+- `ERR worker not running`:
+  - 실행 중인 worker가 없는 상태에서 `pause`, `resume`, `pc_view`, `*_stream` 요청이 들어온 경우입니다.
+  - 먼저 `channel=<n> ...` 명령으로 worker를 시작했는지 확인합니다.
+- `ERR worker stopping`:
+  - 이전 `stop` 요청의 teardown이 아직 완료되지 않은 상태입니다.
+  - 짧은 대기 후 다시 요청합니다.
+- `stop` 응답 직후에도 정리 로그가 잠시 이어지는 경우:
+  - 현재 구현은 `stop` 요청에 즉시 ACK를 반환하고 teardown은 백그라운드에서 진행합니다.
+  - 이는 의도된 동작이며, 종료 완료까지 짧은 grace window가 존재할 수 있습니다.
 - 정적 분석에서 `clang-tidy`가 실패하면:
   - 로컬 LLVM/MSVC 조합에 따라 도구체인 호환성 문제가 있을 수 있습니다.
   - 이 경우 `.clang-tidy`는 규칙셋 참고용으로 두고, 실제 분석은 `tools/run_static_analysis.ps1`의 MSVC `/analyze` 경로를 사용합니다.
@@ -359,3 +412,5 @@ python .\tools\export\export_da3metric_onnx.py --height 560 --width 1008
 - `app_config.h`의 엔진/RTSP/입력 해상도가 현재 배포 아티팩트와 일치하는가?
 - 서버 로그에 `Listening on port ...`가 출력되는가?
 - 클라이언트 `Start` 응답이 `OK started ...`로 오는가?
+- stream 요청이 `OK rgbd_stream ...` 또는 `OK depth_stream ...`로 연결되는가?
+- `pause` 후 새 프레임 publish가 중단되고, `resume` 후 재개되는가?
