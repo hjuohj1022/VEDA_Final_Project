@@ -76,6 +76,15 @@
 - 다이얼로그에서 `Refresh` 버튼 제거(`Close`만 유지)
 - 사양 정보는 팝업 호출 시 최초 1회 조회 후 캐시 재사용(반복 조회로 인한 UI 멈춤 완화)
 
+### 8. 실행파일 아이콘(Windows)
+- 실행파일 아이콘은 `SVG`가 아닌 `ICO` 리소스로 적용
+- 아이콘 파일:
+  - `src/ui/assets/icons/Hanwha_logo.ico`
+  - 원본 벡터: `src/ui/assets/icons/Hanwha_logo.svg`
+- Windows 리소스 파일:
+  - `src/app/app_icon.rc`
+- CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘에 반영
+
 ## Qt Client Architecture Diagram
 
 ```text
@@ -218,6 +227,7 @@ ffmpeg 배치/버전 관리:
 참고:
 - Storage/Timeline/MonthDays/Playback digest는 Crow API를 통해 조회합니다.
 - 빌드 시 로컬 `tools/ffmpeg.exe`가 있으면 실행 폴더로 자동 복사하도록 CMake POST_BUILD가 설정되어 있습니다.
+- Windows 실행파일 아이콘은 `src/app/app_icon.rc` + `src/ui/assets/icons/Hanwha_logo.ico` 조합으로 설정됩니다.
 
 ## Qt -> Crow API 전환 현황 (한글)
 

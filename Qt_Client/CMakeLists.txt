@@ -87,6 +87,10 @@ qt_add_executable(Team3VideoReceiver
     .env
 )
 
+if (WIN32)
+    target_sources(Team3VideoReceiver PRIVATE src/app/app_icon.rc)
+endif()
+
 # Force UTF-8 source/execution charset so Korean literals do not break.
 if (MSVC)
     target_compile_options(Team3VideoReceiver PRIVATE /utf-8)
