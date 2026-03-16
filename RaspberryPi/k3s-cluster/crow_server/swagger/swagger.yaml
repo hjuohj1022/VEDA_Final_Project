@@ -33,6 +33,14 @@ paths:
           description: JSON 형식 오류 또는 필수 파라미터 누락
         '409':
           description: 이미 존재하는 ID
+          content:
+            text/plain:
+              example: 'Registration Failed: ID already exists'
+        '500':
+          description: 데이터베이스 오류로 회원가입 실패
+          content:
+            text/plain:
+              example: 'Registration Failed: DB error'
 
   /login:
     post:
@@ -147,6 +155,35 @@ paths:
           content:
             text/plain:
               example: 2FA is already enabled
+
+  /2fa/status:
+    get:
+      summary: Get current TOTP 2FA status
+      description: |
+        현재 로그인한 사용자의 TOTP 2FA 활성화 여부를 조회합니다.
+        프로필 메뉴를 열 때 이 값을 확인해 'OTP 생성' 또는 'OTP 삭제'를 분기하는 용도로 사용할 수 있습니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 2FA status loaded
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: true
+                has_pending_setup: false
+                pending_expires_in: 0
+        '401':
+          description: Unauthorized
+          content:
+            text/plain:
+              example: Unauthorized
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
 
   /2fa/setup/confirm:
     post:
@@ -331,6 +368,85 @@ paths:
           content:
             text/plain:
               example: User not found
+
+  /account/delete:
+    post:
+      summary: Delete current account
+      description: |
+        Deletes the currently authenticated account.
+        The caller must always re-enter the current password.
+        If TOTP 2FA is enabled for the account, the current OTP code must also be provided.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  example: testpw1234
+                otp:
+                  type: string
+                  description: Required only when 2FA is enabled for the account.
+                  example: '123456'
+            examples:
+              without2fa:
+                summary: Delete account without OTP
+                value:
+                  password: testpw1234
+              with2fa:
+                summary: Delete account with OTP
+                value:
+                  password: testpw1234
+                  otp: '123456'
+      responses:
+        '200':
+          description: Account deleted
+          content:
+            application/json:
+              example:
+                status: success
+                deleted: true
+        '400':
+          description: Missing or invalid request field
+          content:
+            text/plain:
+              examples:
+                missingPassword:
+                  summary: password is missing
+                  value: Missing password
+                missingOtp:
+                  summary: otp is required because 2FA is enabled
+                  value: Missing otp
+        '401':
+          description: Unauthorized, invalid password, or invalid OTP
+          content:
+            text/plain:
+              examples:
+                unauthorized:
+                  summary: JWT is missing or invalid
+                  value: Unauthorized
+                invalidPassword:
+                  summary: password does not match the current account
+                  value: Invalid password
+                invalidOtp:
+                  summary: otp does not match the authenticator app
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+        '500':
+          description: Database or delete operation failure
+          content:
+            text/plain:
+              example: Failed to delete user
 
   /recordings:
     get:
