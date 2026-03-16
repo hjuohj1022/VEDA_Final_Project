@@ -101,6 +101,8 @@ def send_command(host: str, port: int, command: str,
     with connect_socket(host, port, CONTROL_CONNECT_TIMEOUT_SEC, use_mtls, ca_file, client_cert, client_key) as s:
         s.sendall(payload.encode("utf-8"))
         data = s.recv(4096)
+    if not data:
+        raise ConnectionError("Server closed the control connection without a response")
     return data.decode("utf-8", errors="replace").strip()
 
 
@@ -156,10 +158,14 @@ class ClientGui(tk.Tk):
         btn_frame = ttk.Frame(frm)
         btn_frame.grid(row=8, column=0, columnspan=3, pady=12, sticky="w")
 
-        ttk.Button(btn_frame, text="Start", command=self.on_start).grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(btn_frame, text="Stop", command=self.on_stop).grid(row=0, column=1)
-        ttk.Button(btn_frame, text="Pause", command=self.on_pause).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(btn_frame, text="Resume", command=self.on_resume).grid(row=0, column=3, padx=(8, 0))
+        self.start_button = ttk.Button(btn_frame, text="Start", command=self.on_start)
+        self.start_button.grid(row=0, column=0, padx=(0, 8))
+        self.stop_button = ttk.Button(btn_frame, text="Stop", command=self.on_stop)
+        self.stop_button.grid(row=0, column=1)
+        self.pause_button = ttk.Button(btn_frame, text="Pause", command=self.on_pause)
+        self.pause_button.grid(row=0, column=2, padx=(8, 0))
+        self.resume_button = ttk.Button(btn_frame, text="Resume", command=self.on_resume)
+        self.resume_button.grid(row=0, column=3, padx=(8, 0))
         ttk.Button(btn_frame, text="View PC (Server)", command=self.on_view_pc).grid(row=0, column=4, padx=(8, 0))
         ttk.Button(btn_frame, text="View PC (Client)", command=self.on_view_pc_client).grid(row=0, column=5, padx=(8, 0))
 
@@ -183,62 +189,80 @@ class ClientGui(tk.Tk):
         self._last_mouse_x = 0
         self._last_mouse_y = 0
         self._last_drag_send_ts = 0.0
+        self._control_inflight = False
+        self._control_buttons = [
+            self.start_button,
+            self.stop_button,
+            self.pause_button,
+            self.resume_button,
+        ]
+
+    def _set_control_buttons_enabled(self, enabled: bool) -> None:
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for button in self._control_buttons:
+            button.configure(state=state)
+
+    def _control_args(self):
+        return (
+            self.host_var.get().strip(),
+            int(self.port_var.get().strip()),
+            self.use_mtls_var.get(),
+            self.ca_file_var.get().strip(),
+            self.client_cert_var.get().strip(),
+            self.client_key_var.get().strip(),
+        )
+
+    def _finish_control_request(self) -> None:
+        self._control_inflight = False
+        self._set_control_buttons_enabled(True)
+
+    def _handle_control_success(self, response: str) -> None:
+        self.status.set(response)
+        self._finish_control_request()
+
+    def _handle_control_error(self, error_text: str) -> None:
+        messagebox.showerror("Connection Error", error_text)
+        self._finish_control_request()
+
+    def _run_control_command_async(self, command: str, pending_status: str) -> None:
+        if self._control_inflight:
+            self.status.set("Another control request is already in progress.")
+            return
+
+        try:
+            host, port, use_mtls, ca_file, client_cert, client_key = self._control_args()
+        except Exception as exc:
+            messagebox.showerror("Connection Error", str(exc))
+            return
+
+        self._control_inflight = True
+        self._set_control_buttons_enabled(False)
+        self.status.set(pending_status)
+
+        def worker():
+            try:
+                response = send_command(host, port, command, use_mtls, ca_file, client_cert, client_key)
+            except Exception as exc:
+                self.after(0, self._handle_control_error, str(exc))
+                return
+            self.after(0, self._handle_control_success, response)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def on_start(self) -> None:
-        host = self.host_var.get().strip()
-        port = int(self.port_var.get().strip())
         channel = self.channel_var.get().strip()
         mode = self.mode_var.get().strip()
-
         command = f"channel={channel} {mode}"
-        try:
-            resp = send_command(host, port, command,
-                                self.use_mtls_var.get(),
-                                self.ca_file_var.get().strip(),
-                                self.client_cert_var.get().strip(),
-                                self.client_key_var.get().strip())
-            self.status.set(resp or "OK")
-        except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
+        self._run_control_command_async(command, f"Sending start: {command}")
 
     def on_stop(self) -> None:
-        host = self.host_var.get().strip()
-        port = int(self.port_var.get().strip())
-        try:
-            resp = send_command(host, port, "stop",
-                                self.use_mtls_var.get(),
-                                self.ca_file_var.get().strip(),
-                                self.client_cert_var.get().strip(),
-                                self.client_key_var.get().strip())
-            self.status.set(resp or "OK")
-        except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
+        self._run_control_command_async("stop", "Sending stop")
 
     def on_pause(self) -> None:
-        host = self.host_var.get().strip()
-        port = int(self.port_var.get().strip())
-        try:
-            resp = send_command(host, port, "pause",
-                                self.use_mtls_var.get(),
-                                self.ca_file_var.get().strip(),
-                                self.client_cert_var.get().strip(),
-                                self.client_key_var.get().strip())
-            self.status.set(resp or "OK")
-        except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
+        self._run_control_command_async("pause", "Sending pause")
 
     def on_resume(self) -> None:
-        host = self.host_var.get().strip()
-        port = int(self.port_var.get().strip())
-        try:
-            resp = send_command(host, port, "resume",
-                                self.use_mtls_var.get(),
-                                self.ca_file_var.get().strip(),
-                                self.client_cert_var.get().strip(),
-                                self.client_key_var.get().strip())
-            self.status.set(resp or "OK")
-        except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
+        self._run_control_command_async("resume", "Sending resume")
 
     def on_apply_view(self) -> None:
         host = self.host_var.get().strip()
@@ -358,6 +382,23 @@ class ClientGui(tk.Tk):
                 buf.extend(chunk)
             return bytes(buf)
 
+        png_error_reported = False
+
+        def draw_png(png_bytes: bytes):
+            nonlocal png_error_reported
+            if not win.winfo_exists():
+                return
+            try:
+                img = tk.PhotoImage(data=base64.b64encode(png_bytes))
+                canvas.delete("all")
+                canvas.create_image(0, 0, image=img, anchor="nw")
+                canvas.image = img
+                png_error_reported = False
+            except Exception as exc:
+                if not png_error_reported:
+                    png_error_reported = True
+                    self.status.set(f"Server render error: {exc}")
+
         def stream_loop():
             try:
                 with connect_socket(host, port, STREAM_CONNECT_TIMEOUT_SEC,
@@ -373,19 +414,14 @@ class ClientGui(tk.Tk):
                         raise RuntimeError(f"Unexpected response: {line.decode(errors='ignore')}")
                     s.settimeout(None)
 
-                    img = None
                     while not self._stream_stop.is_set():
                         header = recv_exact(s, 16)
-                        frame_idx, w, h, payload = struct.unpack("<IIII", header)
+                        _frame_idx, _w, _h, payload = struct.unpack("<IIII", header)
                         data = recv_exact(s, payload)
-                        b64 = base64.b64encode(data)
-                        img = tk.PhotoImage(data=b64)
-                        canvas.delete("all")
-                        canvas.create_image(0, 0, image=img, anchor="nw")
-                        canvas.image = img
-            except Exception as e:
+                        self.after(0, draw_png, data)
+            except Exception as exc:
                 if not self._stream_stop.is_set():
-                    messagebox.showerror("PC Stream Error", str(e))
+                    self.after(0, lambda text=str(exc): messagebox.showerror("PC Stream Error", text))
 
         self._stream_thread = threading.Thread(target=stream_loop, daemon=True)
         self._stream_thread.start()
@@ -675,7 +711,7 @@ class ClientGui(tk.Tk):
                         self.after(0, draw_ppm, ppm)
             except Exception as e:
                 if not self._stream_stop.is_set():
-                    self.after(0, lambda: messagebox.showerror("RGBD Stream Error", str(e)))
+                    self.after(0, lambda text=str(e): messagebox.showerror("RGBD Stream Error", text))
 
         self._stream_thread = threading.Thread(target=stream_loop, daemon=True)
         self._stream_thread.start()

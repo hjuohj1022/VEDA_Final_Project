@@ -8,6 +8,7 @@ struct Request {
     bool headless = false;
     bool headlessSet = false;
     bool gui = false;
+    bool statusQuery = false;
     bool stop = false;
     bool pauseSet = false;
     bool pause = false;

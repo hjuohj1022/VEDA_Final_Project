@@ -42,9 +42,14 @@ void StopStreamThread(std::thread& streamThread, StreamBuffer& streamBuffer) {
     if (!streamThread.joinable()) {
         return;
     }
+    SOCKET clientSocket = INVALID_SOCKET;
     {
         std::unique_lock<std::mutex> lock(streamBuffer.mu);
         streamBuffer.stop = true;
+        clientSocket = streamBuffer.activeSocket;
+    }
+    if (clientSocket != INVALID_SOCKET) {
+        shutdown(clientSocket, SD_BOTH);
     }
     streamBuffer.cv.notify_all();
     streamThread.join();
@@ -62,15 +67,32 @@ void StopPcStreamThread(ServerRuntimeContext& ctx) {
     StopStreamThread(ctx.pcStreamThread, ctx.pcStream);
 }
 
+bool IsStreamRequest(const Request& req) {
+    return req.depthStream || req.rgbdStream || req.pcStream;
+}
+
+void ResetPausedState(ServerRuntimeContext& ctx) {
+    std::lock_guard<std::mutex> lock(ctx.controlState.mu);
+    ctx.controlState.paused = false;
+}
+
 void StopWorker(ServerRuntimeContext& ctx) {
-    if (!ctx.workerRunning) {
-        return;
+    if (ctx.workerRunning) {
+        ctx.workerStop.store(true);
     }
-    ctx.workerStop.store(true);
-    if (ctx.worker.joinable()) {
-        ctx.worker.join();
+
+    StopDepthStreamThread(ctx);
+    StopRgbdStreamThread(ctx);
+    StopPcStreamThread(ctx);
+
+    if (ctx.workerRunning) {
+        if (ctx.worker.joinable()) {
+            ctx.worker.join();
+        }
+        ctx.workerRunning = false;
     }
-    ctx.workerRunning = false;
+
+    ResetPausedState(ctx);
 }
 
 void HandlePcViewRequest(const ServerClient& client, const Request& req, ServerRuntimeContext& ctx) {
@@ -113,11 +135,22 @@ void HandlePcViewRequest(const ServerClient& client, const Request& req, ServerR
 void HandlePauseRequest(const ServerClient& client, const Request& req, ServerRuntimeContext& ctx) {
     bool pausedNow = false;
     {
-        std::lock_guard<std::mutex> lock(ctx.viewParams.mu);
-        ctx.viewParams.paused = req.pause;
-        pausedNow = ctx.viewParams.paused;
+        std::lock_guard<std::mutex> lock(ctx.controlState.mu);
+        ctx.controlState.paused = req.pause;
+        pausedNow = ctx.controlState.paused;
     }
     SendResponse(client, std::string("OK pause=") + (pausedNow ? "1\n" : "0\n"));
+}
+
+void HandleStatusRequest(const ServerClient& client, ServerRuntimeContext& ctx) {
+    bool pausedNow = false;
+    {
+        std::lock_guard<std::mutex> lock(ctx.controlState.mu);
+        pausedNow = ctx.controlState.paused;
+    }
+    SendResponse(client,
+                 "OK status worker_running=" + std::to_string(ctx.workerRunning ? 1 : 0) +
+                     " paused=" + std::to_string(pausedNow ? 1 : 0) + "\n");
 }
 
 void ResetWorkerStartupState(WorkerStartupState& state) {
@@ -155,9 +188,6 @@ void JoinFinishedStreamThreads(ServerRuntimeContext& ctx) {
 
 void ShutdownRuntime(ServerRuntimeContext& ctx) {
     StopWorker(ctx);
-    StopDepthStreamThread(ctx);
-    StopRgbdStreamThread(ctx);
-    StopPcStreamThread(ctx);
 }
 
 void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeContext& ctx) {
@@ -167,6 +197,11 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     if (!valid.ok) {
         LogWarn("Invalid request: " + valid.error);
         SendResponse(clientSocket.get(), valid.error);
+        return;
+    }
+
+    if (IsStreamRequest(req) && !ctx.workerRunning) {
+        SendResponse(clientSocket.get(), "ERR worker not running\n");
         return;
     }
 
@@ -202,7 +237,16 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
         return;
     }
 
+    if (req.statusQuery) {
+        HandleStatusRequest(clientSocket.get(), ctx);
+        return;
+    }
+
     if (req.pauseSet) {
+        if (!ctx.workerRunning) {
+            SendResponse(clientSocket.get(), "ERR worker not running\n");
+            return;
+        }
         HandlePauseRequest(clientSocket.get(), req, ctx);
         return;
     }
@@ -225,7 +269,8 @@ void HandleClientRequest(ServerClient client, const Request& req, ServerRuntimeC
     ResetWorkerStartupState(*startupState);
     ctx.worker = std::thread([channel, headless, &ctx, startupState]() {
         const bool ok = RunDepthWorker(channel, headless, ctx.workerStop,
-                                       &ctx.depthStream, &ctx.rgbdStream, &ctx.pcStream, &ctx.viewParams,
+                                       &ctx.depthStream, &ctx.rgbdStream, &ctx.pcStream,
+                                       &ctx.viewParams, &ctx.controlState,
                                        startupState.get());
         if (!ok) {
             LogError("Worker exited with errors.");

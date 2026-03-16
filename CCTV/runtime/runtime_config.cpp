@@ -30,6 +30,8 @@ RuntimeConfig LoadRuntimeConfigFromEnvironment() {
         ParsePositiveEnvOrDefault("VEDA_PROXY_RELAY_IO_TIMEOUT_MS", cfg.proxy_relay_io_timeout_ms);
     cfg.proxy_max_concurrent_clients =
         ParsePositiveEnvOrDefault("VEDA_PROXY_MAX_CONCURRENT_CLIENTS", cfg.proxy_max_concurrent_clients);
+    cfg.worker_ready_wait_ms =
+        ParsePositiveEnvOrDefault("VEDA_WORKER_READY_WAIT_MS", cfg.worker_ready_wait_ms);
     return cfg;
 }
 

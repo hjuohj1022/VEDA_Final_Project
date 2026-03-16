@@ -133,6 +133,17 @@ void TestValidationMixedControlCommands() {
         Expect(req.headlessSet && !req.headless, "gui should force non-headless");
     }
 }
+
+void TestStatusParse() {
+    {
+        Request req = ParseRequest("status");
+        Expect(req.statusQuery, "status token should be parsed");
+    }
+    {
+        Request req = ParseRequest("worker_status");
+        Expect(req.statusQuery, "worker_status alias should be parsed");
+    }
+}
 }  // namespace
 
 int main() {
@@ -143,6 +154,7 @@ int main() {
     TestValidationChannelBoundaries();
     TestValidationStreamCombinations();
     TestValidationMixedControlCommands();
+    TestStatusParse();
 
     if (failures > 0) {
         std::cerr << "request_parser_smoke failed: " << failures << std::endl;

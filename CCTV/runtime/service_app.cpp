@@ -53,6 +53,7 @@ int RunDepthService(const ServiceRunOptions& options) {
     ImageStreamBuffer pcStream;
     std::atomic<bool> pcStreamActive{false};
     ViewParams viewParams;
+    WorkerControlState controlState;
     ServerRuntimeContext runtimeCtx{
         worker,
         streamThread,
@@ -67,6 +68,7 @@ int RunDepthService(const ServiceRunOptions& options) {
         rgbdStream,
         pcStream,
         viewParams,
+        controlState,
     };
     RuntimeCleanupGuard cleanupGuard(runtimeCtx, serverCtx);
 

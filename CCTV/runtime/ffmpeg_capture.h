@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -25,6 +26,7 @@ public:
     bool Read(cv::Mat& frame, std::string& error);
     bool IsOpened() const;
     void Close();
+    void SetInterruptStopFlag(const std::atomic<bool>* stopFlag);
 
 private:
     struct Impl;

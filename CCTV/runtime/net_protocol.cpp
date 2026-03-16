@@ -54,7 +54,11 @@ void DepthStreamWorker(ServerClient client, DepthStreamBuffer* streamBuf, std::a
     if (active) {
         active->store(true);
     }
-    streamBuf->stop = false;
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->stop = false;
+        streamBuf->activeSocket = client.socket;
+    }
 
     const std::string ok = "OK depth_stream\n";
     int okMessageSize = 0;
@@ -102,6 +106,11 @@ void DepthStreamWorker(ServerClient client, DepthStreamBuffer* streamBuf, std::a
     if (active) {
         active->store(false);
     }
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->activeSocket = INVALID_SOCKET;
+        streamBuf->hasFrame = false;
+    }
     CloseServerClient(client);
 }
 
@@ -115,7 +124,11 @@ void RgbdStreamWorker(ServerClient client, RgbdStreamBuffer* streamBuf, std::ato
     if (active) {
         active->store(true);
     }
-    streamBuf->stop = false;
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->stop = false;
+        streamBuf->activeSocket = client.socket;
+    }
 
     const std::string ok = "OK rgbd_stream fmt=depth32f+bgr24\n";
     int okMessageSize = 0;
@@ -170,6 +183,11 @@ void RgbdStreamWorker(ServerClient client, RgbdStreamBuffer* streamBuf, std::ato
     if (active) {
         active->store(false);
     }
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->activeSocket = INVALID_SOCKET;
+        streamBuf->hasFrame = false;
+    }
     CloseServerClient(client);
 }
 
@@ -183,7 +201,11 @@ void PcImageStreamWorker(ServerClient client, ImageStreamBuffer* streamBuf, std:
     if (active) {
         active->store(true);
     }
-    streamBuf->stop = false;
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->stop = false;
+        streamBuf->activeSocket = client.socket;
+    }
 
     const std::string ok = "OK pc_stream fmt=png\n";
     int okMessageSize = 0;
@@ -230,6 +252,11 @@ void PcImageStreamWorker(ServerClient client, ImageStreamBuffer* streamBuf, std:
     LogWarn("PC image stream client disconnected.");
     if (active) {
         active->store(false);
+    }
+    {
+        std::lock_guard<std::mutex> lock(streamBuf->mu);
+        streamBuf->activeSocket = INVALID_SOCKET;
+        streamBuf->hasFrame = false;
     }
     CloseServerClient(client);
 }

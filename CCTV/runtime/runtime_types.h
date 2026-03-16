@@ -5,6 +5,8 @@
 #include <mutex>
 #include <vector>
 
+#include <winsock2.h>
+
 struct DepthStreamBuffer {
     std::mutex mu;
     std::condition_variable cv;
@@ -14,6 +16,7 @@ struct DepthStreamBuffer {
     uint32_t frameIdx = 0;
     bool hasFrame = false;
     bool stop = false;
+    SOCKET activeSocket = INVALID_SOCKET;
 };
 
 struct ImageStreamBuffer {
@@ -25,6 +28,7 @@ struct ImageStreamBuffer {
     uint32_t frameIdx = 0;
     bool hasFrame = false;
     bool stop = false;
+    SOCKET activeSocket = INVALID_SOCKET;
 };
 
 struct RgbdStreamBuffer {
@@ -37,6 +41,7 @@ struct RgbdStreamBuffer {
     uint32_t frameIdx = 0;
     bool hasFrame = false;
     bool stop = false;
+    SOCKET activeSocket = INVALID_SOCKET;
 };
 
 struct ViewParams {
@@ -48,5 +53,9 @@ struct ViewParams {
     bool flipZ = false;
     bool wire = false;
     bool mesh = false;
+};
+
+struct WorkerControlState {
+    std::mutex mu;
     bool paused = false;
 };

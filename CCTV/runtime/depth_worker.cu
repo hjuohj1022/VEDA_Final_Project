@@ -67,29 +67,6 @@ struct PointCloudViewConfig {
     bool mesh = false;
 };
 
-struct FrozenFrameState {
-    Mat depth;
-    Mat color;
-    Mat frame;
-    int width = 0;
-    int height = 0;
-    uint64_t frameIdx = 0;
-
-    bool HasFrame() const {
-        return !depth.empty() && width > 0 && height > 0;
-    }
-
-    void Update(const Mat& depthMat, const Mat& colorForDepth, const Mat& sourceFrame,
-                const int outW, const int outH, const uint64_t idx) {
-        depth = depthMat.clone();
-        color = colorForDepth.clone();
-        frame = sourceFrame.clone();
-        width = outW;
-        height = outH;
-        frameIdx = idx;
-    }
-};
-
 class WorkerPerfTracker {
 public:
     explicit WorkerPerfTracker(const RuntimeConfig& cfg)
@@ -187,13 +164,13 @@ private:
     double gpuMsSum_ = 0.0;
 };
 
-bool IsWorkerPaused(ViewParams* viewParams) {
-    if (!viewParams) {
+bool IsWorkerPaused(WorkerControlState* controlState) {
+    if (!controlState) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(viewParams->mu);
-    return viewParams->paused;
+    std::lock_guard<std::mutex> lock(controlState->mu);
+    return controlState->paused;
 }
 
 PointCloudViewConfig SnapshotPointCloudView(ViewParams* viewParams) {
@@ -218,16 +195,6 @@ CameraIntrinsics MakeFrameIntrinsics(const int outW, const int outH) {
         MakeIntrinsicsFromFovDegrees(kReferenceHfovDeg, kReferenceVfovDeg,
                                      kReferenceWidth, kReferenceHeight);
     return ScaleIntrinsics(base, outW, outH, kReferenceWidth, kReferenceHeight);
-}
-
-Mat MakeSafeColorFrame(const Mat& colorForDepth, const int outW, const int outH) {
-    if (!colorForDepth.empty() &&
-        colorForDepth.type() == CV_8UC3 &&
-        colorForDepth.cols == outW &&
-        colorForDepth.rows == outH) {
-        return colorForDepth;
-    }
-    return Mat(outH, outW, CV_8UC3, Scalar(0, 0, 0));
 }
 
 Mat BuildDepthColorImage(const Mat& depthMat) {
@@ -415,47 +382,16 @@ void RenderPointCloudPreview(const RuntimeConfig& cfg,
     cv::imshow(kPointCloudWindowTitle, pcImage);
 }
 
-bool HandlePausedState(const RuntimeConfig& cfg,
-                       const bool headless,
-                       DepthStreamBuffer* streamBuf,
-                       RgbdStreamBuffer* rgbdStreamBuf,
-                       ImageStreamBuffer* pcStreamBuf,
-                       ViewParams* viewParams,
-                       const FrozenFrameState& frozenFrame,
-                       const WorkerPerfTracker& perfTracker) {
-    if (!frozenFrame.HasFrame()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(cfg.pause_loop_sleep_ms));
-        return true;
-    }
-
-    const int outW = frozenFrame.width;
-    const int outH = frozenFrame.height;
-    const Mat depthMat = frozenFrame.depth;
-    const Mat colorForDepth = MakeSafeColorFrame(frozenFrame.color, outW, outH);
-    const Mat depthColor = BuildDepthColorImage(depthMat);
-    const CameraIntrinsics intrinsics = MakeFrameIntrinsics(outW, outH);
-    const PointCloudViewConfig viewConfig = SnapshotPointCloudView(viewParams);
-    const size_t depthCount = static_cast<size_t>(outW) * static_cast<size_t>(outH);
-
-    PublishWorkerOutputs(cfg, streamBuf, rgbdStreamBuf, pcStreamBuf,
-                         depthMat.ptr<float>(), depthCount,
-                         depthMat, colorForDepth,
-                         outW, outH, frozenFrame.frameIdx,
-                         intrinsics, viewConfig);
-
+void HandlePausedState(const RuntimeConfig& cfg, const bool headless) {
     if (!headless) {
-        RenderMainPreview(cfg, frozenFrame.frame, depthColor,
-                          perfTracker.Overlay1(), perfTracker.Overlay2(),
-                          true, 0.0);
         cv::waitKey(1);
     }
-
     std::this_thread::sleep_for(std::chrono::milliseconds(cfg.pause_loop_sleep_ms));
-    return true;
 }
 
 bool TryReadFrameWithReconnect(FfmpegRtspCapture& cap,
                                const RuntimeConfig& cfg,
+                               const std::atomic<bool>& stopFlag,
                                const std::string& rtspUrl,
                                Mat& frame,
                                std::string& captureError,
@@ -468,6 +404,11 @@ bool TryReadFrameWithReconnect(FfmpegRtspCapture& cap,
         return true;
     }
 
+    if (stopFlag.load()) {
+        captureError = "stop requested";
+        return false;
+    }
+
     grabFailCount++;
     totalReadFail++;
     if (grabFailCount % cfg.grab_fail_log_every == 1) {
@@ -477,6 +418,10 @@ bool TryReadFrameWithReconnect(FfmpegRtspCapture& cap,
 
     std::string reopenError;
     const auto reopenStart = std::chrono::steady_clock::now();
+    if (stopFlag.load()) {
+        captureError = "stop requested";
+        return false;
+    }
     if (cap.Reopen(reopenError)) {
         const auto reopenEnd = std::chrono::steady_clock::now();
         const auto reopenMs =
@@ -608,6 +553,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                     RgbdStreamBuffer* rgbdStreamBuf,
                     ImageStreamBuffer* pcStreamBuf,
                     ViewParams* viewParams,
+                    WorkerControlState* controlState,
                     WorkerStartupState* startupState) {
     const RuntimeConfig& cfg = GetRuntimeConfig();
     LogInfo("Mode: " + std::string(headless ? "headless" : "gui") +
@@ -641,6 +587,7 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
 
     const std::string& rtspUrl = RTSP_URLS[channel];
     FfmpegRtspCapture cap;
+    cap.SetInterruptStopFlag(&stopFlag);
     std::string captureError;
     if (!cap.Open(rtspUrl, cfg, captureError)) {
         reportStartupFailure("RTSP open failed: " + captureError);
@@ -651,7 +598,6 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     Mat frame, resized;
     std::vector<float> outputBuffer(trt.outputElements);
     uint64_t frameIdx = 0;
-    FrozenFrameState frozenFrame;
 
     LogInfo("Stream started.");
 
@@ -669,13 +615,12 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
     bool fatalError = false;
     std::string fatalStartupDetail;
     while (!stopFlag.load()) {
-        if (IsWorkerPaused(viewParams)) {
-            HandlePausedState(cfg, headless, streamBuf, rgbdStreamBuf, pcStreamBuf,
-                              viewParams, frozenFrame, perfTracker);
+        if (IsWorkerPaused(controlState)) {
+            HandlePausedState(cfg, headless);
             continue;
         }
 
-        if (!TryReadFrameWithReconnect(cap, cfg, rtspUrl, frame, captureError,
+        if (!TryReadFrameWithReconnect(cap, cfg, stopFlag, rtspUrl, frame, captureError,
                                        grabFailCount, totalReadFail,
                                        totalReconnectSuccess, totalReconnectFail)) {
             continue;
@@ -770,8 +715,6 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
             RenderPointCloudPreview(cfg, depthMat, outW, outH, intrinsics, colorForDepth, viewConfig);
             cv::waitKey(1);
         }
-
-        frozenFrame.Update(depthMat, colorForDepth, frame, outW, outH, frameIdx);
         reportStartupSuccess();
 
         const auto frameEnd = std::chrono::steady_clock::now();

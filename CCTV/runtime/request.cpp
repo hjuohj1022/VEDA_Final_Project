@@ -163,6 +163,10 @@ Request ParseRequest(const std::string& line) {
             req.pauseSet = true;
             continue;
         }
+        if (t == "status" || t == "worker_status") {
+            req.statusQuery = true;
+            continue;
+        }
         if (t == "resume") {
             req.pause = false;
             req.pauseSet = true;
