@@ -112,33 +112,39 @@ void TestRuntimeConfigDefaults() {
     ScopedEnvRestore readTimeout("VEDA_CONTROL_CLIENT_READ_TIMEOUT_MS", std::nullopt);
     ScopedEnvRestore relayTimeout("VEDA_PROXY_RELAY_IO_TIMEOUT_MS", std::nullopt);
     ScopedEnvRestore maxClients("VEDA_PROXY_MAX_CONCURRENT_CLIENTS", std::nullopt);
+    ScopedEnvRestore workerReadyWait("VEDA_WORKER_READY_WAIT_MS", std::nullopt);
 
     const RuntimeConfig cfg = LoadRuntimeConfigFromEnvironment();
     Expect(cfg.control_client_read_timeout_ms == 5000, "default control client read timeout should be 5000ms");
     Expect(cfg.proxy_relay_io_timeout_ms == 30000, "default proxy relay timeout should be 30000ms");
     Expect(cfg.proxy_max_concurrent_clients == 32, "default proxy max concurrent clients should be 32");
+    Expect(cfg.worker_ready_wait_ms == 25000, "default worker ready wait should be 25000ms");
 }
 
 void TestRuntimeConfigEnvOverrides() {
     ScopedEnvRestore readTimeout("VEDA_CONTROL_CLIENT_READ_TIMEOUT_MS", std::string("7000"));
     ScopedEnvRestore relayTimeout("VEDA_PROXY_RELAY_IO_TIMEOUT_MS", std::string("45000"));
     ScopedEnvRestore maxClients("VEDA_PROXY_MAX_CONCURRENT_CLIENTS", std::string("5"));
+    ScopedEnvRestore workerReadyWait("VEDA_WORKER_READY_WAIT_MS", std::string("12000"));
 
     const RuntimeConfig cfg = LoadRuntimeConfigFromEnvironment();
     Expect(cfg.control_client_read_timeout_ms == 7000, "control client read timeout env override should apply");
     Expect(cfg.proxy_relay_io_timeout_ms == 45000, "proxy relay timeout env override should apply");
     Expect(cfg.proxy_max_concurrent_clients == 5, "proxy max concurrent clients env override should apply");
+    Expect(cfg.worker_ready_wait_ms == 12000, "worker ready wait env override should apply");
 }
 
 void TestRuntimeConfigInvalidEnvFallback() {
     ScopedEnvRestore readTimeout("VEDA_CONTROL_CLIENT_READ_TIMEOUT_MS", std::string("0"));
     ScopedEnvRestore relayTimeout("VEDA_PROXY_RELAY_IO_TIMEOUT_MS", std::string("-1"));
     ScopedEnvRestore maxClients("VEDA_PROXY_MAX_CONCURRENT_CLIENTS", std::string("abc"));
+    ScopedEnvRestore workerReadyWait("VEDA_WORKER_READY_WAIT_MS", std::string("invalid"));
 
     const RuntimeConfig cfg = LoadRuntimeConfigFromEnvironment();
     Expect(cfg.control_client_read_timeout_ms == 5000, "non-positive control timeout should fall back to default");
     Expect(cfg.proxy_relay_io_timeout_ms == 30000, "invalid relay timeout should fall back to default");
     Expect(cfg.proxy_max_concurrent_clients == 32, "invalid max client count should fall back to default");
+    Expect(cfg.worker_ready_wait_ms == 25000, "invalid worker ready wait should fall back to default");
 }
 }  // namespace
 

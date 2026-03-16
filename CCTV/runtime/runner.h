@@ -20,4 +20,5 @@ bool RunDepthWorker(int channel, bool headless, std::atomic<bool>& stopFlag,
                     RgbdStreamBuffer* rgbdStreamBuf,
                     ImageStreamBuffer* pcStreamBuf,
                     ViewParams* viewParams,
+                    WorkerControlState* controlState,
                     WorkerStartupState* startupState = nullptr);

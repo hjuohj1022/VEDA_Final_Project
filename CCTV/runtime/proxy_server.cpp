@@ -1,5 +1,6 @@
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <thread>
 #include <utility>
@@ -42,6 +43,31 @@ public:
 
 private:
     SOCKET socket_ = INVALID_SOCKET;
+};
+
+class WorkerShutdownGuard {
+public:
+    WorkerShutdownGuard(WorkerProcessManager* workerMgr, std::atomic<bool>* workerStopping, const bool enabled)
+        : workerMgr_(workerMgr), workerStopping_(workerStopping), enabled_(enabled) {}
+
+    ~WorkerShutdownGuard() {
+        if (!enabled_ || !workerMgr_) {
+            return;
+        }
+        workerMgr_->Shutdown();
+        if (workerStopping_) {
+            workerStopping_->store(false);
+        }
+        LogInfo("[PROXY] worker process shut down after stop request");
+    }
+
+    WorkerShutdownGuard(const WorkerShutdownGuard&) = delete;
+    WorkerShutdownGuard& operator=(const WorkerShutdownGuard&) = delete;
+
+private:
+    WorkerProcessManager* workerMgr_ = nullptr;
+    std::atomic<bool>* workerStopping_ = nullptr;
+    bool enabled_ = false;
 };
 
 class ProxyCleanupGuard {
@@ -129,34 +155,243 @@ bool ConnectWorkerWithRetry(WorkerProcessManager& workerMgr, SOCKET& outSocket, 
     return ConnectToWorker(workerMgr.port(), outSocket, outErr, 2000);
 }
 
+bool IsStreamRequest(const Request& req) {
+    return req.depthStream || req.rgbdStream || req.pcStream;
+}
+
+bool RequiresRunningWorker(const Request& req) {
+    return IsStreamRequest(req);
+}
+
+bool IsStartRequest(const Request& req) {
+    if (req.statusQuery || req.stop || req.pauseSet ||
+        req.depthStream || req.rgbdStream || req.pcStream || req.pcView) {
+        return false;
+    }
+    return (req.channel >= 0) || req.headlessSet || req.gui;
+}
+
+bool ReceiveTextResponse(const SOCKET socket, std::string& outResponse, std::string& outErr) {
+    outResponse.clear();
+    std::array<char, 256> responseBuf{};
+    while (outResponse.find('\n') == std::string::npos && outResponse.size() < responseBuf.size()) {
+        const int received = recv(socket, responseBuf.data(), static_cast<int>(responseBuf.size()), 0);
+        if (received == 0) {
+            outErr = "worker status recv closed";
+            return false;
+        }
+        if (received < 0) {
+            outErr = "worker status recv failed (wsa=" + std::to_string(WSAGetLastError()) + ")";
+            return false;
+        }
+        outResponse.append(responseBuf.data(), static_cast<std::size_t>(received));
+    }
+    if (outResponse.empty()) {
+        outErr = "worker status response empty";
+        return false;
+    }
+    return true;
+}
+
+bool QueryWorkerReady(WorkerProcessManager& workerMgr, const int timeoutMs, bool& outReady) {
+    outReady = false;
+    if (!workerMgr.IsRunning()) {
+        return false;
+    }
+
+    std::string err;
+    SOCKET workerSocket = INVALID_SOCKET;
+    if (!ConnectToWorker(workerMgr.port(), workerSocket, err, static_cast<DWORD>(timeoutMs))) {
+        return false;
+    }
+    RawSocketHandle workerHandle(workerSocket);
+
+    if (!ApplySocketIoTimeouts(workerHandle.get(), timeoutMs)) {
+        LogWarn("[PROXY] failed to apply worker status timeout (wsa=" + std::to_string(WSAGetLastError()) + ")");
+    }
+
+    const std::string statusRequest = "status";
+    if (!SendAllToSocket(workerHandle.get(), statusRequest.data(), static_cast<int>(statusRequest.size()), err)) {
+        return false;
+    }
+
+    std::string response;
+    if (!ReceiveTextResponse(workerHandle.get(), response, err)) {
+        return false;
+    }
+
+    outReady = response.find("worker_running=1") != std::string::npos;
+    return true;
+}
+
+enum class WorkerReadyWaitResult {
+    kReady,
+    kTimeout,
+    kStopping,
+};
+
+void ExecuteAsyncStop(WorkerProcessManager* workerMgr,
+                      std::atomic<bool>* workerStopping,
+                      const int relayTimeoutMs) {
+    if (!workerMgr) {
+        if (workerStopping) {
+            workerStopping->store(false);
+        }
+        return;
+    }
+
+    WorkerShutdownGuard workerShutdownGuard(workerMgr, workerStopping, true);
+    const int stopRelayTimeoutMs =
+        (relayTimeoutMs > 0 && relayTimeoutMs < 2000) ? relayTimeoutMs : 2000;
+
+    std::string stopErr;
+    SOCKET workerSocket = INVALID_SOCKET;
+    if (!ConnectToWorker(workerMgr->port(), workerSocket, stopErr, 500)) {
+        LogWarn("[PROXY] async worker stop connect failed: " + stopErr);
+        return;
+    }
+
+    RawSocketHandle workerHandle(workerSocket);
+    if (!ApplySocketIoTimeouts(workerHandle.get(), stopRelayTimeoutMs)) {
+        LogWarn("[PROXY] failed to apply async worker stop timeout (wsa=" +
+                std::to_string(WSAGetLastError()) + ")");
+    }
+
+    const std::string stopRequest = "stop";
+    if (!SendAllToSocket(workerHandle.get(), stopRequest.data(), static_cast<int>(stopRequest.size()), stopErr)) {
+        LogWarn("[PROXY] failed to forward async stop to worker: " + stopErr);
+        return;
+    }
+
+    std::array<char, 4096> responseBuf{};
+    const int received = recv(workerHandle.get(), responseBuf.data(),
+                              static_cast<int>(responseBuf.size()), 0);
+    if (received == 0) {
+        return;
+    }
+    if (received < 0) {
+        const int wsaErr = WSAGetLastError();
+        if (wsaErr != WSAETIMEDOUT) {
+            LogWarn("[PROXY] async worker stop recv failed (wsa=" + std::to_string(wsaErr) + ")");
+        }
+    }
+}
+
+WorkerReadyWaitResult WaitForWorkerReady(WorkerProcessManager& workerMgr,
+                                         std::atomic<bool>* workerStopping,
+                                         const RuntimeConfig& cfg) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(cfg.worker_ready_wait_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (workerStopping && workerStopping->load()) {
+            return WorkerReadyWaitResult::kStopping;
+        }
+
+        const auto remaining = deadline - std::chrono::steady_clock::now();
+        const int remainingMs = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count());
+        if (remainingMs <= 0) {
+            break;
+        }
+
+        bool ready = false;
+        if (QueryWorkerReady(workerMgr, remainingMs, ready) && ready) {
+            return WorkerReadyWaitResult::kReady;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return WorkerReadyWaitResult::kTimeout;
+}
+
 void HandleProxyClient(ParsedControlRequest requestCtx,
                        WorkerProcessManager* workerMgr,
-                       std::atomic<int>* activeClients) {
+                       std::atomic<int>* activeClients,
+                       std::atomic<bool>* workerStopping) {
     ClientSocketHandle clientHandle(requestCtx.client);
     ActiveProxyClientGuard activeGuard(*activeClients);
     const Request& req = requestCtx.request;
     const std::string& line = requestCtx.line;
     const int requestLen = static_cast<int>(line.size());
     const RuntimeConfig& cfg = GetRuntimeConfig();
-    if (req.stop && !workerMgr->IsRunning()) {
+    if (workerStopping && workerStopping->load()) {
+        if (req.stop) {
+            SendResponse(clientHandle.get(), "OK stopped\n");
+        } else {
+            SendResponse(clientHandle.get(), "ERR worker stopping\n");
+        }
+        return;
+    }
+
+    const bool workerServiceRunning = workerMgr->IsRunning();
+    const bool startRequest = IsStartRequest(req);
+    if (req.stop && !workerServiceRunning) {
         SendResponse(clientHandle.get(), "OK stopped\n");
+        return;
+    }
+    if (RequiresRunningWorker(req)) {
+        const WorkerReadyWaitResult waitResult = WaitForWorkerReady(*workerMgr, workerStopping, cfg);
+        if (waitResult == WorkerReadyWaitResult::kStopping) {
+            SendResponse(clientHandle.get(), "ERR worker stopping\n");
+            return;
+        }
+        if (waitResult == WorkerReadyWaitResult::kTimeout) {
+            SendResponse(clientHandle.get(), "ERR worker not running\n");
+            return;
+        }
+    } else if (!workerServiceRunning && !startRequest) {
+        SendResponse(clientHandle.get(), "ERR worker not running\n");
+        return;
+    }
+
+    bool stopGateEnabled = false;
+    if (req.stop && workerStopping) {
+        bool expected = false;
+        if (!workerStopping->compare_exchange_strong(expected, true)) {
+            SendResponse(clientHandle.get(), "OK stopped\n");
+            return;
+        }
+        stopGateEnabled = true;
+    }
+
+    if (req.stop) {
+        SendResponse(clientHandle.get(), "OK stopped\n");
+        if (stopGateEnabled) {
+            LogInfo("[PROXY] stop request accepted; worker teardown running in background");
+            std::thread(ExecuteAsyncStop, workerMgr, workerStopping, cfg.proxy_relay_io_timeout_ms).detach();
+        }
         return;
     }
 
     std::string err;
     SOCKET workerSocket = INVALID_SOCKET;
-    if (!ConnectWorkerWithRetry(*workerMgr, workerSocket, err)) {
-        LogError("[PROXY] worker unavailable: " + err);
-        SendResponse(clientHandle.get(), "ERR worker unavailable\n");
-        return;
+    if (startRequest) {
+        if (!ConnectWorkerWithRetry(*workerMgr, workerSocket, err)) {
+            LogError("[PROXY] worker unavailable: " + err);
+            SendResponse(clientHandle.get(), "ERR worker unavailable\n");
+            return;
+        }
+    } else {
+        if (!workerMgr->IsRunning()) {
+            err = "worker service not running";
+        } else if (ConnectToWorker(workerMgr->port(), workerSocket, err, 2000)) {
+            err.clear();
+        }
+        if (!err.empty()) {
+            LogWarn("[PROXY] worker unavailable without start: " + err);
+            SendResponse(clientHandle.get(), "ERR worker not running\n");
+            return;
+        }
     }
     RawSocketHandle workerHandle(workerSocket);
 
-    if (!ApplySocketIoTimeouts(workerHandle.get(), cfg.proxy_relay_io_timeout_ms)) {
-        LogWarn("[PROXY] failed to apply worker relay timeout (wsa=" + std::to_string(WSAGetLastError()) + ")");
-    }
-    if (!ApplySocketIoTimeouts(clientHandle.get().socket, cfg.proxy_relay_io_timeout_ms)) {
-        LogWarn("[PROXY] failed to apply client relay timeout (wsa=" + std::to_string(WSAGetLastError()) + ")");
+    if (!IsStreamRequest(req)) {
+        if (!ApplySocketIoTimeouts(workerHandle.get(), cfg.proxy_relay_io_timeout_ms)) {
+            LogWarn("[PROXY] failed to apply worker relay timeout (wsa=" + std::to_string(WSAGetLastError()) + ")");
+        }
+        if (!ApplySocketIoTimeouts(clientHandle.get().socket, cfg.proxy_relay_io_timeout_ms)) {
+            LogWarn("[PROXY] failed to apply client relay timeout (wsa=" + std::to_string(WSAGetLastError()) + ")");
+        }
     }
 
     if (!SendAllToSocket(workerHandle.get(), line.data(), requestLen, err)) {
@@ -197,6 +432,7 @@ int RunProxyServer(const ProxyRunOptions& options) {
     WorkerProcessManager workerMgr(options.workerPort);
     ProxyCleanupGuard cleanupGuard(serverCtx, workerMgr);
     std::atomic<int> activeClients{0};
+    std::atomic<bool> workerStopping{false};
 
     while (true) {
         ParsedControlRequest requestCtx;
@@ -213,6 +449,6 @@ int RunProxyServer(const ProxyRunOptions& options) {
             continue;
         }
 
-        std::thread(HandleProxyClient, std::move(requestCtx), &workerMgr, &activeClients).detach();
+        std::thread(HandleProxyClient, std::move(requestCtx), &workerMgr, &activeClients, &workerStopping).detach();
     }
 }

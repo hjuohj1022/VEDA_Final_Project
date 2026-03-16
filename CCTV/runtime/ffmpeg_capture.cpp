@@ -197,6 +197,7 @@ int MapColorSpaceToSwsMatrix(const AVColorSpace colorSpace) {
 }  // namespace
 
 struct FfmpegRtspCapture::Impl {
+    const std::atomic<bool>* stopFlag = nullptr;
     AVFormatContext* formatCtx = nullptr;
     AVCodecContext* codecCtx = nullptr;
     SwsContext* swsCtx = nullptr;
@@ -220,6 +221,7 @@ struct FfmpegRtspCapture::Impl {
     static int InterruptCallback(void* opaque) {
         auto* self = static_cast<Impl*>(opaque);
         if (!self || !self->deadlineActive) return 0;
+        if (self->stopFlag && self->stopFlag->load()) return 1;
         return std::chrono::steady_clock::now() > self->deadline ? 1 : 0;
     }
 
@@ -502,6 +504,10 @@ FfmpegRtspCapture::~FfmpegRtspCapture() = default;
 FfmpegRtspCapture::FfmpegRtspCapture(FfmpegRtspCapture&& other) noexcept = default;
 
 FfmpegRtspCapture& FfmpegRtspCapture::operator=(FfmpegRtspCapture&& other) noexcept = default;
+
+void FfmpegRtspCapture::SetInterruptStopFlag(const std::atomic<bool>* stopFlag) {
+    impl_->stopFlag = stopFlag;
+}
 
 bool FfmpegRtspCapture::Open(const std::string& url, const RuntimeConfig& cfg, std::string& error) {
     return impl_->Open(url, cfg, error);

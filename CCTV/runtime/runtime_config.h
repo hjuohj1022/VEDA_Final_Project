@@ -54,6 +54,7 @@ struct RuntimeConfig {
     int control_client_read_timeout_ms = 5000;
     int proxy_relay_io_timeout_ms = 30000;
     int proxy_max_concurrent_clients = 32;
+    int worker_ready_wait_ms = 25000;
     ControlTlsConfig control_tls;
 };
 

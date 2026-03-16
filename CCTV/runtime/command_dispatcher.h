@@ -21,6 +21,7 @@ struct ServerRuntimeContext {
     RgbdStreamBuffer& rgbdStream;
     ImageStreamBuffer& pcStream;
     ViewParams& viewParams;
+    WorkerControlState& controlState;
 };
 
 void JoinFinishedStreamThreads(ServerRuntimeContext& ctx);
