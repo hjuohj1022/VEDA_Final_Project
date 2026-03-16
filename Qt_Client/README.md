@@ -24,7 +24,6 @@
 
 ### 3. 저장소/상태 정보
 - 카메라 SUNAPI 응답 기반 SD 저장소 용량 표시
-- 참고: `/recordings`, `/stream` 계열은 현재 UI에서 사용하지 않음(레거시)
 
 ### 3-1. 카메라 표시(Image Enhancements) 제어
 - Camera Controls 패널에서 채널별 표시값 제어
@@ -70,6 +69,12 @@
 - `POST /register` 성공 시 로그인 화면으로 자동 복귀 및 입력값 초기화
 - `Back to Sign In` 클릭 시 회원가입 입력값 초기화
 - 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
+
+### 7. 클라이언트 사양(System Specs) 팝업
+- 헤더 좌측 홈 아이콘 클릭 시 클라이언트 사양 다이얼로그 표시
+- 홈 아이콘 툴팁 문구: `클라이언트 사양`
+- 다이얼로그에서 `Refresh` 버튼 제거(`Close`만 유지)
+- 사양 정보는 팝업 호출 시 최초 1회 조회 후 캐시 재사용(반복 조회로 인한 UI 멈춤 완화)
 
 ## Qt Client Architecture Diagram
 

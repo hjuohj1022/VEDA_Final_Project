@@ -122,15 +122,7 @@ public:
     Q_INVOKABLE bool updateRtspCredentials(QString username, QString password);
     Q_INVOKABLE void useEnvRtspCredentials();
     Q_INVOKABLE void probeRtspEndpoint(QString ip, QString port, int timeoutMs = 1200);
-
-    // Recordings/files
-    Q_INVOKABLE void refreshRecordings();
-    Q_INVOKABLE void deleteRecording(QString name);
-    Q_INVOKABLE void renameRecording(QString oldName, QString newName);
-    Q_INVOKABLE QString getStreamUrl(QString fileName);
-    Q_INVOKABLE void downloadAndPlay(QString fileName);
-    Q_INVOKABLE void cancelDownload();
-    Q_INVOKABLE void exportRecording(QString fileName, QString savePath);
+    Q_INVOKABLE QVariantMap getClientSystemInfo() const;
 
     // Playback
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;
@@ -203,19 +195,6 @@ signals:
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();
-
-    // Recordings/file events
-    void recordingsLoaded(QVariantList files);
-    void recordingsLoadFailed(QString error);
-    void deleteSuccess();
-    void deleteFailed(QString error);
-    void renameSuccess();
-    void renameFailed(QString error);
-
-    // Download events
-    void downloadProgress(qint64 received, qint64 total);
-    void downloadFinished(QString path);
-    void downloadError(QString error);
 
     // RTSP/camera events
     void cameraControlMessage(QString message, bool isError);

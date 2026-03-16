@@ -51,6 +51,8 @@ ApplicationWindow {
     property alias exportProgressVisible: uiStore.exportProgressVisible
     property alias exportProgressPercent: uiStore.exportProgressPercent
     property alias exportProgressText: uiStore.exportProgressText
+    property var clientSystemSpecsCache: ({})
+    property bool clientSystemSpecsLoaded: false
 
     QtObject {
         id: uiStore
@@ -88,6 +90,16 @@ ApplicationWindow {
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
         return cameraNames[index]
+    }
+
+    function showClientSystemSpecs() {
+        if (!backend.isLoggedIn)
+            return
+        if (!clientSystemSpecsLoaded) {
+            clientSystemSpecsCache = backend.getClientSystemInfo()
+            clientSystemSpecsLoaded = true
+        }
+        systemSpecsDialog.showWithData(clientSystemSpecsCache)
     }
 
     function urlToLocalPath(u) {
@@ -431,7 +443,9 @@ ApplicationWindow {
                 backend.logout()
                 stackLayout.currentIndex = 1
             }
-            onRequestHome: stackLayout.currentIndex = backend.isLoggedIn ? 0 : 1
+            onRequestHome: {
+                window.showClientSystemSpecs()
+            }
             onRequestRtspSettings: {
                 rtspSettingsPopup.prepareAndShow()
             }
@@ -956,6 +970,11 @@ ApplicationWindow {
         id: rtspSettingsPopup
         theme: window.appTheme
         hostWindow: window
+    }
+
+    SystemSpecsDialog {
+        id: systemSpecsDialog
+        theme: window.appTheme
     }
 
     Window {
