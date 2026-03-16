@@ -38,11 +38,11 @@
 namespace fs = std::filesystem;
 
 std::string getJwtSecret();
+
+namespace {
 bool verifyTokenStage(const std::string& token,
                       const std::string& expected_stage,
                       std::string* user_id_out);
-
-namespace {
 // 인증/DB/파일 스트리밍 헬퍼의 라우트 바깥 배치.
 // main()의 서비스 등록 흐름 집중 목적 구조.
 constexpr char kDatabaseName[] = "veda_db";
