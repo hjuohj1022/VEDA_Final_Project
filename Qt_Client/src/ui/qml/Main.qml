@@ -53,6 +53,10 @@ ApplicationWindow {
     property alias exportProgressText: uiStore.exportProgressText
     property var clientSystemSpecsCache: ({})
     property bool clientSystemSpecsLoaded: false
+    property bool startupOverlayVisible: true
+    property bool startupBootReady: false
+    property bool startupMinElapsed: false
+    property string startupStatusText: "초기 리소스 준비 중..."
 
     QtObject {
         id: uiStore
@@ -100,6 +104,10 @@ ApplicationWindow {
             clientSystemSpecsLoaded = true
         }
         systemSpecsDialog.showWithData(clientSystemSpecsCache)
+    }
+
+    function updateStartupOverlayState() {
+        startupOverlayVisible = !(startupBootReady && startupMinElapsed)
     }
 
     function urlToLocalPath(u) {
@@ -256,6 +264,11 @@ ApplicationWindow {
         if (a === 172 && b >= 16 && b <= 31) return true
         if (a === 192 && b === 168) return true
         return false
+    }
+
+    Component.onCompleted: {
+        startupBootReady = true
+        updateStartupOverlayState()
     }
 
     function sanitizeIpv4Input(raw) {
@@ -753,6 +766,68 @@ ApplicationWindow {
         }
     }
 
+    Rectangle {
+        anchors.fill: parent
+        z: 5000
+        visible: startupOverlayVisible
+        color: theme.bgSecondary
+
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: theme.bgSecondary }
+                GradientStop { position: 1.0; color: theme.bgPrimary }
+            }
+            opacity: 0.95
+        }
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 16
+
+            Rectangle {
+                width: 72
+                height: 72
+                radius: 18
+                color: theme.accent
+                anchors.horizontalCenter: parent.horizontalCenter
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "\uE72E"
+                    color: "white"
+                    font.family: "Segoe MDL2 Assets"
+                    font.pixelSize: 30
+                }
+            }
+
+            Text {
+                text: "Vision VMS"
+                color: theme.textPrimary
+                font.pixelSize: 30
+                font.bold: true
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            Text {
+                text: startupStatusText
+                color: theme.textSecondary
+                font.pixelSize: 14
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            BusyIndicator {
+                running: startupOverlayVisible
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+        }
+    }
+
     TapHandler {
         acceptedButtons: Qt.AllButtons
         onTapped: backend.resetSessionTimer()
@@ -911,6 +986,18 @@ ApplicationWindow {
                                           window.pendingExportStart,
                                           window.pendingExportEnd,
                                           savePath)
+        }
+    }
+
+    Timer {
+        id: startupMinTimer
+        interval: 1500
+        repeat: false
+        running: true
+        onTriggered: {
+            startupMinElapsed = true
+            startupStatusText = "로그인 화면 준비 완료"
+            updateStartupOverlayState()
         }
     }
 
