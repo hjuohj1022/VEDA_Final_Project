@@ -7,8 +7,8 @@
 #include <stdint.h>
 
 #define CMD_UART_NUM       UART_NUM_1
-#define CMD_UART_TX_PIN    11
-#define CMD_UART_RX_PIN    12
+#define CMD_UART_TX_PIN    21
+#define CMD_UART_RX_PIN    20
 #define CMD_UART_BAUD      115200
 #define CMD_UART_RX_BUF    256
 #define CMD_MAX_LEN        64

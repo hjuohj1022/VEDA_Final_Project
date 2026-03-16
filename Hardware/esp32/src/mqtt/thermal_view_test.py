@@ -10,13 +10,6 @@ import numpy as np
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
-try:
-    from app_client_config import MQTT_BROKER, MQTT_PORT, MQTT_TLS_INSECURE
-except ImportError:
-    MQTT_BROKER = ""
-    MQTT_PORT = 8883
-    MQTT_TLS_INSECURE = True
-
 WIDTH = 160
 HEIGHT = 120
 FRAME_BYTES = WIDTH * HEIGHT * 2
@@ -141,7 +134,7 @@ def normalize_frame(raw_frame, min_val, max_val):
 
 
 def render_frame(assembler, frame_id, min_val, max_val, frame_bytes):
-    raw_frame = np.frombuffer(frame_bytes[:FRAME_BYTES], dtype=">u2").reshape((HEIGHT, WIDTH))
+    raw_frame = np.frombuffer(frame_bytes, dtype=">u2").reshape((HEIGHT, WIDTH))
     gray_frame, lo, hi = normalize_frame(raw_frame, min_val, max_val)
     color_frame = cv2.applyColorMap(gray_frame, cv2.COLORMAP_JET)
     view = cv2.resize(color_frame, (960, 720), interpolation=cv2.INTER_LINEAR)
@@ -243,12 +236,12 @@ def build_client(args, assembler):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple thermal MQTT viewer")
-    parser.add_argument("--host", default=MQTT_BROKER)
-    parser.add_argument("--port", type=int, default=MQTT_PORT)
+    parser.add_argument("--host", default="192.168.55.200")
+    parser.add_argument("--port", type=int, default=8883)
     parser.add_argument("--topic", default=DEFAULT_TOPIC)
     parser.add_argument("--tls", action="store_true", default=True)
     parser.add_argument("--no-tls", dest="tls", action="store_false")
-    parser.add_argument("--insecure", action="store_true", default=MQTT_TLS_INSECURE)
+    parser.add_argument("--insecure", action="store_true", default=True)
     parser.add_argument("--secure-cn", dest="insecure", action="store_false")
     return parser.parse_args()
 
@@ -256,8 +249,6 @@ def parse_args():
 def main():
     try:
         args = parse_args()
-        if not args.host:
-            raise RuntimeError("Create app_client_config.py from app_client_config.example.py")
         log("thermal_view_test.py start")
         log(f"python cwd={os.getcwd()}")
         log(f"connecting to {args.host}:{args.port} topic={args.topic} tls={args.tls} insecure={args.insecure}")
