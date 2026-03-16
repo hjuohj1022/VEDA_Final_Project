@@ -36,6 +36,18 @@
   - `POST /api/sunapi/display/settings`
   - `POST /api/sunapi/display/reset`
 
+### 3-2. 모터 제어(임시 UI)
+- 헤더 검색창 오른쪽 `Motor` 버튼으로 임시 모터 제어 다이얼로그 오픈
+- 다이얼로그에서 `motor(1~3)`, `direction(left/right)`, `angle(0~180)` 입력/선택 후 제어
+- 지원 동작
+  - `Press` / `Release` / `Stop` / `Set` / `Center All` / `Stop All`
+- 현재 위치는 기능 검증용이며, 추후 Camera Controls 패널로 통합 예정
+- 관련 구현:
+  - `src/ui/qml/common/Header.qml`
+  - `src/ui/qml/dialogs/MotorControlDialog.qml`
+  - `src/core/cctv/BackendMotorControl.cpp`
+  - `src/core/cctv/BackendMotorControlService.cpp`
+
 ### 4. Thermal 모니터링
 - 상단 탭의 `Thermal` 진입 시 열화상 스트림 시작, 이탈 시 자동 중지
 - MQTT 청크 프레임(160x120, 16-bit) 재조립 후 QML `Image`로 표시
@@ -218,6 +230,12 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/api/sunapi/display/settings` | 표시 설정 조회 (대비/밝기/윤곽/컬러) |
 | `POST` | `/api/sunapi/display/settings` | 표시 설정 적용 (채널별) |
 | `POST` | `/api/sunapi/display/reset` | 표시 설정 초기화 (50/50/12/50) |
+| `POST` | `/motor/control/press` | 모터 press 시작 (`motor`, `direction`) |
+| `POST` | `/motor/control/release` | 모터 press 해제 (`motor`) |
+| `POST` | `/motor/control/stop` | 단일 모터 정지 (`motor`) |
+| `POST` | `/motor/control/set` | 단일 모터 각도 설정 (`motor`, `angle`) |
+| `POST` | `/motor/control/center` | 전체 모터 동일 각도 센터 정렬 (`angle`, optional) |
+| `POST` | `/motor/control/stopall` | 전체 모터 일괄 정지 |
 | `POST` | `/cctv/control/start` | 3D Map 처리 시작 (channel/mode) |
 | `POST` | `/cctv/control/stream` | 3D Map 스트림 모드 요청 (`rgbd_stream`) |
 | `POST` | `/cctv/control/pause` | 3D Map 처리 일시정지 |
@@ -398,6 +416,12 @@ Playback 동작 검증 시 아래를 확인했습니다.
 - 타임라인 라벨 겹침
   - 기본/확대 라벨 Repeater 동시 렌더 문제
   - 조건부 `model` 렌더링으로 수정
+
+- 한글 문자열 깨짐(소스/로그)
+  - 저장소 규칙: `.gitattributes` + `.editorconfig` 기준 UTF-8 유지
+  - 에디터 권장: UTF-8 고정(`autoGuessEncoding` 비활성)
+  - Git 권장 설정: `core.autocrlf=input`, `core.eol=lf`
+  - 문자열 리터럴 수정 후 빌드 에러 발생 시 따옴표/이스케이프(`\"`, `\n`) 먼저 확인
 
 ## License
 

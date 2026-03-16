@@ -462,6 +462,9 @@ ApplicationWindow {
             onRequestRtspSettings: {
                 rtspSettingsPopup.prepareAndShow()
             }
+            onRequestMotorControl: {
+                motorControlDialog.openDialog()
+            }
             onRequestExportCancel: {
                 backend.cancelPlaybackExport()
             }
@@ -1055,6 +1058,12 @@ ApplicationWindow {
     }
     RtspSettingsDialog {
         id: rtspSettingsPopup
+        theme: window.appTheme
+        hostWindow: window
+    }
+
+    MotorControlDialog {
+        id: motorControlDialog
         theme: window.appTheme
         hostWindow: window
     }

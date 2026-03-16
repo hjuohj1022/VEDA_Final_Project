@@ -62,6 +62,8 @@ qt_add_executable(Team3VideoReceiver
     src/core/sunapi/BackendSunapiPtzService.cpp
     src/core/cctv/BackendCctv3dMap.cpp
     src/core/cctv/BackendCctv3dMapService.cpp
+    src/core/cctv/BackendMotorControl.cpp
+    src/core/cctv/BackendMotorControlService.cpp
     src/core/sunapi/BackendSunapiDisplay.cpp
     src/core/sunapi/BackendSunapiDisplayService.cpp
     src/core/sunapi/BackendSunapiTimeline.cpp
@@ -124,6 +126,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/sidebar/SidebarSystemMetricsPanel.qml
         src/ui/qml/dialogs/PlaybackExportSaveDialog.qml
         src/ui/qml/dialogs/RtspSettingsDialog.qml
+        src/ui/qml/dialogs/MotorControlDialog.qml
         src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/dialogs/SystemSpecsDialog.qml
         src/ui/qml/components/IconButton.qml

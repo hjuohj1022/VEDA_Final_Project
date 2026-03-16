@@ -150,29 +150,37 @@ public:
     Q_INVOKABLE void setThermalManualRange(int minValue, int maxValue);
 
     // SUNAPI PTZ/Focus
-    Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);
-    Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);
-    Q_INVOKABLE bool sunapiZoomStop(int cameraIndex);
-    Q_INVOKABLE bool sunapiFocusNear(int cameraIndex);
-    Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);
-    Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);
-    Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);
+    Q_INVOKABLE bool sunapiZoomIn(int cameraIndex);         // 카메라 줌 인 시작
+    Q_INVOKABLE bool sunapiZoomOut(int cameraIndex);        // 카메라 줌 아웃 시작
+    Q_INVOKABLE bool sunapiZoomStop(int cameraIndex);       // 카메라 줌 동작 정지
+    Q_INVOKABLE bool sunapiFocusNear(int cameraIndex);      // 카메라 포커스 Near 이동
+    Q_INVOKABLE bool sunapiFocusFar(int cameraIndex);       // 카메라 포커스 Far 이동
+    Q_INVOKABLE bool sunapiFocusStop(int cameraIndex);      // 카메라 포커스 동작 정지
+    Q_INVOKABLE bool sunapiSimpleAutoFocus(int cameraIndex);// 카메라 오토포커스 실행
 
     // SUNAPI display + 3D map
-    Q_INVOKABLE void sunapiLoadDisplaySettings(int cameraIndex);
+    Q_INVOKABLE void sunapiLoadDisplaySettings(int cameraIndex);               // 표시 설정 조회
     Q_INVOKABLE bool sunapiSetDisplaySettings(int cameraIndex,
                                               int contrast,
                                               int brightness,
                                               int sharpnessLevel,
                                               int colorLevel,
-                                              bool sharpnessEnabled);
-    Q_INVOKABLE bool sunapiResetDisplaySettings(int cameraIndex);
-    Q_INVOKABLE bool startCctv3dMapPrepareSequence(int cameraIndex);
-    Q_INVOKABLE bool startCctv3dMapSequence(int cameraIndex);
-    Q_INVOKABLE bool pauseCctv3dMapSequence();
-    Q_INVOKABLE bool resumeCctv3dMapSequence();
-    Q_INVOKABLE void stopCctv3dMapSequence();
-    Q_INVOKABLE bool updateCctv3dMapView(double rx, double ry);
+                                              bool sharpnessEnabled);           // 표시 설정 적용
+    Q_INVOKABLE bool sunapiResetDisplaySettings(int cameraIndex);               // 표시 설정 초기화
+    Q_INVOKABLE bool startCctv3dMapPrepareSequence(int cameraIndex);            // 3D Map 준비 시퀀스 시작
+    Q_INVOKABLE bool startCctv3dMapSequence(int cameraIndex);                   // 3D Map 실행 시퀀스 시작
+    Q_INVOKABLE bool pauseCctv3dMapSequence();                                  // 3D Map 처리 일시정지
+    Q_INVOKABLE bool resumeCctv3dMapSequence();                                 // 3D Map 처리 재개
+    Q_INVOKABLE void stopCctv3dMapSequence();                                   // 3D Map 처리 중지
+    Q_INVOKABLE bool updateCctv3dMapView(double rx, double ry);                 // 3D Map 뷰 회전 값 갱신
+
+    // Motor control (Crow /motor/control/*)
+    Q_INVOKABLE bool motorPress(int motor, const QString &direction); // 모터 지정 방향 press 명령 전달
+    Q_INVOKABLE bool motorRelease(int motor);                         // 모터 press 상태 release 해제
+    Q_INVOKABLE bool motorStop(int motor);                            // 단일 모터 정지
+    Q_INVOKABLE bool motorSetAngle(int motor, int angle);             // 단일 모터 지정 각도 이동
+    Q_INVOKABLE bool motorCenter(int angle = 90);                     // 전체 모터 동일 각도 센터 정렬
+    Q_INVOKABLE bool motorStopAll();                                  // 전체 모터 일괄 정지
 
 signals:
     // Property notify
