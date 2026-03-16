@@ -8,6 +8,7 @@ import "playback"
 import "thermal"
 import "sidebar"
 import "dialogs"
+import "components" as C
 
 ApplicationWindow {
     id: window
@@ -671,6 +672,7 @@ ApplicationWindow {
                                     visible: stackLayout.currentIndex === 3
                                     theme: window.appTheme
                                     isLoggedIn: backend.isLoggedIn
+                                    mapModeEnabled: rightSidebar.mapModeEnabled
                                     cameraIndex: window.inlineMainCameraIndex
                                     locationName: window.cameraLocationName(window.inlineMainCameraIndex)
                                     onRequestClose: {
@@ -954,6 +956,323 @@ ApplicationWindow {
         id: rtspSettingsPopup
         theme: window.appTheme
         hostWindow: window
+    }
+
+    Window {
+        id: cctv3dMapDebugWindow
+        visible: backend.isLoggedIn && rightSidebar.mapModeEnabled
+        width: 1000
+        height: 760
+        minimumWidth: 640
+        minimumHeight: 520
+        title: "Vision VMS - 3D Map"
+        flags: Qt.Window | Qt.FramelessWindowHint
+        color: theme.bgPrimary
+        property real viewRx: -20.0
+        property real viewRy: 35.0
+        property bool dragging: false
+        property real lastDragX: 0
+        property real lastDragY: 0
+        property int dragSendIntervalMs: 90
+        property double lastDragSendMs: 0
+
+        function clamp(v, lo, hi) {
+            return Math.max(lo, Math.min(hi, v))
+        }
+
+        function wrapDeg(v) {
+            while (v > 180.0)
+                v -= 360.0
+            while (v < -180.0)
+                v += 360.0
+            return v
+        }
+
+        function sendViewUpdate(force) {
+            if (!visible)
+                return
+            var now = Date.now()
+            if (!force && (now - lastDragSendMs) < dragSendIntervalMs)
+                return
+            lastDragSendMs = now
+            backend.updateCctv3dMapView(viewRx, viewRy)
+        }
+
+        onClosing: function(close) {
+            if (rightSidebar.mapModeEnabled) {
+                backend.stopCctv3dMapSequence()
+                rightSidebar.mapModeEnabled = false
+            }
+            close.accepted = true
+        }
+
+        onVisibleChanged: {
+            if (visible) {
+                lastDragSendMs = 0
+                sendViewUpdate(true)
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: theme.bgPrimary
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 0
+                spacing: 8
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 32
+                    color: theme.bgComponent
+                    border.color: theme.border
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 6
+                        spacing: 8
+
+                        Text {
+                            text: "3D Map Viewer"
+                            color: theme.textPrimary
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: mapTitleMinBtn
+                            width: 28
+                            height: 22
+                            radius: 4
+                            color: mapTitleMinMouse.pressed
+                                   ? (window.isDarkMode ? "#3f3f46" : "#d4d4d8")
+                                   : (mapTitleMinMouse.containsMouse ? (window.isDarkMode ? "#27272a" : "#e4e4e7") : "transparent")
+                            scale: mapTitleMinMouse.pressed ? 0.95 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "-"
+                                color: theme.textSecondary
+                                font.pixelSize: 14
+                            }
+
+                            MouseArea {
+                                id: mapTitleMinMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: cctv3dMapDebugWindow.showMinimized()
+                            }
+                        }
+
+                        Rectangle {
+                            id: mapTitleCloseBtn
+                            width: 28
+                            height: 22
+                            radius: 4
+                            color: mapTitleCloseMouse.pressed ? "#b91c1c" : (mapTitleCloseMouse.containsMouse ? "#dc2626" : "transparent")
+                            scale: mapTitleCloseMouse.pressed ? 0.95 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "x"
+                                color: mapTitleCloseMouse.containsMouse ? "white" : theme.textSecondary
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: mapTitleCloseMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: cctv3dMapDebugWindow.close()
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        z: -1
+                        onPressed: function(mouse) {
+                            if (mouse.button === Qt.LeftButton)
+                                cctv3dMapDebugWindow.startSystemMove()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 52
+                    Layout.leftMargin: 10
+                    Layout.rightMargin: 10
+                    color: theme.bgComponent
+                    border.color: theme.border
+                    border.width: 1
+                    radius: 8
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 8
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "3D Map Viewer"
+                                color: theme.textPrimary
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+                            Text {
+                                text: backend.cctv3dMapFrameDataUrl.length > 0
+                                      ? "RGBD 스트림 수신 중"
+                                      : "프레임 수신 대기 중"
+                                color: theme.textSecondary
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        C.SidebarControlButton {
+                            text: "일시정지"
+                            compact: true
+                            theme: window.appTheme
+                            enabled: rightSidebar.mapModeEnabled
+                            onClicked: backend.pauseCctv3dMapSequence()
+                        }
+
+                        C.SidebarControlButton {
+                            text: "재개"
+                            compact: true
+                            theme: window.appTheme
+                            enabled: rightSidebar.mapModeEnabled
+                            onClicked: backend.resumeCctv3dMapSequence()
+                        }
+
+                        C.SidebarControlButton {
+                            text: "Stop"
+                            compact: true
+                            accentStyle: true
+                            theme: window.appTheme
+                            enabled: rightSidebar.mapModeEnabled
+                            onClicked: {
+                                backend.stopCctv3dMapSequence()
+                                rightSidebar.mapModeEnabled = false
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.leftMargin: 10
+                    Layout.rightMargin: 10
+                    Layout.bottomMargin: 10
+                    color: theme.bgSecondary
+                    border.color: theme.border
+                    border.width: 1
+                    radius: 8
+
+                    Image {
+                        id: cctv3dMapDebugImage
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        source: backend.cctv3dMapFrameDataUrl
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        smooth: true
+                        mipmap: false
+                    }
+
+                    MouseArea {
+                        anchors.fill: cctv3dMapDebugImage
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.OpenHandCursor
+
+                        onPressed: function(mouse) {
+                            if (mouse.button !== Qt.LeftButton)
+                                return
+                            cctv3dMapDebugWindow.dragging = true
+                            cctv3dMapDebugWindow.lastDragX = mouse.x
+                            cctv3dMapDebugWindow.lastDragY = mouse.y
+                        }
+
+                        onReleased: function(mouse) {
+                            if (mouse.button !== Qt.LeftButton)
+                                return
+                            cctv3dMapDebugWindow.dragging = false
+                            cctv3dMapDebugWindow.sendViewUpdate(true)
+                        }
+
+                        onCanceled: {
+                            cctv3dMapDebugWindow.dragging = false
+                        }
+
+                        onPositionChanged: function(mouse) {
+                            if (!cctv3dMapDebugWindow.dragging)
+                                return
+
+                            var dx = mouse.x - cctv3dMapDebugWindow.lastDragX
+                            var dy = mouse.y - cctv3dMapDebugWindow.lastDragY
+                            cctv3dMapDebugWindow.lastDragX = mouse.x
+                            cctv3dMapDebugWindow.lastDragY = mouse.y
+
+                            var sensitivity = 0.22
+                            cctv3dMapDebugWindow.viewRx = cctv3dMapDebugWindow.clamp(
+                                        cctv3dMapDebugWindow.viewRx + dy * sensitivity, -89.0, 89.0)
+                            cctv3dMapDebugWindow.viewRy = cctv3dMapDebugWindow.wrapDeg(
+                                        cctv3dMapDebugWindow.viewRy + dx * sensitivity)
+                            cctv3dMapDebugWindow.sendViewUpdate(false)
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.left: cctv3dMapDebugImage.left
+                        anchors.top: cctv3dMapDebugImage.top
+                        anchors.leftMargin: 12
+                        anchors.topMargin: 10
+                        radius: 6
+                        color: "#66000000"
+                        border.color: "#22ffffff"
+                        border.width: 1
+                        implicitWidth: debugGuideText.implicitWidth + 14
+                        implicitHeight: debugGuideText.implicitHeight + 8
+                        z: 10
+
+                        Text {
+                            id: debugGuideText
+                            anchors.centerIn: parent
+                            text: "Drag LMB: Rotate | rx "
+                                  + cctv3dMapDebugWindow.viewRx.toFixed(1)
+                                  + " | ry "
+                                  + cctv3dMapDebugWindow.viewRy.toFixed(1)
+                            color: "#e5e7eb"
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: cctv3dMapDebugImage.source.length === 0
+                        text: "3D Map 프레임 수신 대기 중..."
+                        color: theme.textSecondary
+                        font.pixelSize: 16
+                    }
+                }
+            }
+        }
     }
 
     Rectangle {

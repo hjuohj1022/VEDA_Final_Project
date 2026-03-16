@@ -1,7 +1,7 @@
 ﻿# Qt CCTV Client (Live + Playback VMS)
 
 이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
-실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신)을 제공합니다.
+실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신 + 로컬 렌더링)을 제공합니다.
 
 ## 주요 기능
 
@@ -43,18 +43,25 @@
 - 팔레트(`Jet`/`Gray`/`Iron`) 및 Auto/Manual range 제어 지원
 - 관련 구현: `src/core/thermal/BackendThermal.cpp`, `src/ui/qml/thermal/ThermalViewer.qml`
 
-### 5. CCTV 3D Map (1차: API + WS 수신)
-- Camera Controls의 `3D Map 모드 ON/OFF` 버튼으로 시작/중지
+### 5. CCTV 3D Map (1차: API + WS 수신/로컬 렌더)
+- Camera Controls에서 `줌- + 오토포커스` 준비 버튼, `3D Map 모드 ON/OFF` 버튼으로 시작/중지
+- 3D Map 전용 새 창(프레임리스, UI 통일)에서 수신 프레임 표시 및 드래그 회전
+- 3D Map 창/사이드바에서 `일시정지`/`재개` 버튼 지원
+  - `POST /cctv/control/pause`
+  - `POST /cctv/control/resume`
 - ON 시 시퀀스:
-  - 줌 아웃 -> 줌 정지 -> 오토포커스 -> `POST /cctv/control/start` -> `POST /cctv/control/stream` -> `wss://<API_HOST>/cctv/stream`
+  - 줌 아웃 -> 줌 정지 -> 오토포커스 -> `POST /cctv/control/start` -> `POST /cctv/control/stream`(`rgbd_stream`) -> `wss://<API_HOST>/cctv/stream`
 - OFF 시 즉시 중지:
   - `POST /cctv/control/stop` 호출 + WS 종료
 - 현재 단계(1차):
-  - WS 바이너리 프레임 수신/카운트까지 연동
-  - OpenCL 포인트클라우드 렌더링은 후속 단계
+  - WS 바이너리 프레임을 수신해 클라이언트에서 RGBD 포인트클라우드(와이어프레임 오버레이) 렌더링
+  - 드래그 회전은 서버 view API 호출 없이 로컬 재렌더링
+  - OpenCL 기반 고성능 렌더링 파이프라인은 후속 단계
 - 관련 구현:
   - `src/core/cctv/BackendCctv3dMap.cpp`
+  - `src/core/cctv/BackendCctv3dMapService.cpp`
   - `src/ui/qml/sidebar/SidebarCameraControlsPanel.qml`
+  - `src/ui/qml/Main.qml` (3D Map 전용 창)
 
 ### 6. 인증 (Login / Sign Up)
 - 로그인 화면에서 `Sign In`/`Sign Up` 모드 전환 지원
@@ -192,7 +199,9 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/api/sunapi/display/settings` | 표시 설정 적용 (채널별) |
 | `POST` | `/api/sunapi/display/reset` | 표시 설정 초기화 (50/50/12/50) |
 | `POST` | `/cctv/control/start` | 3D Map 처리 시작 (channel/mode) |
-| `POST` | `/cctv/control/stream` | 3D Map 스트림 모드 요청 (`pc_stream`) |
+| `POST` | `/cctv/control/stream` | 3D Map 스트림 모드 요청 (`rgbd_stream`) |
+| `POST` | `/cctv/control/pause` | 3D Map 처리 일시정지 |
+| `POST` | `/cctv/control/resume` | 3D Map 처리 재개 |
 | `POST` | `/cctv/control/stop` | 3D Map 처리 중지 |
 | `WS` | `/cctv/stream` | 3D Map 바이너리 프레임 수신 |
 | `GET` | `/api/sunapi/export/create` | Playback Export 작업 생성 |
@@ -212,7 +221,7 @@ ffmpeg 배치/버전 관리:
   - Export WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/export/session`
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
   - 표시 설정(대비/밝기/윤곽/컬러): Qt direct CGI -> Crow `/api/sunapi/display/*`
-  - 3D Map 1차: Qt ON/OFF 버튼 -> Crow `/cctv/control/*` + `/cctv/stream` WS 수신
+  - 3D Map 1차: Qt ON/OFF/Pause/Resume -> Crow `/cctv/control/*` + `/cctv/stream` WS 수신 + 클라이언트 로컬 렌더
   - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
 

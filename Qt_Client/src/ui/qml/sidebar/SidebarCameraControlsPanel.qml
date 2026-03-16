@@ -134,27 +134,86 @@ Item {
                     }
                 }
 
-                C.SidebarControlButton {
-                    text: store.mapModeEnabled ? "3D Map 모드 ON" : "3D Map 모드 OFF"
+                RowLayout {
                     Layout.fillWidth: true
-                    compact: true
-                    accentStyle: store.mapModeEnabled
-                    theme: root.theme
-                    onClicked: {
-                        if (store.selectedCameraIndex < 0)
-                            return
+                    spacing: 6
 
-                        if (!store.mapModeEnabled) {
-                            var started = backend.startCctv3dMapSequence(store.selectedCameraIndex)
-                            store.mapModeEnabled = started
-                            if (started) {
-                                store.cameraControlStatus = "3D Map 시퀀스를 시작합니다."
+                    C.SidebarControlButton {
+                        text: "줌- + 오토포커스"
+                        compact: true
+                        theme: root.theme
+                        Layout.fillWidth: true
+                        enabled: store.selectedCameraIndex >= 0 && store.supportZoom && store.supportFocus
+                        onClicked: {
+                            if (store.selectedCameraIndex < 0)
+                                return
+                            var prepared = backend.startCctv3dMapPrepareSequence(store.selectedCameraIndex)
+                            if (prepared) {
+                                store.cameraControlStatus = "줌-/오토포커스 준비 시퀀스를 시작했습니다."
                                 store.cameraControlError = false
                                 store.restartCameraControlStatusTimer()
                             }
-                        } else {
-                            backend.stopCctv3dMapSequence()
-                            store.mapModeEnabled = false
+                        }
+                    }
+
+                    C.SidebarControlButton {
+                        text: store.mapModeEnabled ? "3D Map 모드 ON" : "3D Map 모드 OFF"
+                        compact: true
+                        accentStyle: store.mapModeEnabled
+                        theme: root.theme
+                        Layout.fillWidth: true
+                        enabled: store.selectedCameraIndex >= 0
+                        onClicked: {
+                            if (store.selectedCameraIndex < 0)
+                                return
+
+                            if (!store.mapModeEnabled) {
+                                var started = backend.startCctv3dMapSequence(store.selectedCameraIndex)
+                                store.mapModeEnabled = started
+                                if (started) {
+                                    store.cameraControlStatus = "3D Map 시작 요청을 보냈습니다."
+                                    store.cameraControlError = false
+                                    store.restartCameraControlStatusTimer()
+                                }
+                            } else {
+                                backend.stopCctv3dMapSequence()
+                                store.mapModeEnabled = false
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    C.SidebarControlButton {
+                        text: "3D Map 일시정지"
+                        compact: true
+                        theme: root.theme
+                        Layout.fillWidth: true
+                        enabled: store.selectedCameraIndex >= 0 && store.mapModeEnabled
+                        onClicked: {
+                            if (backend.pauseCctv3dMapSequence()) {
+                                store.cameraControlStatus = "3D Map pause 요청을 보냈습니다."
+                                store.cameraControlError = false
+                                store.restartCameraControlStatusTimer()
+                            }
+                        }
+                    }
+
+                    C.SidebarControlButton {
+                        text: "3D Map 재개"
+                        compact: true
+                        theme: root.theme
+                        Layout.fillWidth: true
+                        enabled: store.selectedCameraIndex >= 0 && store.mapModeEnabled
+                        onClicked: {
+                            if (backend.resumeCctv3dMapSequence()) {
+                                store.cameraControlStatus = "3D Map resume 요청을 보냈습니다."
+                                store.cameraControlError = false
+                                store.restartCameraControlStatusTimer()
+                            }
                         }
                     }
                 }

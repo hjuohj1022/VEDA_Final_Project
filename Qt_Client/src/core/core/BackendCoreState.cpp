@@ -17,6 +17,7 @@ int Backend::detectedObjects() const { return BackendCoreStateService::detectedO
 QString Backend::networkStatus() const { return BackendCoreStateService::networkStatus(d_ptr.get()); }
 
 QString Backend::thermalFrameDataUrl() const { return BackendCoreStateService::thermalFrameDataUrl(d_ptr.get()); }
+QString Backend::cctv3dMapFrameDataUrl() const { return BackendCoreStateService::cctv3dMapFrameDataUrl(d_ptr.get()); }
 QString Backend::thermalInfoText() const { return BackendCoreStateService::thermalInfoText(d_ptr.get()); }
 bool Backend::thermalStreaming() const { return BackendCoreStateService::thermalStreaming(d_ptr.get()); }
 QString Backend::thermalPalette() const { return BackendCoreStateService::thermalPalette(d_ptr.get()); }
