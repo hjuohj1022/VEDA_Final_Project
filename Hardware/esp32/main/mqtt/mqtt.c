@@ -22,12 +22,14 @@
 static esp_mqtt_client_handle_t s_client          = NULL;
 static bool                     s_mqtt_connected  = false;
 static int64_t                  s_last_connect_us = 0;
+static int64_t                  s_next_health_publish_us = 0;
 
 #define MQTT_FRAME_CHUNK_RETRY_DELAY_MS  25U
-#define MQTT_FRAME_CHUNK_DELAY_MS        12U
-#define MQTT_FRAME_BACKOFF_DELAY_MS      40U
+#define MQTT_FRAME_CHUNK_DELAY_MS        4U
+#define MQTT_FRAME_BACKOFF_DELAY_MS      20U
 #define MQTT_FRAME_IDLE_DELAY_MS         10U
-#define MQTT_HEALTH_PERIOD_MS            60000U
+#define MQTT_HEALTH_TASK_POLL_MS         250U
+#define MQTT_HEALTH_PERIOD_US            (60000000LL)
 
 static bool mqttTopicEquals(const esp_mqtt_event_handle_t event, const char *topic)
 {
@@ -35,6 +37,14 @@ static bool mqttTopicEquals(const esp_mqtt_event_handle_t event, const char *top
 
     return (event->topic_len == (int)topic_len) &&
            (strncmp(event->topic, topic, topic_len) == 0);
+}
+
+static bool mqttPayloadEquals(const esp_mqtt_event_handle_t event, const char *payload)
+{
+    const size_t payload_len = strlen(payload);
+
+    return (event->data_len == (int)payload_len) &&
+           (strncmp(event->data, payload, payload_len) == 0);
 }
 
 static bool mqttBuildHealthPayload(char *payload, size_t payload_size)
@@ -57,7 +67,7 @@ static bool mqttBuildHealthPayload(char *payload, size_t payload_size)
                    "\"cmd_queue_depth\":%lu,\"frame_packets\":%lu,\"frame_completed\":%lu,"
                    "\"frame_timeouts\":%lu,\"frame_errors\":%lu,\"bad_magic\":%lu,"
                    "\"bad_checksum\":%lu,\"bad_len\":%lu,\"seq_errors\":%lu,"
-                   "\"queue_full_drops\":%lu,\"frame_ready\":%u}",
+                   "\"queue_full_drops\":%lu,\"stale_frame_drops\":%lu,\"frame_ready\":%u}",
                    (unsigned long)(esp_timer_get_time() / 1000000ULL),
                    wifi_ok ? "true" : "false",
                    rssi,
@@ -74,6 +84,7 @@ static bool mqttBuildHealthPayload(char *payload, size_t payload_size)
                    (unsigned long)stats.bad_payload_len,
                    (unsigned long)stats.seq_errors,
                    (unsigned long)stats.queue_full_drops,
+                   (unsigned long)stats.stale_frame_drops,
                    (unsigned int)stats.frame_ready);
     return true;
 }
@@ -104,10 +115,11 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
     case MQTT_EVENT_CONNECTED: {
         s_mqtt_connected = true;
         s_last_connect_us = esp_timer_get_time();
+        s_next_health_publish_us = s_last_connect_us + MQTT_HEALTH_PERIOD_US;
         (void)esp_mqtt_client_subscribe(event->client, CMD_TOPIC, 1);
-        (void)esp_mqtt_client_subscribe(event->client, HEALTH_REQ_TOPIC, 1);
+        (void)esp_mqtt_client_subscribe(event->client, HEALTH_CONTROL_TOPIC, 1);
         (void)esp_mqtt_client_publish(s_client, "lepton/status", "Lepton ready", 12, 1, 0);
-        (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd topic qos=1\n");
+        (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd/control topic qos=1\n");
         (void)printf("Heap after MQTT connect: free=%lu min=%lu\n",
                      (unsigned long)esp_get_free_heap_size(),
                      (unsigned long)esp_get_minimum_free_heap_size());
@@ -118,8 +130,13 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
         (void)printf("Topic: %.*s\n", (int)event->topic_len, event->topic);
         (void)printf("Data: %.*s\n", (int)event->data_len, event->data);
 
-        if (mqttTopicEquals(event, HEALTH_REQ_TOPIC)) {
-            mqttPublishHealthSnapshot("request");
+        if (mqttTopicEquals(event, HEALTH_CONTROL_TOPIC)) {
+            if (mqttPayloadEquals(event, HEALTH_CONTROL_CMD) ||
+                mqttPayloadEquals(event, "cmd=publish_status_now")) {
+                mqttPublishHealthSnapshot("request");
+            } else {
+                (void)printf("Ignoring unsupported system/control command\n");
+            }
             break;
         }
 
@@ -152,6 +169,7 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
 
     case MQTT_EVENT_DISCONNECTED: {
         s_mqtt_connected = false;
+        s_next_health_publish_us = 0;
         (void)printf("MQTT disconnected\n");
         break;
     }
@@ -331,7 +349,13 @@ void mqttHealthTask(void *arg)
     (void)arg;
 
     for (;;) {
-        mqttPublishHealthSnapshot("periodic");
-        vTaskDelay(pdMS_TO_TICKS(MQTT_HEALTH_PERIOD_MS));
+        if (s_mqtt_connected &&
+            (s_next_health_publish_us != 0) &&
+            (esp_timer_get_time() >= s_next_health_publish_us)) {
+            mqttPublishHealthSnapshot("periodic");
+            s_next_health_publish_us += MQTT_HEALTH_PERIOD_US;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(MQTT_HEALTH_TASK_POLL_MS));
     }
 }

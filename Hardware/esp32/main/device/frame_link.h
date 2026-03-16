@@ -20,6 +20,7 @@ typedef struct {
     uint32_t bad_payload_len;
     uint32_t seq_errors;
     uint32_t queue_full_drops;
+    uint32_t stale_frame_drops;
     uint8_t frame_ready;
 } frame_link_stats_t;
 

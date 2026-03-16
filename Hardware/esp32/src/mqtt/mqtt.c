@@ -12,6 +12,84 @@
 static esp_mqtt_client_handle_t s_client         = NULL;
 static bool                     s_mqtt_connected = false;
 
+#define MQTT_HEALTH_TASK_POLL_MS       250U
+#define MQTT_HEALTH_PERIOD_US          (60000000LL)
+
+static bool mqttTopicEquals(const esp_mqtt_event_handle_t event, const char *topic)
+{
+    const size_t topic_len = strlen(topic);
+
+    return (event->topic_len == (int)topic_len) &&
+           (strncmp(event->topic, topic, topic_len) == 0);
+}
+
+static bool mqttPayloadEquals(const esp_mqtt_event_handle_t event, const char *payload)
+{
+    const size_t payload_len = strlen(payload);
+
+    return (event->data_len == (int)payload_len) &&
+           (strncmp(event->data, payload, payload_len) == 0);
+}
+
+static bool mqttBuildHealthPayload(char *payload, size_t payload_size)
+{
+    frame_link_stats_t stats = {0};
+    wifi_ap_record_t ap_info = {0};
+    const bool wifi_ok = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
+    const int rssi = wifi_ok ? (int)ap_info.rssi : -127;
+    const uint32_t cmd_depth = cmdUartGetQueueDepth();
+
+    if ((payload == NULL) || (payload_size == 0U)) {
+        return false;
+    }
+
+    frameLinkGetStats(&stats);
+
+    (void)snprintf(payload,
+                   payload_size,
+                   "{\"uptime_sec\":%lu,\"wifi_connected\":%s,\"wifi_rssi\":%d,"
+                   "\"mqtt_connected\":%s,\"free_heap\":%lu,\"min_heap\":%lu,"
+                   "\"cmd_queue_depth\":%lu,\"frame_packets\":%lu,\"frame_completed\":%lu,"
+                   "\"frame_timeouts\":%lu,\"frame_errors\":%lu,\"bad_magic\":%lu,"
+                   "\"bad_checksum\":%lu,\"bad_len\":%lu,\"seq_errors\":%lu,"
+                   "\"queue_full_drops\":%lu,\"frame_ready\":%u}",
+                   (unsigned long)(esp_timer_get_time() / 1000000ULL),
+                   wifi_ok ? "true" : "false",
+                   rssi,
+                   s_mqtt_connected ? "true" : "false",
+                   (unsigned long)esp_get_free_heap_size(),
+                   (unsigned long)esp_get_minimum_free_heap_size(),
+                   (unsigned long)cmd_depth,
+                   (unsigned long)stats.total_packets,
+                   (unsigned long)stats.completed_frames,
+                   (unsigned long)stats.spi_timeouts,
+                   (unsigned long)stats.spi_errors,
+                   (unsigned long)stats.bad_magic,
+                   (unsigned long)stats.bad_checksum,
+                   (unsigned long)stats.bad_payload_len,
+                   (unsigned long)stats.seq_errors,
+                   (unsigned long)stats.queue_full_drops,
+                   (unsigned int)stats.frame_ready);
+    return true;
+}
+
+static void mqttPublishHealthSnapshot(const char *reason)
+{
+    char payload[320];
+
+    if (!mqttBuildHealthPayload(payload, sizeof(payload))) {
+        return;
+    }
+
+    mqttPublishText(HEALTH_TOPIC, payload, 0);
+
+    if (reason != NULL) {
+        (void)printf("Health publish (%s): %s\n", reason, payload);
+    } else {
+        (void)printf("Health publish: %s\n", payload);
+    }
+}
+
 static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     const esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
@@ -22,8 +100,9 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
     case MQTT_EVENT_CONNECTED: {
         s_mqtt_connected = true;
         (void)esp_mqtt_client_subscribe(event->client, CMD_TOPIC, 1);
+        (void)esp_mqtt_client_subscribe(event->client, HEALTH_CONTROL_TOPIC, 1);
         (void)esp_mqtt_client_publish(s_client, "lepton/status", "Lepton ready", 12, 1, 0);
-        (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd topic qos=1\n");
+        (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd/control topic qos=1\n");
         (void)printf("Heap after MQTT connect: free=%lu min=%lu\n",
                      (unsigned long)esp_get_free_heap_size(),
                      (unsigned long)esp_get_minimum_free_heap_size());
@@ -34,8 +113,17 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
         (void)printf("Topic: %.*s\n", (int)event->topic_len, event->topic);
         (void)printf("Data: %.*s\n", (int)event->data_len, event->data);
 
-        if ((event->topic_len != (int)strlen(CMD_TOPIC)) ||
-            (strncmp(event->topic, CMD_TOPIC, (size_t)event->topic_len) != 0)) {
+        if (mqttTopicEquals(event, HEALTH_CONTROL_TOPIC)) {
+            if (mqttPayloadEquals(event, HEALTH_CONTROL_CMD) ||
+                mqttPayloadEquals(event, "cmd=publish_status_now")) {
+                mqttPublishHealthSnapshot("request");
+            } else {
+                (void)printf("Ignoring unsupported system/control command\n");
+            }
+            break;
+        }
+
+        if (!mqttTopicEquals(event, CMD_TOPIC)) {
             break;
         }
 
@@ -225,46 +313,25 @@ void mqttFrameTask(void *arg)
 
 void mqttHealthTask(void *arg)
 {
-    char payload[320];
+    int64_t next_publish_us = 0;
     (void)arg;
 
     for (;;) {
-        frame_link_stats_t stats = {0};
-        wifi_ap_record_t ap_info = {0};
-        const bool wifi_ok = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
-        const int rssi = wifi_ok ? (int)ap_info.rssi : -127;
-        const uint32_t cmd_depth = cmdUartGetQueueDepth();
+        if (!s_mqtt_connected) {
+            next_publish_us = 0;
+            vTaskDelay(pdMS_TO_TICKS(MQTT_HEALTH_TASK_POLL_MS));
+            continue;
+        }
 
-        frameLinkGetStats(&stats);
+        if (next_publish_us == 0) {
+            next_publish_us = esp_timer_get_time() + MQTT_HEALTH_PERIOD_US;
+        }
 
-        (void)snprintf(payload,
-                       sizeof(payload),
-                       "{\"uptime_sec\":%lu,\"wifi_connected\":%s,\"wifi_rssi\":%d,"
-                       "\"mqtt_connected\":%s,\"free_heap\":%lu,\"min_heap\":%lu,"
-                       "\"cmd_queue_depth\":%lu,\"frame_packets\":%lu,\"frame_completed\":%lu,"
-                       "\"frame_timeouts\":%lu,\"frame_errors\":%lu,\"bad_magic\":%lu,"
-                       "\"bad_checksum\":%lu,\"bad_len\":%lu,\"seq_errors\":%lu,"
-                       "\"queue_full_drops\":%lu,\"frame_ready\":%u}",
-                       (unsigned long)(esp_timer_get_time() / 1000000ULL),
-                       wifi_ok ? "true" : "false",
-                       rssi,
-                       s_mqtt_connected ? "true" : "false",
-                       (unsigned long)esp_get_free_heap_size(),
-                       (unsigned long)esp_get_minimum_free_heap_size(),
-                       (unsigned long)cmd_depth,
-                       (unsigned long)stats.total_packets,
-                       (unsigned long)stats.completed_frames,
-                       (unsigned long)stats.spi_timeouts,
-                       (unsigned long)stats.spi_errors,
-                       (unsigned long)stats.bad_magic,
-                       (unsigned long)stats.bad_checksum,
-                       (unsigned long)stats.bad_payload_len,
-                       (unsigned long)stats.seq_errors,
-                       (unsigned long)stats.queue_full_drops,
-                       (unsigned int)stats.frame_ready);
+        if (esp_timer_get_time() >= next_publish_us) {
+            mqttPublishHealthSnapshot("periodic");
+            next_publish_us += MQTT_HEALTH_PERIOD_US;
+        }
 
-        mqttPublishText(HEALTH_TOPIC, payload, 0);
-        (void)printf("Health publish: %s\n", payload);
-        vTaskDelay(pdMS_TO_TICKS(5000U));
+        vTaskDelay(pdMS_TO_TICKS(MQTT_HEALTH_TASK_POLL_MS));
     }
 }

@@ -39,12 +39,13 @@ static uint32_t s_bad_checksum = 0U;
 static uint32_t s_bad_payload_len = 0U;
 static uint32_t s_seq_errors = 0U;
 static uint32_t s_queue_full_drops = 0U;
+static uint32_t s_stale_frame_drops = 0U;
 static bool s_waiting_for_first_packet_logged = false;
 
 static void logFrameLinkSummary(void)
 {
     (void)printf("SPI frame link: packets=%lu frames=%lu timeouts=%lu errors=%lu "
-                 "bad_magic=%lu bad_checksum=%lu bad_len=%lu seq=%lu queue_full=%lu ready=%u\n",
+                 "bad_magic=%lu bad_checksum=%lu bad_len=%lu seq=%lu queue_full=%lu stale=%lu ready=%u\n",
                  (unsigned long)s_total_packets,
                  (unsigned long)s_completed_frames,
                  (unsigned long)s_spi_timeouts,
@@ -54,6 +55,7 @@ static void logFrameLinkSummary(void)
                  (unsigned long)s_bad_payload_len,
                  (unsigned long)s_seq_errors,
                  (unsigned long)s_queue_full_drops,
+                 (unsigned long)s_stale_frame_drops,
                  (unsigned int)s_frame_ready);
 }
 
@@ -97,6 +99,12 @@ bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf, uint16_t *frame_id, i
     if ((s_frame_mutex != NULL) &&
         (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(20U)) == pdTRUE)) {
         if ((s_frame_ready > 0U) && (s_read_idx >= 0) && (s_read_idx < (int)s_allocated_buffers)) {
+            if ((s_allocated_buffers > 0U) && (s_frame_ready > 1U)) {
+                const uint8_t dropped_count = (uint8_t)(s_frame_ready - 1U);
+                s_read_idx = (s_read_idx + (int)dropped_count) % (int)s_allocated_buffers;
+                s_stale_frame_drops += (uint32_t)dropped_count;
+                s_frame_ready = 1U;
+            }
             *buffer_idx = s_read_idx;
             *frame_buf = s_frame_bufs[s_read_idx];
             *frame_id = s_frame_ids[s_read_idx];
@@ -144,6 +152,7 @@ void frameLinkGetStats(frame_link_stats_t *stats)
     stats->bad_payload_len = s_bad_payload_len;
     stats->seq_errors = s_seq_errors;
     stats->queue_full_drops = s_queue_full_drops;
+    stats->stale_frame_drops = s_stale_frame_drops;
     stats->frame_ready = s_frame_ready;
 }
 
@@ -223,6 +232,7 @@ void frameLinkTask(void *arg)
     uint32_t last_summary_bad_len = 0U;
     uint32_t last_summary_seq = 0U;
     uint32_t last_summary_queue_full = 0U;
+    uint32_t last_summary_stale = 0U;
     (void)arg;
 
     for (;;) {
@@ -258,7 +268,8 @@ void frameLinkTask(void *arg)
                     (s_bad_checksum == 0U) &&
                     (s_bad_payload_len == 0U) &&
                     (s_seq_errors == 0U) &&
-                    (s_queue_full_drops == 0U)) {
+                    (s_queue_full_drops == 0U) &&
+                    (s_stale_frame_drops == 0U)) {
                     if (!s_waiting_for_first_packet_logged) {
                         (void)printf("SPI frame link idle: waiting for first SPI packet\n");
                         s_waiting_for_first_packet_logged = true;
@@ -271,7 +282,8 @@ void frameLinkTask(void *arg)
                            (s_bad_checksum != last_summary_bad_checksum) ||
                            (s_bad_payload_len != last_summary_bad_len) ||
                            (s_seq_errors != last_summary_seq) ||
-                           (s_queue_full_drops != last_summary_queue_full)) {
+                           (s_queue_full_drops != last_summary_queue_full) ||
+                           (s_stale_frame_drops != last_summary_stale)) {
                     logFrameLinkSummary();
                     last_summary_packets = s_total_packets;
                     last_summary_frames = s_completed_frames;
@@ -282,6 +294,7 @@ void frameLinkTask(void *arg)
                     last_summary_bad_len = s_bad_payload_len;
                     last_summary_seq = s_seq_errors;
                     last_summary_queue_full = s_queue_full_drops;
+                    last_summary_stale = s_stale_frame_drops;
                 }
                 last_summary_tick = xTaskGetTickCount();
             }
@@ -392,7 +405,8 @@ void frameLinkTask(void *arg)
                 (s_bad_checksum != last_summary_bad_checksum) ||
                 (s_bad_payload_len != last_summary_bad_len) ||
                 (s_seq_errors != last_summary_seq) ||
-                (s_queue_full_drops != last_summary_queue_full)) {
+                (s_queue_full_drops != last_summary_queue_full) ||
+                (s_stale_frame_drops != last_summary_stale)) {
                 logFrameLinkSummary();
                 last_summary_packets = s_total_packets;
                 last_summary_frames = s_completed_frames;
@@ -403,6 +417,7 @@ void frameLinkTask(void *arg)
                 last_summary_bad_len = s_bad_payload_len;
                 last_summary_seq = s_seq_errors;
                 last_summary_queue_full = s_queue_full_drops;
+                last_summary_stale = s_stale_frame_drops;
             }
             last_summary_tick = xTaskGetTickCount();
         }

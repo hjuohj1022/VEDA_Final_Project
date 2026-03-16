@@ -22,7 +22,7 @@
           |  - motor/control
           |  - motor/response
           |  - system/status
-          |  - system/request
+          |  - system/control
           |  - lepton/frame/chunk
           v
 [ MQTT Broker ] <---- TLS ----> [ ESP32-C3 ]
@@ -105,7 +105,7 @@ UART 설정:
 | `motor/control` | Client -> ESP32 | STM32로 전달할 모터 제어 명령 |
 | `motor/response` | STM32/ESP32 -> Client | STM32 응답 라인 |
 | `system/status` | ESP32 -> Client | ESP32 health / watchdog JSON |
-| `system/request` | Client -> ESP32 | 즉시 health snapshot 요청 |
+| `system/control` | Server -> ESP32 | watchdog/status 즉시 요청 |
 
 ### 열화상
 
@@ -141,11 +141,7 @@ STM32는 UART 라인 기반 ASCII 명령을 사용한다.
 - `ERR`
 - `ERR overflow`
 
-<<<<<<< HEAD
 상세 명령 설명은 [command.md](/C:/Users/1-21/Desktop/MyGitMISRA/VEDA_Final_Project/Hardware/command.md)에 정리되어 있다.
-=======
-상세 명령 정리는 [command.md](VEDA_Final_Project/Hardware/command.md)에 있다.
->>>>>>> bb92532d4a8a3e822185a7a9969ae0cbbe14e7ff
 
 ## 각 보드 역할
 
@@ -157,7 +153,8 @@ STM32는 UART 라인 기반 ASCII 명령을 사용한다.
 - 수신한 명령을 UART로 STM32에 전달
 - STM32 응답을 줄 단위로 `motor/response`에 재publish
 - `system/status` health JSON 발행
-- `system/request` 수신 시 즉시 health 응답
+- MQTT connect 후 `system/control` 구독
+- `system/control`에서 `publish_status_now` 요청을 받으면 즉시 `system/status` 1회 발행
 
 ### STM32
 
@@ -179,13 +176,13 @@ STM32는 UART 라인 기반 ASCII 명령을 사용한다.
 ### 발행 방식
 
 - 주기 발행: `60초`마다 `system/status`
-- 즉시 응답: `system/request` 수신 시 즉시 `system/status`
+- 즉시 응답: `system/control`에서 `publish_status_now` 요청 수신 시 즉시 `system/status`
 
 예시:
 
 ```text
-topic: system/request
-payload: now
+topic: system/control
+payload: publish_status_now
 ```
 
 예상 응답:
@@ -222,6 +219,12 @@ ESP32는 JSON 문자열을 발행한다.
   "frame_ready": 0
 }
 ```
+
+### Server Watchdog API
+
+- `/esp32/watchdog/request`: MQTT `system/control`로 `publish_status_now` 요청 publish
+- server는 `system/status`를 계속 subscribe 하여 최신 health/watchdog 상태를 cache
+- `/esp32/watchdog/config`는 제거되었으며 더 이상 사용하지 않음
 
 ### 필드 설명
 
@@ -292,7 +295,7 @@ motor/response -> OK 91 90 90
 정상이라면 broker subscriber에서 다음을 확인할 수 있어야 한다.
 
 - `system/status`가 60초 주기로 도착
-- `system/request` publish 직후 `system/status`가 즉시 도착
+- `/esp32/watchdog/request` 호출 직후 `system/status`가 즉시 도착
 
 정상 상태 예시:
 

@@ -14,6 +14,8 @@
 #define CMD_TOPIC           "motor/control"
 #define STM32_RESP_TOPIC    "motor/response"
 #define HEALTH_TOPIC        "system/status"
+#define HEALTH_CONTROL_TOPIC "system/control"
+#define HEALTH_CONTROL_CMD   "publish_status_now"
 
 extern esp_mqtt_client_handle_t client;
 extern bool mqtt_connected;
