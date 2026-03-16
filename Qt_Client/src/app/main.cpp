@@ -22,6 +22,7 @@ int main(int argc, char *argv[])
     app.setOrganizationName("Team3");
     app.setOrganizationDomain("team3.com");
     app.setApplicationName("Team3VideoReceiver");
+    app.setWindowIcon(QIcon(":/qt/qml/Team3VideoReceiver/icons/Hanwha_logo.ico"));
 
     // 기본 Qt Quick Controls 스타일 지정
     QQuickStyle::setStyle("Basic");

@@ -20,6 +20,10 @@ set_source_files_properties(
     src/ui/assets/icons/tooltip_light.svg
     PROPERTIES QT_RESOURCE_ALIAS icons/tooltip_light.svg
 )
+set_source_files_properties(
+    src/ui/assets/icons/Hanwha_logo.ico
+    PROPERTIES QT_RESOURCE_ALIAS icons/Hanwha_logo.ico
+)
 
 
 qt_add_executable(Team3VideoReceiver
@@ -129,6 +133,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/assets/icons/README.txt
         src/ui/assets/icons/tooltip_dark.svg
         src/ui/assets/icons/tooltip_light.svg
+        src/ui/assets/icons/Hanwha_logo.ico
 )
 
 target_include_directories(Team3VideoReceiver
