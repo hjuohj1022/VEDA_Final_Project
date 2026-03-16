@@ -1,5 +1,9 @@
 pipeline {
     agent any
+
+    options {
+        disableConcurrentBuilds()
+    }
     
     environment {
         // === 1. 버전 관리 설정 (여기서 메이저/마이너 관리) ===
@@ -161,6 +165,87 @@ pipeline {
                 }
             }
         }
+
+        // 🐬 MariaDB 선행 배포
+        stage('MariaDB 배포') {
+            when { 
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/mariadb/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    dir('RaspberryPi/k3s-cluster/mariadb') {
+                        echo "🐬 MariaDB 빌드: ${env.DOCKER_VER}"
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:${env.DOCKER_VER} -t hjuohj/mariadb-server:latest --push ."
+                        }
+                    }
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh '''
+                            set -euo pipefail
+
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/mariadb
+                            kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/mariadb --timeout=180s
+                        '''
+                    }
+                }
+            }
+        }
+
+        // 🧬 DB 마이그레이션
+        stage('DB 마이그레이션') {
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/mariadb/**'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/crow-db-migration-job.yaml'
+                    changeset 'RaspberryPi/k3s-cluster/crow_server/2fa_migration.sql'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                        sh '''
+                            set -euo pipefail
+
+                            if ! kubectl --kubeconfig="$KUBECONFIG" get deployment mariadb >/dev/null 2>&1; then
+                                echo "mariadb deployment not found; skipping DB migration."
+                                exit 0
+                            fi
+
+                            kubectl --kubeconfig="$KUBECONFIG" wait \
+                                --for=condition=available \
+                                deployment/mariadb \
+                                --timeout=180s
+
+                            kubectl --kubeconfig="$KUBECONFIG" create configmap crow-db-migration-sql \
+                                --from-file=2fa_migration.sql=RaspberryPi/k3s-cluster/crow_server/2fa_migration.sql \
+                                --dry-run=client -o yaml | kubectl --kubeconfig="$KUBECONFIG" apply -f -
+
+                            kubectl --kubeconfig="$KUBECONFIG" delete job crow-db-migration \
+                                --ignore-not-found=true \
+                                --wait=true
+
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f \
+                                RaspberryPi/k3s-cluster/crow_server/crow-db-migration-job.yaml
+
+                            if ! kubectl --kubeconfig="$KUBECONFIG" wait \
+                                --for=condition=complete \
+                                job/crow-db-migration \
+                                --timeout=180s; then
+                                kubectl --kubeconfig="$KUBECONFIG" logs job/crow-db-migration --all-containers=true || true
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
         
         // 🦅 2. Crow Server
         stage('Crow Server 배포') {
@@ -186,8 +271,12 @@ pipeline {
                         }
                     }
                     withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml"
-                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/crow-server"
+                        sh '''
+                            set -euo pipefail
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/crow-server
+                            kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/crow-server --timeout=180s
+                        '''
                     }
                 }
             }
@@ -278,31 +367,6 @@ pipeline {
             }
         }
 
-        // 🐬 5. MariaDB
-        stage('MariaDB 배포') {
-            when { 
-                anyOf {
-                    changeset 'RaspberryPi/k3s-cluster/mariadb/**'
-                    triggeredBy 'UserIdCause'
-                }
-            }
-            steps {
-                script {
-                    dir('RaspberryPi/k3s-cluster/mariadb') {
-                        echo "🐬 MariaDB 빌드: ${env.DOCKER_VER}"
-                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            sh "echo $PASS | docker login -u $USER --password-stdin"
-                            sh "docker buildx build --platform linux/arm64 -t hjuohj/mariadb-server:${env.DOCKER_VER} -t hjuohj/mariadb-server:latest --push ."
-                        }
-                    }
-                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml"
-                        sh "kubectl --kubeconfig=$KUBECONFIG apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml"
-                        sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment/mariadb"
-                    }
-                }
-            }
-        }
 
         // 🛡️ 6. Nginx Gateway
         stage('Nginx Gateway 배포') {

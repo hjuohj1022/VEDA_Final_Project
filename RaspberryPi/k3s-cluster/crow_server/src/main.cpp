@@ -9,12 +9,16 @@
 #include <jwt-cpp/jwt.h> 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <array>
+#include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <cstdlib> 
 #include <fstream> 
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mysql/mysql.h>
@@ -33,6 +37,8 @@
 // 인증, 파일 스트리밍, SUNAPI 프록시, CCTV, MQTT 기반 장치 제어 라우트의 단일 프로세스 집약.
 namespace fs = std::filesystem;
 
+std::string getJwtSecret();
+
 namespace {
 // 인증/DB/파일 스트리밍 헬퍼의 라우트 바깥 배치.
 // main()의 서비스 등록 흐름 집중 목적 구조.
@@ -45,6 +51,17 @@ constexpr size_t kPasswordSaltBytes = 16;
 constexpr size_t kPasswordHashBytes = 32;
 constexpr char kPasswordHashPrefix[] = "pbkdf2_sha256";
 constexpr long long kMaxStreamResponseBytes = 8LL * 1024LL * 1024LL;
+// TOTP 2FA는 Authenticator 앱과 서버가 동일한 규칙을 공유해야 하므로 상수로 고정한다.
+constexpr size_t kTotpSecretBufferBytes = 128;
+constexpr size_t kTotpSecretBytes = 20;
+constexpr int kTotpDigits = 6;
+constexpr int kTotpPeriodSeconds = 30;
+constexpr int kTotpAllowedSkewSteps = 1;
+constexpr int kPreAuthTokenTtlSeconds = 300;
+constexpr int kPendingTotpTtlSeconds = 300;
+constexpr char kJwtStageFull[] = "full";
+constexpr char kJwtStagePre2fa[] = "pre_2fa";
+constexpr char kOtpIssuer[] = "VEDA";
 
 using MysqlBindFlag = std::remove_pointer_t<decltype(std::declval<MYSQL_BIND>().is_null)>;
 
@@ -66,6 +83,16 @@ struct MysqlStatementCloser {
 
 using MysqlConnectionPtr = std::unique_ptr<MYSQL, MysqlConnectionCloser>;
 using MysqlStatementPtr = std::unique_ptr<MYSQL_STMT, MysqlStatementCloser>;
+
+// users 테이블의 2FA 관련 상태를 한 번에 읽어 라우트 분기에서 재사용한다.
+struct UserTwoFactorInfo {
+    bool found = false;
+    bool enabled = false;
+    std::string secret;
+    std::string pending_secret;
+    long long pending_expires_at = 0;
+    long long last_used_step = -1;
+};
 
 std::optional<std::string> validateCredentials(const std::string& user_id,
                                                const std::string& password) {
@@ -375,6 +402,588 @@ bool parseLongLong(const std::string& text, long long* value) {
         return false;
     }
 }
+
+// OTP는 검증 로직에 들어가기 전에 숫자 6자리 형식인지 먼저 확인한다.
+std::optional<std::string> validateOtpCode(const std::string& code) {
+    if (code.size() != static_cast<size_t>(kTotpDigits)) {
+        return "OTP must be 6 digits";
+    }
+
+    if (!std::all_of(code.begin(), code.end(), [](unsigned char ch) {
+            return std::isdigit(ch) != 0;
+        })) {
+        return "OTP must contain only digits";
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::string> extractBearerToken(const crow::request& req) {
+    const std::string auth_header = req.get_header_value("Authorization");
+    if (auth_header.size() <= 7 || auth_header.rfind("Bearer ", 0) != 0) {
+        return std::nullopt;
+    }
+    return auth_header.substr(7);
+}
+
+std::string urlEncodeComponent(const std::string& input) {
+    std::ostringstream oss;
+    oss << std::uppercase << std::hex;
+
+    for (unsigned char ch : input) {
+        if ((ch >= 'a' && ch <= 'z') ||
+            (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') ||
+            ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            oss << static_cast<char>(ch);
+        } else {
+            oss << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+        }
+    }
+
+    return oss.str();
+}
+
+// Authenticator 앱과의 호환을 위해 secret은 Base32 문자열로 저장하고 전달한다.
+std::string base32Encode(const unsigned char* data, size_t size) {
+    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+    if (!data || size == 0) {
+        return {};
+    }
+
+    std::string encoded;
+    encoded.reserve((size * 8 + 4) / 5);
+
+    std::uint32_t buffer = 0;
+    int bits_left = 0;
+    for (size_t index = 0; index < size; ++index) {
+        buffer = (buffer << 8) | data[index];
+        bits_left += 8;
+
+        while (bits_left >= 5) {
+            encoded.push_back(kAlphabet[(buffer >> (bits_left - 5)) & 0x1F]);
+            bits_left -= 5;
+        }
+    }
+
+    if (bits_left > 0) {
+        encoded.push_back(kAlphabet[(buffer << (5 - bits_left)) & 0x1F]);
+    }
+
+    return encoded;
+}
+
+bool base32Decode(const std::string& text, std::vector<unsigned char>* out) {
+    if (!out) {
+        return false;
+    }
+
+    out->clear();
+    if (text.empty()) {
+        return false;
+    }
+
+    std::uint32_t buffer = 0;
+    int bits_left = 0;
+
+    for (unsigned char raw_ch : text) {
+        if (raw_ch == '=' || raw_ch == ' ' || raw_ch == '-') {
+            continue;
+        }
+
+        const unsigned char ch = static_cast<unsigned char>(std::toupper(raw_ch));
+        int value = -1;
+        if (ch >= 'A' && ch <= 'Z') {
+            value = ch - 'A';
+        } else if (ch >= '2' && ch <= '7') {
+            value = ch - '2' + 26;
+        } else {
+            out->clear();
+            return false;
+        }
+
+        buffer = (buffer << 5) | static_cast<std::uint32_t>(value);
+        bits_left += 5;
+        while (bits_left >= 8) {
+            out->push_back(static_cast<unsigned char>((buffer >> (bits_left - 8)) & 0xFF));
+            bits_left -= 8;
+        }
+    }
+
+    return !out->empty();
+}
+
+std::string generateRandomBase32Secret() {
+    std::array<unsigned char, kTotpSecretBytes> secret_bytes{};
+    if (RAND_bytes(secret_bytes.data(), static_cast<int>(secret_bytes.size())) != 1) {
+        std::cerr << "[AUTH] RAND_bytes failed for TOTP secret" << std::endl;
+        return {};
+    }
+
+    return base32Encode(secret_bytes.data(), secret_bytes.size());
+}
+
+std::string buildOtpAuthUrl(const std::string& issuer,
+                            const std::string& user_id,
+                            const std::string& secret) {
+    const std::string label = issuer + ":" + user_id;
+    return "otpauth://totp/" + urlEncodeComponent(label) +
+           "?secret=" + secret +
+           "&issuer=" + urlEncodeComponent(issuer) +
+           "&algorithm=SHA1&digits=" + std::to_string(kTotpDigits) +
+           "&period=" + std::to_string(kTotpPeriodSeconds);
+}
+
+// RFC 6238 방식으로 현재 time-step에 대응하는 6자리 OTP를 계산한다.
+bool generateTotpCodeAtStep(const std::string& base32_secret,
+                            long long step,
+                            std::string* out_code) {
+    if (!out_code || step < 0) {
+        return false;
+    }
+
+    std::vector<unsigned char> secret_bytes;
+    if (!base32Decode(base32_secret, &secret_bytes)) {
+        return false;
+    }
+
+    std::array<unsigned char, 8> counter{};
+    std::uint64_t value = static_cast<std::uint64_t>(step);
+    for (int index = static_cast<int>(counter.size()) - 1; index >= 0; --index) {
+        counter[static_cast<size_t>(index)] = static_cast<unsigned char>(value & 0xFF);
+        value >>= 8;
+    }
+
+    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+    unsigned int digest_length = 0;
+    if (!HMAC(EVP_sha1(),
+              secret_bytes.data(),
+              static_cast<int>(secret_bytes.size()),
+              counter.data(),
+              static_cast<int>(counter.size()),
+              digest.data(),
+              &digest_length) || digest_length < 20) {
+        return false;
+    }
+
+    const int offset = digest[digest_length - 1] & 0x0F;
+    if (offset + 3 >= static_cast<int>(digest_length)) {
+        return false;
+    }
+
+    const int binary_code =
+        ((digest[static_cast<size_t>(offset)] & 0x7F) << 24) |
+        ((digest[static_cast<size_t>(offset + 1)] & 0xFF) << 16) |
+        ((digest[static_cast<size_t>(offset + 2)] & 0xFF) << 8) |
+        (digest[static_cast<size_t>(offset + 3)] & 0xFF);
+
+    const int otp = binary_code % 1000000;
+    std::ostringstream oss;
+    oss << std::setw(kTotpDigits) << std::setfill('0') << otp;
+    *out_code = oss.str();
+    return true;
+}
+
+bool verifyTotpCode(const std::string& base32_secret,
+                    const std::string& input_code,
+                    long long last_used_step,
+                    long long* matched_step) {
+    if (matched_step) {
+        *matched_step = -1;
+    }
+    if (validateOtpCode(input_code)) {
+        return false;
+    }
+
+    const long long now = static_cast<long long>(std::time(nullptr));
+    const long long current_step = now / kTotpPeriodSeconds;
+
+    // 시간 오차를 조금 허용하되, 이미 사용한 step 이하의 OTP는 재사용하지 않는다.
+    for (int delta = -kTotpAllowedSkewSteps; delta <= kTotpAllowedSkewSteps; ++delta) {
+        const long long candidate_step = current_step + delta;
+        if (candidate_step < 0 || candidate_step <= last_used_step) {
+            continue;
+        }
+
+        std::string expected_code;
+        if (!generateTotpCodeAtStep(base32_secret, candidate_step, &expected_code)) {
+            continue;
+        }
+
+        if (expected_code.size() == input_code.size() &&
+            CRYPTO_memcmp(expected_code.data(), input_code.data(), input_code.size()) == 0) {
+            if (matched_step) {
+                *matched_step = candidate_step;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// 로그인과 /2fa 라우트에서 공통으로 쓰는 2FA 상태 조회를 prepared statement로 묶는다.
+bool loadUserTwoFactorInfo(MYSQL* connection,
+                           const std::string& user_id,
+                           UserTwoFactorInfo* out) {
+    if (!connection || !out) {
+        return false;
+    }
+
+    *out = {};
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT two_factor_enabled, "
+        "IFNULL(totp_secret, ''), "
+        "IFNULL(totp_pending_secret, ''), "
+        "IFNULL(UNIX_TIMESTAMP(totp_pending_expires_at), 0), "
+        "IFNULL(totp_last_used_step, -1) "
+        "FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind 2FA lookup param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to execute 2FA lookup: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    signed char enabled_value = 0;
+    std::array<char, kTotpSecretBufferBytes> secret_buffer{};
+    std::array<char, kTotpSecretBufferBytes> pending_secret_buffer{};
+    unsigned long secret_length = 0;
+    unsigned long pending_secret_length = 0;
+    long long pending_expires_at = 0;
+    long long last_used_step = -1;
+    MysqlBindFlag is_null_flags[5] = {};
+    MysqlBindFlag error_flags[5] = {};
+
+    MYSQL_BIND result_bind[5] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_TINY;
+    result_bind[0].buffer = &enabled_value;
+    result_bind[0].is_null = &is_null_flags[0];
+    result_bind[0].error = &error_flags[0];
+
+    result_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[1].buffer = secret_buffer.data();
+    result_bind[1].buffer_length = static_cast<unsigned long>(secret_buffer.size());
+    result_bind[1].length = &secret_length;
+    result_bind[1].is_null = &is_null_flags[1];
+    result_bind[1].error = &error_flags[1];
+
+    result_bind[2].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[2].buffer = pending_secret_buffer.data();
+    result_bind[2].buffer_length = static_cast<unsigned long>(pending_secret_buffer.size());
+    result_bind[2].length = &pending_secret_length;
+    result_bind[2].is_null = &is_null_flags[2];
+    result_bind[2].error = &error_flags[2];
+
+    result_bind[3].buffer_type = MYSQL_TYPE_LONGLONG;
+    result_bind[3].buffer = &pending_expires_at;
+    result_bind[3].is_null = &is_null_flags[3];
+    result_bind[3].error = &error_flags[3];
+
+    result_bind[4].buffer_type = MYSQL_TYPE_LONGLONG;
+    result_bind[4].buffer = &last_used_step;
+    result_bind[4].is_null = &is_null_flags[4];
+    result_bind[4].error = &error_flags[4];
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind 2FA lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to store 2FA lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        return true;
+    }
+
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED ||
+        std::any_of(std::begin(error_flags), std::end(error_flags), [](MysqlBindFlag flag) {
+            return flag != 0;
+        })) {
+        std::cerr << "[DB Error] Failed to fetch 2FA state" << std::endl;
+        return false;
+    }
+
+    out->found = true;
+    out->enabled = enabled_value != 0;
+    out->secret.assign(secret_buffer.data(), secret_length);
+    out->pending_secret.assign(pending_secret_buffer.data(), pending_secret_length);
+    out->pending_expires_at = pending_expires_at;
+    out->last_used_step = last_used_step;
+    return true;
+}
+
+// setup/init 단계에서는 아직 활성화하지 않고 pending secret으로만 저장한다.
+bool savePendingTotpSecret(MYSQL* connection,
+                           const std::string& user_id,
+                           const std::string& pending_secret,
+                           long long expires_at) {
+    auto statement = prepareStatement(
+        connection,
+        "UPDATE users SET totp_pending_secret = ?, "
+        "totp_pending_expires_at = FROM_UNIXTIME(?) WHERE id = ?");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[3] = {};
+    unsigned long pending_secret_length = static_cast<unsigned long>(pending_secret.size());
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    long long expires_at_value = expires_at;
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(pending_secret.c_str());
+    param_bind[0].buffer_length = pending_secret_length;
+    param_bind[0].length = &pending_secret_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_LONGLONG;
+    param_bind[1].buffer = &expires_at_value;
+
+    param_bind[2].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[2].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[2].buffer_length = user_id_length;
+    param_bind[2].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind pending TOTP params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to save pending TOTP secret: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+// 첫 OTP 검증이 끝난 시점에만 pending secret을 실제 로그인용 secret으로 승격한다.
+bool activatePendingTotpSecret(MYSQL* connection,
+                               const std::string& user_id,
+                               long long step) {
+    auto statement = prepareStatement(
+        connection,
+        "UPDATE users SET two_factor_enabled = 1, "
+        "totp_secret = totp_pending_secret, "
+        "totp_pending_secret = NULL, "
+        "totp_pending_expires_at = NULL, "
+        "totp_last_used_step = ? "
+        "WHERE id = ? AND totp_pending_secret IS NOT NULL");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    long long step_value = step;
+
+    param_bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    param_bind[0].buffer = &step_value;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[1].buffer_length = user_id_length;
+    param_bind[1].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind TOTP activation params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to activate TOTP secret: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return mysql_stmt_affected_rows(statement.get()) > 0;
+}
+
+// 같은 30초 window의 OTP 재사용을 막기 위해 마지막으로 승인한 step을 기록한다.
+bool updateLastUsedTotpStep(MYSQL* connection,
+                            const std::string& user_id,
+                            long long step) {
+    auto statement = prepareStatement(connection, "UPDATE users SET totp_last_used_step = ? WHERE id = ?");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    long long step_value = step;
+
+    param_bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    param_bind[0].buffer = &step_value;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[1].buffer_length = user_id_length;
+    param_bind[1].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind last-used-step params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to update last TOTP step: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+// 2FA 비활성화 시에는 active/pending 상태를 모두 지워 다음 설정을 깨끗하게 시작한다.
+bool disableUserTwoFactor(MYSQL* connection,
+                          const std::string& user_id) {
+    auto statement = prepareStatement(
+        connection,
+        "UPDATE users SET two_factor_enabled = 0, "
+        "totp_secret = NULL, "
+        "totp_pending_secret = NULL, "
+        "totp_pending_expires_at = NULL, "
+        "totp_last_used_step = NULL "
+        "WHERE id = ?");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind 2FA disable params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to disable 2FA: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+bool verifyUserPassword(MYSQL* connection,
+                        const std::string& inputId,
+                        const std::string& inputPw) {
+    if (!connection) {
+        return false;
+    }
+
+    std::string stored_password;
+    if (!loadStoredPassword(connection, inputId, &stored_password)) {
+        return false;
+    }
+
+    if (verifyPasswordHash(inputPw, stored_password)) {
+        return true;
+    }
+
+    if (stored_password != inputPw) {
+        return false;
+    }
+
+    const std::string upgraded_hash = hashPassword(inputPw);
+    if (!upgraded_hash.empty()) {
+        updateStoredPasswordHash(connection, inputId, upgraded_hash);
+    }
+    return true;
+}
+
+// full access token과 pre_2fa token을 같은 포맷으로 발급하고 claim으로만 역할을 구분한다.
+std::string generateToken(const std::string& user_id,
+                          const std::string& auth_stage,
+                          std::chrono::seconds ttl) {
+    return jwt::create()
+        .set_issuer("veda_auth_server")
+        .set_type("JWS")
+        .set_payload_claim("user_id", jwt::claim(user_id))
+        .set_payload_claim("auth_stage", jwt::claim(auth_stage))
+        .set_issued_at(std::chrono::system_clock::now())
+        .set_expires_at(std::chrono::system_clock::now() + ttl)
+        .sign(jwt::algorithm::hs256{getJwtSecret()});
+}
+
+bool verifyTokenStage(const std::string& token,
+                      const std::string& expected_stage,
+                      std::string* user_id_out) {
+    try {
+        auto decoded = jwt::decode(token);
+        auto verifier = jwt::verify()
+            .allow_algorithm(jwt::algorithm::hs256{getJwtSecret()})
+            .with_issuer("veda_auth_server");
+
+        verifier.verify(decoded);
+
+        const std::string user_id = decoded.get_payload_claim("user_id").as_string();
+        if (user_id_out) {
+            *user_id_out = user_id;
+        }
+
+        try {
+            const std::string auth_stage = decoded.get_payload_claim("auth_stage").as_string();
+            return auth_stage == expected_stage;
+        } catch (const std::exception&) {
+            // 구형 토큰과의 호환을 위해 auth_stage가 없으면 full 토큰으로만 간주한다.
+            return expected_stage == kJwtStageFull;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[JWT Verify Error] " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// 보호 라우트는 full stage JWT만 통과시키고 pre_auth 토큰은 막는다.
+std::optional<std::string> getAuthorizedUserId(const crow::request& req) {
+    const auto token = extractBearerToken(req);
+    if (!token) {
+        return std::nullopt;
+    }
+
+    std::string user_id;
+    if (!verifyTokenStage(*token, kJwtStageFull, &user_id)) {
+        return std::nullopt;
+    }
+
+    return user_id;
+}
 }  // namespace
 
 // -------------------------------------------------------
@@ -386,29 +995,19 @@ std::string getJwtSecret() {
 }
 
 std::string generateJWT(const std::string& userId) {
-    auto token = jwt::create()
-        .set_issuer("veda_auth_server")
-        .set_type("JWS")
-        .set_payload_claim("user_id", jwt::claim(userId))
-        .set_issued_at(std::chrono::system_clock::now())
-        .set_expires_at(std::chrono::system_clock::now() + std::chrono::hours{24})
-        .sign(jwt::algorithm::hs256{getJwtSecret()});
-    return token;
+    return generateToken(userId, kJwtStageFull, std::chrono::hours{24});
+}
+
+std::string generatePreAuthJWT(const std::string& userId) {
+    return generateToken(userId, kJwtStagePre2fa, std::chrono::seconds{kPreAuthTokenTtlSeconds});
 }
 
 bool verifyJWT(const std::string& token) {
-    try {
-        auto decoded = jwt::decode(token);
-        auto verifier = jwt::verify()
-            .allow_algorithm(jwt::algorithm::hs256{getJwtSecret()})
-            .with_issuer("veda_auth_server");
-        
-        verifier.verify(decoded);
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "[JWT Verify Error] " << e.what() << std::endl;
-        return false;
-    }
+    return verifyTokenStage(token, kJwtStageFull, nullptr);
+}
+
+bool verifyPreAuthJWT(const std::string& token, std::string* user_id_out) {
+    return verifyTokenStage(token, kJwtStagePre2fa, user_id_out);
 }
 
 // -------------------------------------------------------
@@ -544,24 +1143,7 @@ bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputP
         return false;
     }
 
-    std::string stored_password;
-    if (!loadStoredPassword(connection.get(), inputId, &stored_password)) {
-        return false;
-    }
-
-    if (verifyPasswordHash(inputPw, stored_password)) {
-        return true;
-    }
-
-    if (stored_password != inputPw) {
-        return false;
-    }
-
-    const std::string upgraded_hash = hashPassword(inputPw);
-    if (!upgraded_hash.empty()) {
-        updateStoredPasswordHash(connection.get(), inputId, upgraded_hash);
-    }
-    return true;
+    return verifyUserPassword(connection.get(), inputId, inputPw);
 }
 
 bool registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
@@ -703,6 +1285,192 @@ int main()
     });
 
     // ==========================================
+    // TOTP 2FA 설정/검증 API
+    // ==========================================
+    CROW_ROUTE(app, "/2fa/setup/init").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), *user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+        if (two_factor_info.enabled) {
+            return crow::response(409, "2FA is already enabled");
+        }
+
+        // setup/init은 secret을 발급만 하고 confirm 전까지 pending 상태로 유지한다.
+        const std::string secret = generateRandomBase32Secret();
+        if (secret.empty()) {
+            return crow::response(500, "Failed to generate TOTP secret");
+        }
+
+        const long long expires_at = static_cast<long long>(std::time(nullptr)) + kPendingTotpTtlSeconds;
+        if (!savePendingTotpSecret(connection.get(), *user_id, secret, expires_at)) {
+            return crow::response(500, "Failed to save pending TOTP secret");
+        }
+
+        crow::json::wvalue res;
+        res["status"] = "pending";
+        res["manual_key"] = secret;
+        res["otpauth_url"] = buildOtpAuthUrl(kOtpIssuer, *user_id, secret);
+        res["expires_in"] = kPendingTotpTtlSeconds;
+        return crow::response(res);
+    });
+
+    CROW_ROUTE(app, "/2fa/setup/confirm").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto x = crow::json::load(req.body);
+        if (!x || !x.has("otp")) {
+            return crow::response(400, "Missing otp");
+        }
+
+        const std::string otp = x["otp"].s();
+        if (const auto otp_error = validateOtpCode(otp)) {
+            return crow::response(400, *otp_error);
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), *user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+        if (two_factor_info.pending_secret.empty()) {
+            return crow::response(400, "No pending 2FA setup found");
+        }
+
+        const long long now = static_cast<long long>(std::time(nullptr));
+        if (two_factor_info.pending_expires_at > 0 && now > two_factor_info.pending_expires_at) {
+            return crow::response(410, "Pending 2FA setup expired");
+        }
+
+        long long matched_step = -1;
+        // 첫 OTP가 맞아야만 pending secret을 실제 secret으로 활성화한다.
+        if (!verifyTotpCode(two_factor_info.pending_secret, otp, -1, &matched_step)) {
+            return crow::response(401, "Invalid OTP");
+        }
+
+        if (!activatePendingTotpSecret(connection.get(), *user_id, matched_step)) {
+            return crow::response(500, "Failed to activate 2FA");
+        }
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["two_factor_enabled"] = true;
+        return crow::response(res);
+    });
+
+    CROW_ROUTE(app, "/2fa/verify").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        auto x = crow::json::load(req.body);
+        if (!x || !x.has("pre_auth_token") || !x.has("otp")) {
+            return crow::response(400, "Missing pre_auth_token or otp");
+        }
+
+        const std::string pre_auth_token = x["pre_auth_token"].s();
+        const std::string otp = x["otp"].s();
+        if (const auto otp_error = validateOtpCode(otp)) {
+            return crow::response(400, *otp_error);
+        }
+
+        std::string user_id;
+        // pre_auth_token은 비밀번호 1차 인증까지만 통과한 임시 토큰이다.
+        if (!verifyPreAuthJWT(pre_auth_token, &user_id)) {
+            return crow::response(401, "Invalid pre-auth token");
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+        if (!two_factor_info.enabled || two_factor_info.secret.empty()) {
+            return crow::response(400, "2FA is not enabled");
+        }
+
+        long long matched_step = -1;
+        if (!verifyTotpCode(two_factor_info.secret, otp, two_factor_info.last_used_step, &matched_step)) {
+            return crow::response(401, "Invalid OTP");
+        }
+        if (!updateLastUsedTotpStep(connection.get(), user_id, matched_step)) {
+            return crow::response(500, "Failed to update 2FA state");
+        }
+
+        // 최종 JWT는 OTP까지 통과한 뒤에만 발급한다.
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["requires_2fa"] = false;
+        res["token"] = generateJWT(user_id);
+        return crow::response(res);
+    });
+
+    CROW_ROUTE(app, "/2fa/disable").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto x = crow::json::load(req.body);
+        if (!x || !x.has("otp")) {
+            return crow::response(400, "Missing otp");
+        }
+
+        const std::string otp = x["otp"].s();
+        if (const auto otp_error = validateOtpCode(otp)) {
+            return crow::response(400, *otp_error);
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), *user_id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(404, "User not found");
+        }
+        if (!two_factor_info.enabled || two_factor_info.secret.empty()) {
+            return crow::response(400, "2FA is already disabled");
+        }
+
+        long long matched_step = -1;
+        // 비활성화도 현재 OTP를 한 번 더 확인한 뒤 진행한다.
+        if (!verifyTotpCode(two_factor_info.secret, otp, two_factor_info.last_used_step, &matched_step)) {
+            return crow::response(401, "Invalid OTP");
+        }
+        if (!disableUserTwoFactor(connection.get(), *user_id)) {
+            return crow::response(500, "Failed to disable 2FA");
+        }
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["two_factor_enabled"] = false;
+        return crow::response(res);
+    });
+
+    // ==========================================
     // 로그인 API (실제 JWT 발급)
     // ==========================================
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)
@@ -726,27 +1494,44 @@ int main()
         if (!device_id.empty()) std::cout << "[mTLS Device] " << device_id << std::endl;
 
         // DB 확인 후 토큰 생성
-        if (checkUserFromDBSecure(id, pw)) {
-            std::string token = generateJWT(id);
-            
-            crow::json::wvalue res;
-            res["status"] = "success";
-            res["token"] = token;
-            return crow::response(res);
-        } else {
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        if (!verifyUserPassword(connection.get(), id, pw)) {
             return crow::response(401, "Login Failed: Check ID or Password");
         }
+
+        UserTwoFactorInfo two_factor_info;
+        if (!loadUserTwoFactorInfo(connection.get(), id, &two_factor_info) || !two_factor_info.found) {
+            return crow::response(500, "Failed to load 2FA state");
+        }
+
+        crow::json::wvalue res;
+        if (!two_factor_info.enabled) {
+            // 2FA가 꺼져 있으면 기존과 동일하게 바로 access token을 내려준다.
+            res["status"] = "success";
+            res["requires_2fa"] = false;
+            res["token"] = generateJWT(id);
+            return crow::response(res);
+        }
+
+        // 2FA 사용자는 access token 대신 짧게 사는 pre_auth_token으로 OTP 단계로 넘긴다.
+        res["status"] = "2fa_required";
+        res["requires_2fa"] = true;
+        res["pre_auth_token"] = generatePreAuthJWT(id);
+        res["expires_in"] = kPreAuthTokenTtlSeconds;
+        return crow::response(res);
     });
 
     // ==========================================
     // 토큰 검증 헬퍼 (캡처를 위해 람다로 정의)
     // ==========================================
     auto is_authorized = [](const crow::request& req) {
-        std::string auth_header = req.get_header_value("Authorization");
-        if (auth_header.length() < 7 || auth_header.substr(0, 7) != "Bearer ") {
-            return false;
-        }
-        return verifyJWT(auth_header.substr(7));
+        const auto token = extractBearerToken(req);
+        // 기존 보호 API는 full stage JWT만 허용한다.
+        return token && verifyJWT(*token);
     };
 
         // ==========================================
