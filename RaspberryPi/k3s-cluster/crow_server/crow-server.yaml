@@ -26,6 +26,8 @@ spec:
         
         ports:
         - containerPort: 8080
+        - containerPort: 5005
+          protocol: UDP
         
         # DB 접속 정보
         env:
@@ -81,6 +83,10 @@ spec:
             configMapKeyRef:
               name: crow-cctv-ip-config
               key: CCTV_BACKEND_PORT
+        - name: THERMAL_UDP_BIND_HOST
+          value: "0.0.0.0"
+        - name: THERMAL_UDP_PORT
+          value: "5005"
 
         # 마운트
         volumeMounts:
@@ -121,6 +127,11 @@ spec:
   selector:
     app: crow-server
   ports:
-    - protocol: TCP
+    - name: http
+      protocol: TCP
       port: 8080
       targetPort: 8080
+    - name: thermal-udp
+      protocol: UDP
+      port: 5005
+      targetPort: 5005
