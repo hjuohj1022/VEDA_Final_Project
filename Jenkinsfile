@@ -4,12 +4,16 @@ pipeline {
     options {
         disableConcurrentBuilds()
     }
+
+    // parameters {             
+    //     // === 1. 버전 관리 설정 (여기서 메이저/마이너 관리) ===                                                                                                                                                                                             
+    //       string(name: 'PROJECT_NAME', defaultValue: 'AEGIS', description: 'Project Name')                                                                                                                                 
+    //       string(name: 'MAJOR_VER', defaultValue: '1', description: 'Major Version')                                                                                                                                          
+    //       string(name: 'MINOR_VER', defaultValue: '0', description: 'Minor Version')                                                                                                                                          
+    //       string(name: 'PATCH_VER', defaultValue: '0', description: 'Patch Version')                                                                                                                                            
+    //   }
     
     environment {
-        // === 1. 버전 관리 설정 (여기서 메이저/마이너 관리) ===
-        MAJOR_VER = '1'
-        MINOR_VER = '0'
-        
         GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project' 
         DOCKER_CRED = 'docker-hub-login'
         KUBE_CONFIG = 'k3s-kubeconfig'
@@ -21,17 +25,25 @@ pipeline {
         stage('초기화 및 버전 설정') {
             steps {
                 script {
+                    def projectName = params.PROJECT_NAME ?: 'AEGIS'
+                    def majorVer = params.MAJOR_VER ?: '1'
+                    def minorVer = params.MINOR_VER ?: '0'
+                    def patchVer = params.PATCH_VER ?: '0'
+
                     // Git Short Hash 계산
                     def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    
+                    // 날짜 계산 
+                    def buildDate = new Date().format('yyyyMMdd', TimeZone.getTimeZone('Asia/Seoul'))
                     // Docker용 풀 버전: 1.0.50-a1b2c3d
-                    env.DOCKER_VER = "${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}-${gitHash}"
+                    env.DOCKER_VER = "${majorVer}.${minorVer}.${patchVer}-${gitHash}"
                     
-                    // Git 태그용 버전: v1.0.50
-                    env.GIT_TAG_VER = "v${MAJOR_VER}.${MINOR_VER}.${env.BUILD_NUMBER}"
-                    
-                    echo "ℹ️ 이번 빌드 버전: ${env.DOCKER_VER}"
-                }
+                     // Git 태그용 버전: v1.0.50
+                     env.GIT_TAG_VER = "v${majorVer}.${minorVer}.${patchVer}"
+
+                     currentBuild.displayName = "${projectName}_v${majorVer}.${minorVer}.${patchVer}_${buildDate}_R${env.BUILD_NUMBER}"
+                     
+                     echo "ℹ️ 이번 빌드 버전: ${env.DOCKER_VER}"
+                 }
                 
                 slackSend (
                     channel: 'C0ADS8RQAL9', 
@@ -505,6 +517,15 @@ pipeline {
     post {
         success {
             script {
+                properties([       
+                    disableConcurrentBuilds(),
+                    parameters([                                                                                                                                                                                                          
+                        string(name: 'PROJECT_NAME', defaultValue: params.PROJECT_NAME ?: 'AEGIS', description: 'Project Name'),                                                                                                                    
+                        string(name: 'MAJOR_VER', defaultValue: params.MAJOR_VER ?: '1', description: 'Major Version'),                                                                                                                            
+                        string(name: 'MINOR_VER', defaultValue: params.MINOR_VER ?: '0', description: 'Minor Version'),                                                                                                                            
+                        string(name: 'PATCH_VER', defaultValue: '0', description: 'Patch Version')                                                                                                                                         
+                    ])                                                                                                                                                                                                                    
+                ])
                 echo "✅ 빌드 및 배포 성공! Git Tag 생성 중... (${env.GIT_TAG_VER})"
                 
                 // Git Tag 생성 및 푸시
