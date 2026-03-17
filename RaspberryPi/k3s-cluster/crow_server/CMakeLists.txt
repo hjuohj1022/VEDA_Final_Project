@@ -38,6 +38,7 @@ add_executable(
   src/SunapiWsProxy.cpp
   src/CctvManager.cpp
   src/CctvProxy.cpp
+  src/ThermalProxy.cpp
 )
 
 target_compile_definitions(crow_server PRIVATE 
