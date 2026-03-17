@@ -54,6 +54,7 @@ Popup {
             Image {
                 anchors.fill: parent
                 fillMode: Image.PreserveAspectFit
+                retainWhileLoading: true
                 smooth: false
                 cache: false
                 source: root.frameSource

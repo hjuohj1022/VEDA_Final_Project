@@ -3,6 +3,7 @@
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
 
+#include <QAbstractSocket>
 #include <QBuffer>
 #include <QByteArray>
 #include <QDateTime>
@@ -10,6 +11,11 @@
 #include <QImage>
 #include <QList>
 #include <QMap>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QSslError>
+#include <QUrl>
+#include <QWebSocket>
 #include <QtEndian>
 
 #include <algorithm>
@@ -18,12 +24,278 @@
 namespace {
 constexpr int kThermalWidth = 160;
 constexpr int kThermalHeight = 120;
-constexpr int kThermalFrameBytes = kThermalWidth * kThermalHeight * 2;
+constexpr int kThermalPixelCount = kThermalWidth * kThermalHeight;
+constexpr int kThermalFrameBytes8 = kThermalPixelCount;
+constexpr int kThermalFrameBytes16 = kThermalPixelCount * 2;
 constexpr int kThermalHeaderBytes = 10;
 constexpr int kThermalHeaderWithRangeBytes = 8;
 constexpr int kThermalHeaderLegacyBytes = 4;
 constexpr int kThermalChunkLimit = 100;
 constexpr qint64 kThermalFrameTimeoutMs = 1500;
+
+enum class ThermalFrameEncoding {
+    Raw16,
+    Scaled8
+};
+
+static QString normalizedThermalPath(const QString &rawPath, const QString &fallback)
+{
+    QString path = rawPath.trimmed();
+    if (path.isEmpty()) {
+        path = fallback;
+    }
+    if (!path.startsWith('/')) {
+        path.prepend('/');
+    }
+    return path;
+}
+
+static bool usesThermalWsTransport(const BackendPrivate *state)
+{
+    if (!state) {
+        return true;
+    }
+
+    const QString transport = state->m_env.value("THERMAL_TRANSPORT", "ws").trimmed().toLower();
+    return transport != "mqtt";
+}
+
+static QString thermalStartPath(const BackendPrivate *state)
+{
+    return normalizedThermalPath(state ? state->m_env.value("THERMAL_START_PATH") : QString(),
+                                 QStringLiteral("/thermal/control/start"));
+}
+
+static QString thermalStopPath(const BackendPrivate *state)
+{
+    return normalizedThermalPath(state ? state->m_env.value("THERMAL_STOP_PATH") : QString(),
+                                 QStringLiteral("/thermal/control/stop"));
+}
+
+static QString thermalWsPath(const BackendPrivate *state)
+{
+    return normalizedThermalPath(state ? state->m_env.value("THERMAL_WS_PATH") : QString(),
+                                 QStringLiteral("/thermal/stream"));
+}
+
+static void resetThermalAssemblyState(BackendPrivate *state)
+{
+    if (!state) {
+        return;
+    }
+
+    state->m_thermalCurrentFrameId = -1;
+    state->m_thermalTotalChunksExpected = 0;
+    state->m_thermalFrameStartedMs = 0;
+    state->m_thermalHeaderMin = 0;
+    state->m_thermalHeaderMax = 0;
+    state->m_thermalFrameChunks.clear();
+    state->m_thermalLastFrameId = -1;
+    state->m_thermalLastDisplayMs = 0;
+    state->m_thermalChunkCount = 0;
+    state->m_thermalTotalBytes = 0;
+    state->m_thermalDisplayFps = 0.0;
+}
+
+static void setThermalInfoText(Backend *backend, BackendPrivate *state, const QString &text)
+{
+    if (!backend || !state || state->m_thermalInfoText == text) {
+        return;
+    }
+    state->m_thermalInfoText = text;
+    emit backend->thermalInfoTextChanged();
+}
+
+static QUrl buildThermalWsUrl(Backend *backend, BackendPrivate *state)
+{
+    Q_UNUSED(state);
+
+    const QUrl apiBase(backend ? backend->serverUrl() : QString());
+    if (!apiBase.isValid() || apiBase.host().trimmed().isEmpty()) {
+        return {};
+    }
+
+    const QString apiScheme = apiBase.scheme().trimmed().toLower();
+    const QString wsScheme = (apiScheme == "https") ? QStringLiteral("wss") : QStringLiteral("ws");
+    const int defaultPort = (apiScheme == "https") ? 443 : 80;
+
+    QUrl wsUrl;
+    wsUrl.setScheme(wsScheme);
+    wsUrl.setHost(apiBase.host());
+    wsUrl.setPort(apiBase.port(defaultPort));
+    wsUrl.setPath(thermalWsPath(state));
+    return wsUrl;
+}
+
+static void disconnectThermalWs(Backend *backend, BackendPrivate *state, bool expectedStop)
+{
+    Q_UNUSED(backend);
+
+    if (!state) {
+        return;
+    }
+
+    state->m_thermalStopExpected = expectedStop;
+    if (!state->m_thermalWs) {
+        return;
+    }
+
+    if (state->m_thermalWs->state() == QAbstractSocket::ConnectedState
+        || state->m_thermalWs->state() == QAbstractSocket::ConnectingState) {
+        state->m_thermalWs->close();
+    }
+}
+
+static void ensureThermalWs(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state || state->m_thermalWs) {
+        return;
+    }
+
+    state->m_thermalWs = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, backend);
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::connected, backend, [backend, state]() {
+        if (!state->m_thermalStreaming) {
+            disconnectThermalWs(backend, state, true);
+            return;
+        }
+
+        state->m_thermalChunkCount = 0;
+        state->m_thermalTotalBytes = 0;
+        const QString scheme = buildThermalWsUrl(backend, state).scheme().toUpper();
+        setThermalInfoText(backend, state, QString("Thermal %1 connected").arg(scheme));
+        qInfo() << "[THERMAL][WS] connected";
+    });
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::disconnected, backend, [backend, state]() {
+        if (state->m_thermalStopExpected) {
+            state->m_thermalStopExpected = false;
+            return;
+        }
+
+        if (state->m_thermalStreaming) {
+            state->m_thermalStreaming = false;
+            emit backend->thermalStreamingChanged();
+        }
+        setThermalInfoText(backend, state, QStringLiteral("Thermal stream disconnected"));
+        qWarning() << "[THERMAL][WS] disconnected unexpectedly";
+    });
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::binaryMessageReceived, backend,
+                     [backend, state](const QByteArray &payload) {
+        if (!state->m_thermalStreaming) {
+            return;
+        }
+
+        state->m_thermalChunkCount += 1;
+        state->m_thermalTotalBytes += payload.size();
+        backend->handleThermalChunkMessage(payload);
+    });
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::textMessageReceived, backend,
+                     [state](const QString &message) {
+        qInfo() << "[THERMAL][WS][TEXT]" << message.left(180);
+        Q_UNUSED(state);
+    });
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::errorOccurred, backend,
+                     [backend, state](QAbstractSocket::SocketError) {
+        const QString err = state->m_thermalWs
+                ? state->m_thermalWs->errorString()
+                : QStringLiteral("unknown websocket error");
+        setThermalInfoText(backend, state, QString("Thermal WS error: %1").arg(err));
+        qWarning() << "[THERMAL][WS] error:" << err;
+    });
+
+    QObject::connect(state->m_thermalWs, &QWebSocket::sslErrors, backend,
+                     [state](const QList<QSslError> &errors) {
+        for (const auto &err : errors) {
+            qWarning() << "[THERMAL][WS][SSL]" << err.errorString();
+        }
+        if (state->m_sslIgnoreErrors && state->m_thermalWs) {
+            state->m_thermalWs->ignoreSslErrors();
+        }
+    });
+}
+
+static void openThermalWs(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state) {
+        return;
+    }
+
+    ensureThermalWs(backend, state);
+    if (!state->m_thermalWs) {
+        setThermalInfoText(backend, state, QStringLiteral("Thermal WS unavailable"));
+        return;
+    }
+
+    const QUrl wsUrl = buildThermalWsUrl(backend, state);
+    if (!wsUrl.isValid() || wsUrl.host().trimmed().isEmpty()) {
+        state->m_thermalStreaming = false;
+        emit backend->thermalStreamingChanged();
+        setThermalInfoText(backend, state, QStringLiteral("Thermal WS connect failed: invalid API_URL"));
+        return;
+    }
+
+    if (state->m_thermalWs->state() == QAbstractSocket::ConnectedState
+        || state->m_thermalWs->state() == QAbstractSocket::ConnectingState) {
+        state->m_thermalStopExpected = true;
+        state->m_thermalWs->abort();
+    }
+
+    QNetworkRequest request(wsUrl);
+    if (!state->m_authToken.trimmed().isEmpty()) {
+        request.setRawHeader("Authorization", QByteArray("Bearer ") + state->m_authToken.toUtf8());
+    }
+
+    state->m_thermalStopExpected = false;
+    if (wsUrl.scheme().compare("wss", Qt::CaseInsensitive) == 0 && state->m_sslConfigReady) {
+        state->m_thermalWs->setSslConfiguration(state->m_sslConfig);
+    }
+
+    setThermalInfoText(backend, state,
+                       QString("Thermal %1 connecting...").arg(wsUrl.scheme().toUpper()));
+    qInfo() << "[THERMAL][WS] opening:" << wsUrl;
+    state->m_thermalWs->open(request);
+}
+
+static void postThermalStopRequest(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state || !state->m_manager) {
+        return;
+    }
+
+    if (state->m_thermalStopReply && state->m_thermalStopReply->isRunning()) {
+        state->m_thermalStopReply->abort();
+    }
+
+    QNetworkRequest request = backend->makeApiJsonRequest(thermalStopPath(state));
+    backend->applyAuthIfNeeded(request);
+    state->m_thermalStopReply = state->m_manager->post(request, QByteArray("{}"));
+    QPointer<QNetworkReply> reply = state->m_thermalStopReply;
+    backend->attachIgnoreSslErrors(reply, QStringLiteral("THERMAL_STOP"));
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply]() {
+        if (!reply) {
+            return;
+        }
+
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+        const bool ok = (reply->error() == QNetworkReply::NoError) && (statusCode < 400 || statusCode == 0);
+        if (!ok) {
+            qWarning() << "[THERMAL] stop request failed. status=" << statusCode
+                       << "err=" << reply->errorString()
+                       << "body=" << body.left(180);
+        }
+        reply->deleteLater();
+        if (state->m_thermalStopReply == reply) {
+            state->m_thermalStopReply = nullptr;
+        }
+        Q_UNUSED(backend);
+    });
+}
 
 struct ThermalChunkHeader {
     int frameId = -1;
@@ -162,6 +434,11 @@ static int percentileValue(std::vector<int> values, int p)
     std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(idx), values.end());
     return values[idx];
 }
+
+static QString thermalEncodingLabel(ThermalFrameEncoding encoding)
+{
+    return (encoding == ThermalFrameEncoding::Raw16) ? QStringLiteral("16-bit") : QStringLiteral("8-bit");
+}
 } // namespace
 
 void BackendThermalService::startThermalStream(Backend *backend, BackendPrivate *state)
@@ -169,20 +446,75 @@ void BackendThermalService::startThermalStream(Backend *backend, BackendPrivate 
     if (state->m_thermalStreaming) {
         return;
     }
+
     state->m_thermalStreaming = true;
-    state->m_thermalCurrentFrameId = -1;
-    state->m_thermalTotalChunksExpected = 0;
-    state->m_thermalFrameStartedMs = 0;
-    state->m_thermalHeaderMin = 0;
-    state->m_thermalHeaderMax = 0;
-    state->m_thermalFrameChunks.clear();
-    state->m_thermalLastFrameId = -1;
-    state->m_thermalLastDisplayMs = 0;
-    state->m_thermalDisplayFps = 0.0;
-    state->m_thermalInfoText = "Thermal stream active";
-    qInfo() << "[THERMAL] stream started";
+    resetThermalAssemblyState(state);
+
+    const bool useWs = usesThermalWsTransport(state);
+    state->m_thermalInfoText = useWs ? QStringLiteral("Thermal stream starting...") : QStringLiteral("Thermal stream active (MQTT)");
     emit backend->thermalStreamingChanged();
     emit backend->thermalInfoTextChanged();
+
+    if (!useWs) {
+        qInfo() << "[THERMAL] stream started via MQTT";
+        return;
+    }
+
+    if (!state->m_manager) {
+        state->m_thermalStreaming = false;
+        emit backend->thermalStreamingChanged();
+        setThermalInfoText(backend, state, QStringLiteral("Thermal start failed: network manager unavailable"));
+        return;
+    }
+
+    ensureThermalWs(backend, state);
+
+    if (state->m_thermalStartReply && state->m_thermalStartReply->isRunning()) {
+        state->m_thermalStartReply->abort();
+    }
+
+    QNetworkRequest request = backend->makeApiJsonRequest(thermalStartPath(state));
+    backend->applyAuthIfNeeded(request);
+    state->m_thermalStartReply = state->m_manager->post(request, QByteArray("{}"));
+    QPointer<QNetworkReply> reply = state->m_thermalStartReply;
+    backend->attachIgnoreSslErrors(reply, QStringLiteral("THERMAL_START"));
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply]() {
+        if (!reply) {
+            return;
+        }
+
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
+        const QString errorText = reply->errorString();
+        const bool ok = (reply->error() == QNetworkReply::NoError) && (statusCode < 400 || statusCode == 0);
+
+        reply->deleteLater();
+        if (state->m_thermalStartReply == reply) {
+            state->m_thermalStartReply = nullptr;
+        }
+
+        if (!state->m_thermalStreaming) {
+            return;
+        }
+
+        if (!ok) {
+            state->m_thermalStreaming = false;
+            emit backend->thermalStreamingChanged();
+            setThermalInfoText(backend, state,
+                               QString("Thermal start failed (HTTP %1): %2")
+                                       .arg(statusCode)
+                                       .arg(body.isEmpty() ? errorText : body.left(160)));
+            qWarning() << "[THERMAL] start request failed. status=" << statusCode
+                       << "err=" << errorText
+                       << "body=" << body.left(180);
+            return;
+        }
+
+        openThermalWs(backend, state);
+    });
+
+    qInfo() << "[THERMAL] start request sent via API:" << thermalStartPath(state);
 }
 
 void BackendThermalService::stopThermalStream(Backend *backend, BackendPrivate *state)
@@ -190,17 +522,26 @@ void BackendThermalService::stopThermalStream(Backend *backend, BackendPrivate *
     if (!state->m_thermalStreaming) {
         return;
     }
+
     state->m_thermalStreaming = false;
-    state->m_thermalCurrentFrameId = -1;
-    state->m_thermalTotalChunksExpected = 0;
-    state->m_thermalFrameStartedMs = 0;
-    state->m_thermalHeaderMin = 0;
-    state->m_thermalHeaderMax = 0;
-    state->m_thermalFrameChunks.clear();
+    resetThermalAssemblyState(state);
     state->m_thermalInfoText = "Thermal stream stopped";
-    qInfo() << "[THERMAL] stream stopped";
     emit backend->thermalStreamingChanged();
     emit backend->thermalInfoTextChanged();
+
+    if (state->m_thermalStartReply && state->m_thermalStartReply->isRunning()) {
+        state->m_thermalStartReply->abort();
+    }
+    state->m_thermalStartReply = nullptr;
+
+    if (usesThermalWsTransport(state)) {
+        disconnectThermalWs(backend, state, true);
+        postThermalStopRequest(backend, state);
+        qInfo() << "[THERMAL] stream stopped via WS";
+        return;
+    }
+
+    qInfo() << "[THERMAL] stream stopped via MQTT";
 }
 
 void BackendThermalService::setThermalPalette(Backend *backend, BackendPrivate *state, const QString &palette)
@@ -374,7 +715,7 @@ void BackendThermalService::processThermalFrame(Backend *backend,
 {
     const bool debugThermal = (state->m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");
     QByteArray full;
-    full.reserve(kThermalFrameBytes);
+    full.reserve(kThermalFrameBytes16);
     for (int i = 0; i < totalChunks; ++i) {
         if (!chunks.contains(i)) {
             if (debugThermal) {
@@ -384,23 +725,54 @@ void BackendThermalService::processThermalFrame(Backend *backend,
         }
         full.append(chunks.value(i));
     }
-    if (full.size() < kThermalFrameBytes) {
+
+    ThermalFrameEncoding encoding = ThermalFrameEncoding::Raw16;
+    int expectedFrameBytes = 0;
+    if (full.size() == kThermalFrameBytes16) {
+        encoding = ThermalFrameEncoding::Raw16;
+        expectedFrameBytes = kThermalFrameBytes16;
+    } else if (full.size() == kThermalFrameBytes8) {
+        encoding = ThermalFrameEncoding::Scaled8;
+        expectedFrameBytes = kThermalFrameBytes8;
+    } else if (full.size() < kThermalFrameBytes8) {
         if (debugThermal) {
-            qWarning() << "[THERMAL] frame too small:" << full.size() << "expected:" << kThermalFrameBytes;
+            qWarning() << "[THERMAL] frame too small:" << full.size()
+                       << "expected one of:" << kThermalFrameBytes8 << "," << kThermalFrameBytes16;
         }
+        return;
+    } else {
+        qWarning() << "[THERMAL] unexpected frame size:" << full.size()
+                   << "expected one of:" << kThermalFrameBytes8 << "," << kThermalFrameBytes16;
         return;
     }
 
     std::vector<int> raw;
-    raw.reserve(kThermalWidth * kThermalHeight);
+    raw.reserve(kThermalPixelCount);
     std::vector<int> valid;
-    valid.reserve(kThermalWidth * kThermalHeight);
+    valid.reserve(kThermalPixelCount);
     const uchar *buf = reinterpret_cast<const uchar *>(full.constData());
-    for (int i = 0; i < kThermalWidth * kThermalHeight; ++i) {
-        const int v = static_cast<int>(qFromBigEndian<quint16>(buf + i * 2));
-        raw.push_back(v);
-        if (v > 1000 && v < 30000) {
-            valid.push_back(v);
+
+    if (encoding == ThermalFrameEncoding::Raw16) {
+        for (int i = 0; i < kThermalPixelCount; ++i) {
+            const int v = static_cast<int>(qFromBigEndian<quint16>(buf + i * 2));
+            raw.push_back(v);
+            if (v > 1000 && v < 30000) {
+                valid.push_back(v);
+            }
+        }
+    } else {
+        const int baseMin = static_cast<int>(minVal);
+        const int baseMax = static_cast<int>(maxVal);
+        const int range = std::max(1, baseMax - baseMin);
+        for (int i = 0; i < kThermalPixelCount; ++i) {
+            const int pixel8 = static_cast<int>(buf[i]);
+            const int v = (baseMax > baseMin)
+                    ? (baseMin + ((pixel8 * range + 127) / 255))
+                    : (pixel8 << 8);
+            raw.push_back(v);
+            if (v > 1000 && v < 30000) {
+                valid.push_back(v);
+            }
         }
     }
 
@@ -465,13 +837,14 @@ void BackendThermalService::processThermalFrame(Backend *backend,
     state->m_thermalLastFrameId = frameId;
 
     const QString rangeMode = state->m_thermalAutoRange ? QString("Auto(%1%)").arg(state->m_thermalAutoRangeWindowPercent) : "Manual";
-    const QString info = QString("Frame: %1 | FPS: %2 | Palette: %3 | %4 Range: %5 ~ %6")
-                                 .arg(frameId)
-                                 .arg(state->m_thermalDisplayFps, 0, 'f', 2)
-                                 .arg(state->m_thermalPalette)
-                                 .arg(rangeMode)
-                                 .arg(frameMin)
-                                 .arg(frameMax);
+    const QString info = QString("Frame: %1 | FPS: %2 | Format: %3 | Palette: %4 | %5 Range: %6 ~ %7")
+                                  .arg(frameId)
+                                  .arg(state->m_thermalDisplayFps, 0, 'f', 2)
+                                  .arg(thermalEncodingLabel(encoding))
+                                  .arg(state->m_thermalPalette)
+                                  .arg(rangeMode)
+                                  .arg(frameMin)
+                                  .arg(frameMax);
     if (state->m_thermalFrameDataUrl != nextDataUrl) {
         state->m_thermalFrameDataUrl = nextDataUrl;
         emit backend->thermalFrameDataUrlChanged();
@@ -483,6 +856,8 @@ void BackendThermalService::processThermalFrame(Backend *backend,
     if (debugThermal) {
         qInfo() << "[THERMAL] frame rendered id=" << frameId
                 << "bytes=" << full.size()
+                << "expectedBytes=" << expectedFrameBytes
+                << "encoding=" << thermalEncodingLabel(encoding)
                 << "range=" << frameMin << frameMax
                 << "fps=" << state->m_thermalDisplayFps
                 << "palette=" << state->m_thermalPalette;

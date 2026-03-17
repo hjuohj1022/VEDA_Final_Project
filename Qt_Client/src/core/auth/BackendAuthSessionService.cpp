@@ -68,6 +68,22 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
     }
     state->m_accountDeleteReply = nullptr;
     state->m_accountDeleteInProgress = false;
+    if (state->m_thermalStartReply && state->m_thermalStartReply->isRunning()) {
+        state->m_thermalStartReply->abort();
+    }
+    state->m_thermalStartReply = nullptr;
+    if (state->m_thermalStopReply && state->m_thermalStopReply->isRunning()) {
+        state->m_thermalStopReply->abort();
+    }
+    state->m_thermalStopReply = nullptr;
+    if (state->m_thermalWs) {
+        state->m_thermalStopExpected = true;
+        state->m_thermalWs->close();
+    }
+    if (state->m_thermalStreaming) {
+        state->m_thermalStreaming = false;
+        emit backend->thermalStreamingChanged();
+    }
 
     state->m_isLoggedIn = false;
     if (state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty()) {

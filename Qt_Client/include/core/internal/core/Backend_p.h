@@ -119,9 +119,13 @@ struct BackendPrivate
     QString m_playbackExportFinalPath;
 
     // Thermal + display state
+    QPointer<QWebSocket> m_thermalWs;
+    QPointer<QNetworkReply> m_thermalStartReply;
+    QPointer<QNetworkReply> m_thermalStopReply;
     QString m_thermalFrameDataUrl;
     QString m_thermalInfoText = "Thermal idle";
     bool m_thermalStreaming = false;
+    bool m_thermalStopExpected = false;
     QString m_thermalPalette = "Jet";
     bool m_thermalAutoRange = true;
     int m_thermalAutoRangeWindowPercent = 96;
@@ -132,6 +136,8 @@ struct BackendPrivate
     int m_thermalTotalChunksExpected = 0;
     qint64 m_thermalFrameStartedMs = 0;
     qint64 m_thermalLastDisplayMs = 0;
+    qint64 m_thermalChunkCount = 0;
+    qint64 m_thermalTotalBytes = 0;
     double m_thermalDisplayFps = 0.0;
     QMap<int, QByteArray> m_thermalFrameChunks;
     quint16 m_thermalHeaderMin = 0;

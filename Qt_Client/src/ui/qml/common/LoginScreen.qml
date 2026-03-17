@@ -610,6 +610,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 8
                 fillMode: Image.PreserveAspectFit
+                retainWhileLoading: true
                 smooth: false
                 cache: false
                 source: backend.thermalFrameDataUrl

@@ -39,6 +39,8 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
     const QString statusTopic = state->m_env.value("MQTT_STATUS_TOPIC", "system/status").trimmed();
     const QString detectTopic = state->m_env.value("MQTT_DETECTED_TOPIC", "system/detected").trimmed();
     const QString thermalTopic = state->m_env.value("MQTT_THERMAL_TOPIC", "lepton/frame/chunk").trimmed();
+    const QString thermalTransport = state->m_env.value("THERMAL_TRANSPORT", "ws").trimmed().toLower();
+    const bool thermalViaWs = (thermalTransport != "mqtt");
     const bool useTls = (state->m_env.value("MQTT_USE_TLS", "1").trimmed() == "1");
     const QString caPathRaw = state->m_env.value("MQTT_CA_CERT", "certs/rootCA.crt").trimmed();
     const QString certPathRaw = state->m_env.value("MQTT_CLIENT_CERT", "certs/client-qt.crt").trimmed();
@@ -60,7 +62,8 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
             << "host=" << (host.isEmpty() ? QString("localhost") : host)
             << "port=" << (port > 0 ? port : (useTls ? 8883 : 1883))
             << "tls=" << useTls
-            << "debugRx=" << debugRx;
+            << "debugRx=" << debugRx
+            << "thermalTransport=" << thermalTransport;
     qInfo() << "[MQTT] topics:"
             << "status=" << statusTopic
             << "detected=" << detectTopic
@@ -236,6 +239,14 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
         }
 
         if (topicName == thermalTopic) {
+            if (thermalViaWs) {
+                if (debugRx) {
+                    qInfo() << "[MQTT][RX][" << transportTag << "]"
+                            << "ignore thermal topic because THERMAL_TRANSPORT="
+                            << thermalTransport;
+                }
+                return;
+            }
             if (debugThermal && !debugRx) {
                 static int thermalMsgCount = 0;
                 thermalMsgCount++;
@@ -271,8 +282,13 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
         }
         subscribeTopic(statusTopic);
         subscribeTopic(detectTopic);
-        subscribeTopic(thermalTopic);
-        qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << thermalTopic;
+        if (!thermalViaWs) {
+            subscribeTopic(thermalTopic);
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << thermalTopic;
+        } else {
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic
+                    << "(thermal via websocket)";
+        }
     });
 
     QObject::connect(state->m_mqttClient, &QMqttClient::disconnected, backend, [=]() {
