@@ -32,11 +32,11 @@ STM32 UART response
 - Command topic: `motor/control`
 - Response topic: `motor/response`
 - Health topic: `system/status`
-- Health request topic: `system/request`
+- Health control topic: `system/control`
 
 Health request flow:
 
-- `system/request`에 아무 payload나 publish
+- `system/control`에 `publish_status_now` payload publish
 - ESP32가 즉시 현재 health JSON을 `system/status`로 publish
 
 ### 2.2 ESP32 <-> STM32 UART
@@ -279,8 +279,8 @@ motor<N> <action> <arg>
 요청:
 
 ```text
-topic: system/request
-payload: now
+topic: system/control
+payload: publish_status_now
 ```
 
 응답:

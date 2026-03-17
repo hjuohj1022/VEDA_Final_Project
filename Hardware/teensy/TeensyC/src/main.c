@@ -20,6 +20,7 @@
 #define NUM_SEGMENTS     (4U)
 #define FRAME_SIZE       (160U * 120U)
 #define FRAME_BYTES      (FRAME_SIZE * 2U)
+#define FRAME_BUFFER_COUNT (3U)
 
 #define LEP_REG_STATUS   (0x0002U)
 #define LEP_REG_COMMAND  (0x0004U)
@@ -30,17 +31,19 @@
 
 #define FRAME_SPI_PKT_SIZE   (256U)
 #define FRAME_SPI_CLOCK_HZ   (4000000U)
-#define FRAME_SPI_GAP_US     (300U)
+#define FRAME_SPI_GAP_US      (300U)
 #define FRAME_SPI_CS_SETUP_US (5U)
 #define FRAME_SPI_CS_HOLD_US  (5U)
-#define FRAME_POST_SEND_SLEEP_MS (250U)
+#define FRAME_POST_SEND_SLEEP_MS (0U)
+#define CAPTURE_TIMEOUT_RESET_THRESHOLD (3U)
 
 #define FRAME_SPI_HEADER_SIZE   (14U)
 #define FRAME_SPI_PAYLOAD_SIZE  (FRAME_SPI_PKT_SIZE - FRAME_SPI_HEADER_SIZE)
 
-static uint16_t frameBuffer[FRAME_SIZE];
 static uint8_t  rawPacket[PACKET_SIZE];
 static uint8_t  frameTxPacket[FRAME_SPI_PKT_SIZE];
+static uint16_t frameBuffers[FRAME_BUFFER_COUNT][FRAME_SIZE];
+static uint16_t frameIds[FRAME_BUFFER_COUNT];
 
 /* Device nodes */
 #define I2C_DEV_NODE         DT_NODELABEL(lpi2c1)
@@ -57,8 +60,15 @@ static const struct device *frame_spi_dev;
 static const struct device *lepton_cs_gpio;
 static const struct device *frame_cs_gpio;
 static bool frame_spi_ready = false;
+static uint32_t dropped_ready_frames = 0U;
+
+K_MSGQ_DEFINE(free_frame_queue, sizeof(uint8_t), FRAME_BUFFER_COUNT, 4U);
+K_MSGQ_DEFINE(ready_frame_queue, sizeof(uint8_t), FRAME_BUFFER_COUNT, 4U);
+K_THREAD_STACK_DEFINE(frame_sender_stack, 4096U);
+static struct k_thread frame_sender_thread;
 
 static void resetLepton(void);
+static void frameSenderThread(void *arg1, void *arg2, void *arg3);
 
 static struct spi_config lepton_spi_cfg = {
 	.frequency = 18000000U,
@@ -222,9 +232,9 @@ static void frameWriteU16Be(uint8_t *dst, uint16_t value)
 	dst[1] = (uint8_t)(value & 0xFFU);
 }
 
-static int sendFrameOverSpi(uint16_t frame_id)
+static int sendFrameOverSpi(const uint16_t *frame_data, uint16_t frame_id)
 {
-	const uint8_t *frame_bytes = (const uint8_t *)frameBuffer;
+	const uint8_t *frame_bytes = (const uint8_t *)frame_data;
 	const uint16_t total_chunks = (uint16_t)((FRAME_BYTES + FRAME_SPI_PAYLOAD_SIZE - 1U) / FRAME_SPI_PAYLOAD_SIZE);
 
 	ensureFrameSpiReady();
@@ -277,11 +287,49 @@ static int sendFrameOverSpi(uint16_t frame_id)
 	return 0;
 }
 
-static bool captureFrame(uint32_t *discard_count)
+static void frameSenderThread(void *arg1, void *arg2, void *arg3)
+{
+	uint32_t sent_frames = 0U;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+
+	while (true) {
+		uint8_t buffer_idx = 0U;
+
+		if (k_msgq_get(&ready_frame_queue, &buffer_idx, K_FOREVER) != 0) {
+			continue;
+		}
+
+		if (sendFrameOverSpi(frameBuffers[buffer_idx], frameIds[buffer_idx]) == 0) {
+			sent_frames++;
+			if ((sent_frames % 30U) == 0U) {
+				printk("Frame SPI sent: id=%u total=%u dropped_ready=%u\n",
+				       frameIds[buffer_idx],
+				       sent_frames,
+				       dropped_ready_frames);
+			}
+		} else {
+			printk("Frame SPI send failed: id=%u\n", frameIds[buffer_idx]);
+		}
+
+		if (FRAME_POST_SEND_SLEEP_MS > 0U) {
+			(void)k_msleep(FRAME_POST_SEND_SLEEP_MS);
+		}
+
+		(void)k_msgq_put(&free_frame_queue, &buffer_idx, K_FOREVER);
+	}
+}
+
+static bool captureFrame(uint16_t *frame_buffer, uint32_t *discard_count)
 {
 	const uint32_t start_ms = k_uptime_get_32();
 	uint8_t current_seg = 0U;
 	uint32_t local_discards = 0U;
+
+	if ((frame_buffer == NULL) || (discard_count == NULL)) {
+		return false;
+	}
 
 	while (true) {
 		int spi_ret;
@@ -332,11 +380,11 @@ static bool captureFrame(uint32_t *discard_count)
 				for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
 					const uint8_t msb = rawPacket[4U + (i * 2U)];
 					const uint8_t lsb = rawPacket[5U + (i * 2U)];
-					frameBuffer[base_idx + i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
+					frame_buffer[base_idx + i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
 				}
 			}
 
-			if (rawPacket[1] == 59U) {
+			if (rawPacket[1] == (PACKETS_PER_SEG - 1U)) {
 				if (current_seg == NUM_SEGMENTS) {
 					*discard_count = local_discards;
 					return true;
@@ -349,6 +397,7 @@ static bool captureFrame(uint32_t *discard_count)
 
 void main(void) {
 	uint16_t frame_id = 1U;
+	uint32_t consecutive_capture_timeouts = 0U;
 
 	setup_pinmux();
 	(void)usb_enable(NULL);
@@ -380,22 +429,55 @@ void main(void) {
 			}
 		}
 		printk("Lepton init complete, SPI frame link ready\n");
+		for (uint8_t i = 0U; i < FRAME_BUFFER_COUNT; i++) {
+			(void)k_msgq_put(&free_frame_queue, &i, K_NO_WAIT);
+		}
+		(void)k_thread_create(&frame_sender_thread,
+		                      frame_sender_stack,
+		                      K_THREAD_STACK_SIZEOF(frame_sender_stack),
+		                      frameSenderThread,
+		                      NULL,
+		                      NULL,
+		                      NULL,
+		                      5,
+		                      0,
+		                      K_NO_WAIT);
 
 		while (true) {
 			uint32_t discard_count = 0U;
-			if (!captureFrame(&discard_count)) {
-				printk("Capture timeout, resetting Lepton (discards=%u)\n", discard_count);
-				resetLepton();
-				continue;
+			uint8_t buffer_idx = 0U;
+
+			if (k_msgq_get(&free_frame_queue, &buffer_idx, K_NO_WAIT) != 0) {
+				if (k_msgq_get(&ready_frame_queue, &buffer_idx, K_NO_WAIT) == 0) {
+					dropped_ready_frames++;
+				} else {
+					(void)k_msleep(2U);
+					continue;
+				}
 			}
 
-			if (sendFrameOverSpi(frame_id) == 0) {
-				printk("Frame sent over SPI: id=%u\n", frame_id);
-				frame_id++;
-			} else {
-				printk("Frame SPI send failed: id=%u\n", frame_id);
+			frameIds[buffer_idx] = frame_id;
+			if (!captureFrame(frameBuffers[buffer_idx], &discard_count)) {
+				consecutive_capture_timeouts++;
+				printk("Capture timeout: discards=%u consecutive=%u\n",
+				       discard_count,
+				       consecutive_capture_timeouts);
+				(void)k_msgq_put(&free_frame_queue, &buffer_idx, K_NO_WAIT);
+				if (consecutive_capture_timeouts >= CAPTURE_TIMEOUT_RESET_THRESHOLD) {
+					printk("Capture timeout threshold reached, resetting Lepton\n");
+					resetLepton();
+					consecutive_capture_timeouts = 0U;
+				} else {
+					(void)k_msleep(20U);
+				}
+				continue;
 			}
-			(void)k_msleep(FRAME_POST_SEND_SLEEP_MS);
+			consecutive_capture_timeouts = 0U;
+			if (k_msgq_put(&ready_frame_queue, &buffer_idx, K_NO_WAIT) != 0) {
+				dropped_ready_frames++;
+				(void)k_msgq_put(&free_frame_queue, &buffer_idx, K_NO_WAIT);
+			}
+			frame_id++;
 		}
 	}
 }

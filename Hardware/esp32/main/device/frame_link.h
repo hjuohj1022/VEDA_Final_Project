@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define FRAME_BYTES        38400U
-#define NUM_BUFFERS        2U
+#define NUM_BUFFERS        3U
 
 typedef struct {
     uint32_t total_packets;
@@ -20,12 +20,16 @@ typedef struct {
     uint32_t bad_payload_len;
     uint32_t seq_errors;
     uint32_t queue_full_drops;
+    uint32_t stale_frame_drops;
     uint8_t frame_ready;
 } frame_link_stats_t;
 
 void frameLinkInit(void);
 void frameLinkTask(void *arg);
-bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf, uint16_t *frame_id, int *buffer_idx);
+bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf,
+                                uint16_t *frame_id,
+                                int *buffer_idx,
+                                bool drop_stale_frames);
 void frameLinkReleaseReadyFrame(int buffer_idx);
 void frameLinkGetStats(frame_link_stats_t *stats);
 
