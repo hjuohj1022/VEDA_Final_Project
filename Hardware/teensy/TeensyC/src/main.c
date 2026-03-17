@@ -44,6 +44,7 @@ static uint8_t  rawPacket[PACKET_SIZE];
 static uint8_t  frameTxPacket[FRAME_SPI_PKT_SIZE];
 static uint16_t frameBuffers[FRAME_BUFFER_COUNT][FRAME_SIZE];
 static uint16_t frameIds[FRAME_BUFFER_COUNT];
+static uint16_t segmentBuffer[PACKETS_PER_SEG][PIXELS_PER_PKT];
 
 /* Device nodes */
 #define I2C_DEV_NODE         DT_NODELABEL(lpi2c1)
@@ -226,6 +227,19 @@ static uint16_t frameChecksum(const uint8_t *data, uint16_t len)
 	return (uint16_t)(sum & 0xFFFFU);
 }
 
+static void copySegmentToFrame(uint16_t *frame_buffer, uint8_t segment_idx)
+{
+	const uint32_t frame_offset =
+		(uint32_t)(segment_idx - 1U) * (uint32_t)PACKETS_PER_SEG * (uint32_t)PIXELS_PER_PKT;
+
+	for (uint32_t packet_idx = 0U; packet_idx < (uint32_t)PACKETS_PER_SEG; packet_idx++) {
+		const uint32_t dst_offset = frame_offset + (packet_idx * (uint32_t)PIXELS_PER_PKT);
+		(void)memcpy(&frame_buffer[dst_offset],
+		             segmentBuffer[packet_idx],
+		             sizeof(segmentBuffer[packet_idx]));
+	}
+}
+
 static void frameWriteU16Be(uint8_t *dst, uint16_t value)
 {
 	dst[0] = (uint8_t)((value >> 8U) & 0xFFU);
@@ -325,14 +339,21 @@ static bool captureFrame(uint16_t *frame_buffer, uint32_t *discard_count)
 {
 	const uint32_t start_ms = k_uptime_get_32();
 	uint8_t current_seg = 0U;
+	uint8_t expected_seg = 1U;
+	uint8_t expected_packet = 0U;
 	uint32_t local_discards = 0U;
+	bool frame_started = false;
+	bool segment_active = false;
 
 	if ((frame_buffer == NULL) || (discard_count == NULL)) {
 		return false;
 	}
 
+	(void)memset(frame_buffer, 0, FRAME_BYTES);
+
 	while (true) {
 		int spi_ret;
+		uint8_t packet_idx;
 
 		if ((k_uptime_get_32() - start_ms) > 3000U) {
 			*discard_count = local_discards;
@@ -355,42 +376,92 @@ static bool captureFrame(uint16_t *frame_buffer, uint32_t *discard_count)
 
 		if ((rawPacket[0] & 0x0FU) == 0x0FU) {
 			local_discards++;
+			segment_active = false;
+			expected_packet = 0U;
 			(void)k_usleep(30U);
 			continue;
 		}
 
-		if (rawPacket[1] >= PACKETS_PER_SEG) {
+		packet_idx = rawPacket[1];
+		if (packet_idx >= PACKETS_PER_SEG) {
 			local_discards++;
+			segment_active = false;
+			expected_packet = 0U;
 			continue;
 		}
 
-		if (rawPacket[1] == 20U) {
+		if (!segment_active) {
+			if (packet_idx != 0U) {
+				local_discards++;
+				continue;
+			}
+
+			segment_active = true;
+			expected_packet = 0U;
+			current_seg = 0U;
+		}
+
+		if (packet_idx != expected_packet) {
+			local_discards++;
+			segment_active = false;
+			expected_packet = 0U;
+			current_seg = 0U;
+			continue;
+		}
+
+		for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
+			const uint8_t msb = rawPacket[4U + (i * 2U)];
+			const uint8_t lsb = rawPacket[5U + (i * 2U)];
+			segmentBuffer[packet_idx][i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
+		}
+
+		if (packet_idx == 20U) {
 			const uint8_t seg_bits = (uint8_t)((rawPacket[0] >> 4U) & 0x07U);
 			if ((seg_bits > 0U) && (seg_bits <= NUM_SEGMENTS)) {
 				current_seg = seg_bits;
+			} else {
+				local_discards++;
+				segment_active = false;
+				expected_packet = 0U;
+				current_seg = 0U;
+				continue;
 			}
 		}
 
-		if (current_seg > 0U) {
-			const uint32_t base_idx =
-				(((uint32_t)(current_seg - 1U) * (uint32_t)PACKETS_PER_SEG * (uint32_t)PIXELS_PER_PKT) +
-				 ((uint32_t)rawPacket[1] * (uint32_t)PIXELS_PER_PKT));
+		expected_packet++;
 
-			if ((base_idx + PIXELS_PER_PKT) <= (uint32_t)FRAME_SIZE) {
-				for (uint32_t i = 0U; i < PIXELS_PER_PKT; i++) {
-					const uint8_t msb = rawPacket[4U + (i * 2U)];
-					const uint8_t lsb = rawPacket[5U + (i * 2U)];
-					frame_buffer[base_idx + i] = (uint16_t)(((uint16_t)lsb << 8U) | (uint16_t)msb);
-				}
+		if (packet_idx == (PACKETS_PER_SEG - 1U)) {
+			segment_active = false;
+			expected_packet = 0U;
+
+			if (current_seg == 0U) {
+				local_discards++;
+				continue;
 			}
 
-			if (rawPacket[1] == (PACKETS_PER_SEG - 1U)) {
-				if (current_seg == NUM_SEGMENTS) {
-					*discard_count = local_discards;
-					return true;
+			if ((!frame_started) || (current_seg != expected_seg)) {
+				if (current_seg != 1U) {
+					local_discards++;
+					frame_started = false;
+					expected_seg = 1U;
+					current_seg = 0U;
+					continue;
 				}
-				current_seg++;
+
+				(void)memset(frame_buffer, 0, FRAME_BYTES);
+				frame_started = true;
+				expected_seg = 1U;
 			}
+
+			copySegmentToFrame(frame_buffer, current_seg);
+
+			if (current_seg == NUM_SEGMENTS) {
+				*discard_count = local_discards;
+				return true;
+			}
+
+			expected_seg = (uint8_t)(current_seg + 1U);
+			current_seg = 0U;
 		}
 	}
 }
