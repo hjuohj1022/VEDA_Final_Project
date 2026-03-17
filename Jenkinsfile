@@ -16,7 +16,7 @@ pipeline {
                     def projectName = params.PROJECT_NAME ?: 'AEGIS'
                     def majorVer = params.MAJOR_VER ?: '1'
                     def minorVer = params.MINOR_VER ?: '0'
-                    def patchVer = params.PATCH_VER ?: '0'
+                    def patchVer = env.BUILD_NUMBER
 
                     // Git Short Hash 계산
                     def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
@@ -510,8 +510,7 @@ pipeline {
                     parameters([                                                                                                                                                                                                          
                         string(name: 'PROJECT_NAME', defaultValue: params.PROJECT_NAME ?: 'AEGIS', description: 'Project Name'),                                                                                                                    
                         string(name: 'MAJOR_VER', defaultValue: params.MAJOR_VER ?: '1', description: 'Major Version'),                                                                                                                            
-                        string(name: 'MINOR_VER', defaultValue: params.MINOR_VER ?: '0', description: 'Minor Version'),                                                                                                                            
-                        string(name: 'PATCH_VER', defaultValue: '0', description: 'Patch Version')                                                                                                                                         
+                        string(name: 'MINOR_VER', defaultValue: params.MINOR_VER ?: '0', description: 'Minor Version')                                                                                                                                 
                     ])                                                                                                                                                                                                                    
                 ])
                 echo "✅ 빌드 및 배포 성공! Git Tag 생성 중... (${env.GIT_TAG_VER})"
