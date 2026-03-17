@@ -1,0 +1,10 @@
+/archive/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py
+*.md
+*.txt
+!README.md
+!**/README.md
