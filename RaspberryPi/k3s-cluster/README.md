@@ -2,11 +2,13 @@
 
 `RaspberryPi/k3s-cluster`는 Raspberry Pi 4 여러 대를 K3s 클러스터로 묶고, CCTV 관제에 필요한 백엔드 서비스를 역할별로 분산 배치하기 위한 매니페스트와 구성 파일을 모아둔 디렉터리입니다. 이 문서는 각 컴포넌트가 어떤 역할을 맡고, 어떤 경로로 트래픽이 흐르며, 어떤 순서로 배포되는지를 상세히 설명합니다.
 
+열화상 스트리밍 경로도 이 디렉터리 구조 안에 포함되었습니다. 현재 열화상은 `Hardware UDP ingress -> nginx UDP gateway -> crow-server ThermalProxy -> WSS -> Qt Client` 구조로 동작합니다. 열화상 프로토콜 관점의 자세한 설명은 `THERMAL_STREAMING_NETWORK_PROTOCOL.md`를 함께 참고하면 됩니다.
+
 ## Overview
 | Component | Role | Main Files |
 |---|---|---|
-| Nginx Gateway | 외부 진입점, TLS/mTLS 종료, 내부 서비스 라우팅 | `nginx/nginx.conf`, `nginx/nginx-deployment.yaml` |
-| Crow Server | REST API, SUNAPI 프록시, MQTT 연동, CCTV 백엔드 제어 | `crow_server/crow-server.yaml` |
+| Nginx Gateway | 외부 진입점, TLS/mTLS 종료, HTTP/WSS/UDP 게이트웨이 | `nginx/nginx.conf`, `nginx/nginx-deployment.yaml` |
+| Crow Server | REST API, SUNAPI 프록시, MQTT 연동, CCTV 백엔드 제어, 열화상 UDP-WSS 브리지 | `crow_server/crow-server.yaml` |
 | MediaMTX | RTSP/RTSPS/HLS/WebRTC 스트리밍 및 녹화 | `mediamtx/mediamtx.yaml`, `mediamtx/mediamtx.yml` |
 | Mosquitto | MQTT 브로커, mTLS 기반 장치 인증 | `mosquitto/mqtt.yaml`, `mosquitto/mosquitto.conf` |
 | MariaDB | 사용자 및 서비스 데이터 저장 | `mariadb/mariadb-deploy.yaml`, `mariadb/mariadb-init.yaml` |
@@ -15,33 +17,39 @@
 
 ## Architecture Diagram
 ```text
-                                  External Clients
+                            External Clients / Hardware
                   +------------------------------------------------+
-                  | Qt Client / Device / CCTV / Admin Tools        |
+                  | Qt Client / Thermal HW / Device / CCTV / Admin |
                   +------------------------+-----------------------+
                                            |
-                         HTTPS(443), RTSPS(8555), MQTTS(8883)
+              HTTPS/WSS(443), RTSPS(8555), MQTTS(8883), UDP(5005)
                                            |
                                    +-------v--------+
                                    | Nginx Gateway  |
                                    | TLS / mTLS     |
+                                   | HTTP/WSS/UDP   |
                                    | LoadBalancer   |
-                                   +---+--------+---+
-                                       |        |
-                         HTTP proxy ----+        +---- TCP stream proxy
-                                       |        |
-             +-------------------------+        +-------------------------+
-             |                                                          |
-     +-------v--------+                                        +--------v--------+
-     | Crow Server    |                                        | MediaMTX / MQTT |
-     | API / Proxy    |                                        | Stream / Broker |
-     +---+--------+---+                                        +-----+-------+---+
-         |        |                                                  |       |
-         |        +--> MariaDB                                       |       +--> Mosquitto
-         |                                                           |
-         +--> CCTV Backend (depth / inference server)                +--> Camera RTSP ingest
+                                   +---+--------+--------+
+                                       |        |        |
+                         HTTP proxy ----+        |        +---- UDP stream proxy
+                                                |
+                                 TCP stream proxy
+                                       |
+              +------------------------+-------------------------------+
+              |                                                        |
+     +--------v---------+                                   +----------v-------+
+     | Crow Server      |                                   | MediaMTX / MQTT  |
+     | API / Proxy      |                                   | Stream / Broker  |
+     | ThermalProxy     |                                   +-----+--------+---+
+     +---+---------+----+                                         |        |
+         |         |                                              |        +--> Mosquitto
+         |         +--> MariaDB                                   |
+         |                                                        +--> Camera RTSP ingest
+         +--> CCTV Backend (depth / inference server)
          |
          +--> SUNAPI camera HTTP / WebSocket proxy
+         |
+         +--> Thermal UDP recvfrom() -> WSS binary broadcast
 
       K3s cluster schedules these workloads across Raspberry Pi master/worker nodes.
 ```
@@ -69,6 +77,8 @@
 
 - `443/tcp`
   HTTPS 및 WebSocket 요청 수신
+- `5005/udp`
+  열화상 raw frame ingress 수신 및 내부 UDP 프록시
 - `8554/tcp`
   내부 RTSP 프록시
 - `8555/tcp`
@@ -79,8 +89,10 @@
 `nginx/nginx.conf` 기준 주요 역할:
 - HTTP 80 포트를 443으로 리다이렉트
 - `/` 요청을 `crow-server-service:8080`으로 프록시
+- `/thermal/stream` WebSocket upgrade 요청을 Crow Server로 프록시
 - `/sunapi/` 및 `/sunapi/StreamingServer` 요청을 Crow Server로 프록시
 - `/hls/` 요청을 `mediamtx-service:8888`로 프록시
+- 외부 `5005/UDP`를 내부 `crow-server-service:5005/UDP`로 프록시
 - `8554` RTSP 트래픽을 MediaMTX로 포워딩
 - `8883` MQTTS 트래픽을 Mosquitto로 포워딩
 
@@ -99,6 +111,8 @@
 - SUNAPI WebSocket 프록시
 - MQTT 브로커와 연동
 - CCTV 백엔드 서버와 연동
+- 열화상 제어 API 제공
+- 열화상 UDP 수신 및 WSS binary 브로드캐스트
 - DB 조회 및 사용자 데이터 처리
 
 `crow_server/crow-server.yaml` 기준 의존성:
@@ -109,6 +123,7 @@
 - 녹화 디렉터리 공유: `/home/pi/cctv-recordings`
 
 즉, Crow Server는 클러스터 내부 서비스와 외부 CCTV/카메라 제어 계층을 연결하는 중앙 백엔드 역할을 맡습니다.
+이번 작업 기준으로는 `ThermalProxy`가 추가되어, 열화상에 대해서는 `POST /thermal/control/start`, `POST /thermal/control/stop`, `GET /thermal/status`, `WS /thermal/stream` 경로를 제공하고 UDP payload를 WSS로 중계합니다.
 
 ### MediaMTX
 `mediamtx`는 스트리밍 허브입니다.
@@ -170,18 +185,29 @@
 3. 요청을 `crow-server-service:8080`으로 프록시합니다.
 4. Crow Server가 DB, MQTT, CCTV 백엔드와 연동해 응답합니다.
 
-### 2. SUNAPI Proxy
+### 2. Thermal Streaming
+1. Qt 클라이언트가 `POST /thermal/control/start`를 호출합니다.
+2. Nginx가 HTTPS 요청을 `crow-server-service:8080`으로 프록시합니다.
+3. Crow Server의 `ThermalProxy`가 JWT를 검증하고 열화상 receiver 상태를 준비합니다.
+4. Qt 클라이언트가 `wss://<LB_IP>/thermal/stream`으로 연결합니다.
+5. Nginx가 `/thermal/stream` WebSocket upgrade를 Crow Server로 전달합니다.
+6. 하드웨어는 `nginx-service external IP:5005/UDP`로 열화상 chunk를 전송합니다.
+7. Nginx stream proxy가 내부 `crow-server-service:5005/UDP`로 전달합니다.
+8. Crow Server가 UDP datagram을 수신하고 그대로 WebSocket binary message로 브로드캐스트합니다.
+9. Qt 클라이언트가 frame 단위로 chunk를 재조립해 열화상 화면을 표시합니다.
+
+### 3. SUNAPI Proxy
 1. 클라이언트가 `/sunapi/...` 또는 `/sunapi/StreamingServer`로 요청합니다.
 2. Nginx가 장치 인증 결과를 헤더에 포함해 Crow Server로 전달합니다.
 3. Crow Server가 카메라 SUNAPI HTTP/WebSocket으로 중계합니다.
 
-### 3. Streaming
+### 4. Streaming
 1. MediaMTX가 카메라 RTSP를 FFmpeg로 ingest합니다.
 2. 내부에서 `main/sub` 경로로 재게시합니다.
 3. 외부 사용자는 Nginx 또는 MediaMTX Service를 통해 스트림에 접근합니다.
 4. `main` 스트림은 녹화 파일을 `/recordings`에 저장합니다.
 
-### 4. MQTT
+### 5. MQTT
 1. 장치 또는 클라이언트가 `8883`으로 접속합니다.
 2. Nginx가 mTLS를 검증합니다.
 3. 트래픽을 내부 `mqtt-service:1883`으로 포워딩합니다.
@@ -216,6 +242,11 @@
 - MQTTS, RTSPS, HTTPS 모두 mTLS 적용 대상이 될 수 있습니다.
 - 내부 서비스는 ClusterIP로 숨겨 외부 직접 접근을 제한합니다.
 
+열화상 스트리밍 관련 추가 유의점:
+- Qt와 Crow Server 사이의 열화상 제어/스트림은 `HTTPS/WSS` 위에서 JWT 및 TLS 보호를 받습니다.
+- 반면 하드웨어에서 유입되는 `5005/UDP` thermal ingress는 HTTP 계층 인증이 없으므로, 송신 IP 제한이나 별도 네트워크 격리가 중요합니다.
+- 이번 구조에서는 외부 공개 포트를 `nginx` 하나로 모았지만, UDP는 애플리케이션 레벨 인증 대신 네트워크 정책으로 제어하는 것이 핵심입니다.
+
 운영 시 유의점:
 - 현재 `security/certs/`에 실제 인증서 파일이 존재합니다.
 - 실서비스에서는 민감 파일을 저장소에 직접 두지 않고 Kubernetes Secret 또는 외부 비밀 관리 체계로 옮기는 편이 안전합니다.
@@ -231,7 +262,7 @@
 6. MediaMTX ConfigMap, Secret, Deployment를 배포합니다.
 7. Crow Server용 ConfigMap, Secret, Deployment를 배포합니다.
 8. Nginx Gateway Deployment와 Service를 배포합니다.
-9. 외부 IP가 할당되면 HTTPS, MQTTS, RTSPS 동작을 점검합니다.
+9. 외부 IP가 할당되면 HTTPS, WSS, MQTTS, RTSPS, thermal `5005/UDP` 동작을 점검합니다.
 
 ## Operational Procedure
 아래 절차는 현재 저장소에 있는 매니페스트 기준으로 클러스터를 실제 배포할 때 사용할 수 있는 예시입니다. 운영 환경에 맞게 IP, 계정, 인증서 파일명은 반드시 교체해야 합니다.
@@ -413,6 +444,8 @@ kubectl get pods -l app=crow-server -o wide
 kubectl get svc crow-server-service
 ```
 
+열화상 기능이 포함된 현재 매니페스트에서는 `crow-server-service`가 내부 `8080/TCP`뿐 아니라 `5005/UDP`도 함께 노출합니다.
+
 ### 9. Nginx Gateway Apply
 마지막으로 외부 진입점을 올립니다.
 
@@ -426,7 +459,11 @@ kubectl get pods -l app=nginx-gateway -o wide
 kubectl get svc nginx-service
 ```
 
-`nginx-service`가 `LoadBalancer` 타입이므로 외부 IP가 붙는지 확인합니다.
+`nginx-service`가 `LoadBalancer` 타입이므로 외부 IP가 붙는지 확인합니다. 현재 구조에서는 외부 클라이언트의 `443/TCP`와 하드웨어 열화상 입력용 `5005/UDP` 모두 이 게이트웨이를 통해 들어옵니다.
+
+주의:
+- `nginx.conf`는 현재 ConfigMap 마운트가 아니라 이미지 안에 포함되는 구조이므로, 설정을 바꿨다면 단순 `kubectl apply`만으로는 반영되지 않을 수 있습니다.
+- `/thermal/stream` WebSocket 또는 `5005/UDP` 라우팅을 수정했다면 `nginx-gateway` 이미지를 다시 빌드하고 배포하는 절차가 필요할 수 있습니다.
 
 ### 10. Full Apply Example
 한 번에 순서대로 적용하는 예시는 다음과 같습니다.
@@ -468,11 +505,21 @@ openssl s_client -connect <LB_IP>:8883 -cert client-qt.crt -key client-qt.key -C
 openssl s_client -connect <LB_IP>:8555 -cert client-qt.crt -key client-qt.key -CAfile rootCA.crt
 ```
 
+열화상 기능 점검 예시:
+- `POST /thermal/control/start`가 `202`를 반환하는지 확인합니다.
+- nginx access log에서 `GET /thermal/stream HTTP/1.1" 101`이 보이는지 확인합니다.
+- `GET /thermal/status`에서 `udp_bound=true`, `ws_clients > 0`, `packets_received` 증가 여부를 확인합니다.
+- 하드웨어가 `nginx-service external IP:5005/UDP`로 전송하는지 확인합니다.
+
 ### 12. Update And Restart
 설정 변경 후 재적용:
 ```bash
 kubectl apply -f <updated-yaml>
 ```
+
+열화상 관련 주의:
+- `crow-server.yaml` 변경은 일반적인 `kubectl apply`와 rollout restart로 반영 가능합니다.
+- `nginx/nginx.conf` 변경은 이미지 재빌드가 필요할 수 있으므로, 운영 절차에서 별도로 관리하는 편이 안전합니다.
 
 강제 재시작:
 ```bash
@@ -496,6 +543,7 @@ kubectl rollout status deploy/nginx-gateway
 ```text
 RaspberryPi/k3s-cluster/
   README.md
+  THERMAL_STREAMING_NETWORK_PROTOCOL.md
   crow_server/
     crow-server.yaml
     Dockerfile
