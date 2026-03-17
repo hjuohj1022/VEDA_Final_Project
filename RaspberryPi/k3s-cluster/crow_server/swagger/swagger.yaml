@@ -1579,6 +1579,172 @@ paths:
         '101':
           description: WebSocket 프로토콜 전환
 
+  /thermal/control/start:
+    post:
+      summary: 열화상 스트림 수신 시작
+      description: |
+        서버 쪽 UDP 수신기를 준비하고 WebSocket 열화상 스트림 사용 정보를 반환합니다.
+        실제 열화상 프레임은 '/thermal/stream' WebSocket에서 binary message로 전달됩니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: 열화상 스트림 준비 요청 accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  stream:
+                    type: string
+                    example: thermal16
+                  transport:
+                    type: string
+                    example: websocket
+                  ws_path:
+                    type: string
+                    example: /thermal/stream
+                  udp_bind_host:
+                    type: string
+                    example: 0.0.0.0
+                  udp_port:
+                    type: integer
+                    example: 5005
+                  format:
+                    type: object
+                    properties:
+                      width:
+                        type: integer
+                        example: 160
+                      height:
+                        type: integer
+                        example: 120
+                      pixel:
+                        type: string
+                        example: u16be
+                      header_bytes:
+                        type: integer
+                        example: 10
+                      frame_bytes:
+                        type: integer
+                        example: 38400
+        '401':
+          description: Unauthorized
+
+  /thermal/control/stop:
+    post:
+      summary: 열화상 스트림 수신 종료 요청
+      description: |
+        WebSocket 클라이언트가 모두 빠진 상태라면 서버 UDP 수신기를 정리합니다.
+        활성 클라이언트가 남아 있으면 수신기는 계속 유지됩니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: 종료 요청 accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  note:
+                    type: string
+                    example: receiver stops when no WebSocket clients remain
+        '401':
+          description: Unauthorized
+
+  /thermal/status:
+    get:
+      summary: 열화상 수신 상태 조회
+      description: 현재 UDP bind 상태, WebSocket 클라이언트 수, 최근 수신 chunk 메타데이터를 조회합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 상태 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  stream:
+                    type: string
+                    example: thermal16
+                  udp_bound:
+                    type: boolean
+                  receiver_running:
+                    type: boolean
+                  udp_bind_host:
+                    type: string
+                    example: 0.0.0.0
+                  udp_port:
+                    type: integer
+                    example: 5005
+                  ws_clients:
+                    type: integer
+                  last_frame_id:
+                    type: integer
+                  last_chunk_index:
+                    type: integer
+                  last_total_chunks:
+                    type: integer
+                  last_min_val:
+                    type: integer
+                  last_max_val:
+                    type: integer
+                  last_packet_bytes:
+                    type: integer
+                  last_packet_at_ms:
+                    type: integer
+                  packets_received:
+                    type: integer
+                  bytes_received:
+                    type: integer
+                  last_error:
+                    type: string
+                  format:
+                    type: object
+                    properties:
+                      width:
+                        type: integer
+                        example: 160
+                      height:
+                        type: integer
+                        example: 120
+                      pixel:
+                        type: string
+                        example: u16be
+                      header_bytes:
+                        type: integer
+                        example: 10
+                      frame_bytes:
+                        type: integer
+                        example: 38400
+        '401':
+          description: Unauthorized
+
+  /thermal/stream:
+    get:
+      summary: 열화상 스트림 WebSocket
+      description: |
+        Authorization Bearer JWT가 포함된 WebSocket handshake로 접속합니다.
+        서버는 ESP32가 보낸 UDP datagram 원본을 그대로 binary message로 재브로드캐스트합니다.
+        각 binary message 형식은 '10B header + thermal payload'이며 header는 big-endian입니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '101':
+          description: WebSocket protocol switch
+
 components:
   securitySchemes:
     bearerAuth:

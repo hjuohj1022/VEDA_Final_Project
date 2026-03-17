@@ -6,6 +6,7 @@
 #include "../include/EspHealthManager.h"
 #include "../include/MqttManager.h"
 #include "../include/MotorManager.h"
+#include "../include/ThermalProxy.h"
 #include <jwt-cpp/jwt.h> 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -1363,6 +1364,7 @@ int main()
     
     // CCTV 라우트 등록
     registerCctvProxyRoutes(app, cctv_mgr);
+    registerThermalProxyRoutes(app);
 
     const char* mqtt_host = std::getenv("MQTT_HOST") ? std::getenv("MQTT_HOST") : "mqtt-service";
     int mqtt_port = std::getenv("MQTT_PORT") ? std::atoi(std::getenv("MQTT_PORT")) : 1883;
@@ -2065,5 +2067,6 @@ int main()
     });
         
     app.port(8080).multithreaded().run();
+    shutdownThermalProxy();
     shutdownCctvProxyWorker();
 }
