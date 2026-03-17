@@ -4,5 +4,9 @@
 #define APP_WIFI_SSID "6th_team3_5G"
 #define APP_WIFI_PASS "6th_team3"
 #define APP_MQTT_BROKER_URI "mqtts://192.168.55.200:8883"
+#define APP_UDP_TARGET_IP "192.168.55.14"
+#define APP_UDP_TARGET_PORT 5005
+#define APP_FRAME_STREAM_MODE 1
+#define APP_UDP_FRAME_8BIT 1
 
 #endif

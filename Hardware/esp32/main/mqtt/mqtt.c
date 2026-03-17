@@ -1,4 +1,6 @@
 #include "mqtt.h"
+#include "udp_stream.h"
+#include "wifi.h"
 #include "../device/frame_link.h"
 #include "../device/cmd_uart.h"
 #include "esp_system.h"
@@ -25,11 +27,106 @@ static int64_t                  s_last_connect_us = 0;
 static int64_t                  s_next_health_publish_us = 0;
 
 #define MQTT_FRAME_CHUNK_RETRY_DELAY_MS  25U
-#define MQTT_FRAME_CHUNK_DELAY_MS        4U
-#define MQTT_FRAME_BACKOFF_DELAY_MS      20U
+#define MQTT_FRAME_CHUNK_DELAY_MS        2U
+#define MQTT_FRAME_BACKOFF_DELAY_MS      0U
 #define MQTT_FRAME_IDLE_DELAY_MS         10U
+#define UDP_FAST_FRAME_IDLE_DELAY_MS     1U
+#define UDP_FAST_FRAME_YIELD_TICKS       1U
+#define UDP_FAST_CHUNK_YIELD_INTERVAL    4U
 #define MQTT_HEALTH_TASK_POLL_MS         250U
 #define MQTT_HEALTH_PERIOD_US            (60000000LL)
+#define FRAME_PIXEL_COUNT                (FRAME_BYTES / 2U)
+#define THERMAL_VALID_MIN_RAW            1000U
+#define THERMAL_VALID_MAX_RAW            30000U
+#define THERMAL_MIN_SPAN_RAW             100U
+
+static TickType_t delayTicksAtLeast1(uint32_t delay_ms)
+{
+    const TickType_t ticks = pdMS_TO_TICKS(delay_ms);
+    return (ticks > 0U) ? ticks : 1U;
+}
+
+static bool frameStreamUseMqtt(void)
+{
+    return (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_MQTT_ONLY) ||
+           (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH);
+}
+
+static bool frameStreamUseUdp(void)
+{
+    return ((APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_ONLY) ||
+            (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH)) &&
+           udpStreamIsEnabled();
+}
+
+static bool frameStreamUseUdpFast8(void)
+{
+    return (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_ONLY) &&
+           (APP_UDP_FRAME_8BIT != 0) &&
+           udpStreamIsEnabled();
+}
+
+static uint16_t frameReadPixelBe(const uint8_t *frame_buf, size_t pixel_idx)
+{
+    const size_t offset = pixel_idx * 2U;
+
+    return (uint16_t)(((uint16_t)frame_buf[offset] << 8U) | (uint16_t)frame_buf[offset + 1U]);
+}
+
+static void frameComputeRange(const uint8_t *frame_buf, uint16_t *min_val, uint16_t *max_val)
+{
+    uint16_t min_pixel = 0xFFFFU;
+    uint16_t max_pixel = 0U;
+    bool has_valid_pixel = false;
+
+    for (size_t pixel_idx = 0U; pixel_idx < FRAME_PIXEL_COUNT; pixel_idx++) {
+        const uint16_t pixel = frameReadPixelBe(frame_buf, pixel_idx);
+
+        if ((pixel <= THERMAL_VALID_MIN_RAW) || (pixel >= THERMAL_VALID_MAX_RAW)) {
+            continue;
+        }
+
+        has_valid_pixel = true;
+        if (pixel < min_pixel) {
+            min_pixel = pixel;
+        }
+        if (pixel > max_pixel) {
+            max_pixel = pixel;
+        }
+    }
+
+    if (!has_valid_pixel) {
+        min_pixel = 7000U;
+        max_pixel = 10000U;
+    } else if ((max_pixel - min_pixel) < THERMAL_MIN_SPAN_RAW) {
+        max_pixel = min_pixel + THERMAL_MIN_SPAN_RAW;
+    }
+
+    *min_val = min_pixel;
+    *max_val = max_pixel;
+}
+
+static void framePack8BitChunk(uint8_t *dst,
+                               const uint8_t *frame_buf,
+                               size_t pixel_offset,
+                               size_t pixel_count,
+                               uint16_t min_val,
+                               uint16_t max_val)
+{
+    const uint32_t range = (max_val > min_val) ? (uint32_t)(max_val - min_val) : 1U;
+
+    for (size_t i = 0U; i < pixel_count; i++) {
+        uint16_t pixel = frameReadPixelBe(frame_buf, pixel_offset + i);
+
+        if (pixel < min_val) {
+            pixel = min_val;
+        } else if (pixel > max_val) {
+            pixel = max_val;
+        }
+
+        dst[i] = (uint8_t)((((uint32_t)(pixel - min_val)) * 255U) / range);
+    }
+}
 
 static bool mqttTopicEquals(const esp_mqtt_event_handle_t event, const char *topic)
 {
@@ -238,7 +335,6 @@ esp_mqtt_client_handle_t mqttClient(void)
 void mqttFrameTask(void *arg)
 {
     uint8_t msg[CHUNK_MSG_SIZE];
-    const uint16_t total_chunks = (uint16_t)((FRAME_BYTES + CHUNK_PAYLOAD_SIZE - 1U) / CHUNK_PAYLOAD_SIZE);
     (void)arg;
 
     for (;;) {
@@ -246,39 +342,68 @@ void mqttFrameTask(void *arg)
         uint16_t frame_id = 0U;
         int buffer_idx = -1;
 
-        if ((s_mqtt_connected == false) || (s_client == NULL)) {
-            vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_IDLE_DELAY_MS));
+        const bool use_mqtt = frameStreamUseMqtt();
+        const bool use_udp = frameStreamUseUdp();
+        const bool use_udp_fast8 = frameStreamUseUdpFast8();
+        const bool drop_stale_frames = !use_udp_fast8;
+        const size_t frame_payload_bytes = use_udp_fast8 ? FRAME_PIXEL_COUNT : FRAME_BYTES;
+        const uint16_t total_chunks =
+            (uint16_t)((frame_payload_bytes + CHUNK_PAYLOAD_SIZE - 1U) / CHUNK_PAYLOAD_SIZE);
+        const bool verbose_frame_log = use_mqtt;
+        const TickType_t idle_delay_ticks = delayTicksAtLeast1(use_udp_fast8
+                                                               ? UDP_FAST_FRAME_IDLE_DELAY_MS
+                                                               : MQTT_FRAME_IDLE_DELAY_MS);
+
+        if (!use_mqtt && !use_udp) {
+            vTaskDelay(idle_delay_ticks);
             continue;
         }
 
-        if ((esp_timer_get_time() - s_last_connect_us) < 1000000LL) {
-            vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_BACKOFF_DELAY_MS));
+        if (use_udp && !wifiIsConnected()) {
+            vTaskDelay(idle_delay_ticks);
             continue;
         }
 
-        if (!frameLinkAcquireReadyFrame(&fb, &frame_id, &buffer_idx)) {
-            vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_IDLE_DELAY_MS));
+        if (use_mqtt && ((s_mqtt_connected == false) || (s_client == NULL))) {
+            vTaskDelay(idle_delay_ticks);
             continue;
         }
 
-        const uint16_t min_val = 7000U;
-        const uint16_t max_val = 10000U;
+        if (use_mqtt && ((esp_timer_get_time() - s_last_connect_us) < 1000000LL)) {
+            vTaskDelay(delayTicksAtLeast1(MQTT_FRAME_IDLE_DELAY_MS));
+            continue;
+        }
+
+        if (!frameLinkAcquireReadyFrame(&fb, &frame_id, &buffer_idx, drop_stale_frames)) {
+            vTaskDelay(idle_delay_ticks);
+            continue;
+        }
+
+        uint16_t min_val = 7000U;
+        uint16_t max_val = 10000U;
         bool send_ok = true;
         int failed_chunk = -1;
 
-        (void)printf("Sending frame id=%u from buffer=%d\n", (unsigned int)frame_id, buffer_idx);
+        if (use_udp_fast8) {
+            frameComputeRange(fb, &min_val, &max_val);
+        }
+
+        if (verbose_frame_log) {
+            (void)printf("Sending frame id=%u from buffer=%d\n", (unsigned int)frame_id, buffer_idx);
+        }
 
         for (uint16_t i = 0U; i < total_chunks; i++) {
-            if (s_mqtt_connected == false) {
+            if (use_mqtt && (s_mqtt_connected == false)) {
                 send_ok = false;
                 failed_chunk = (int)i;
                 break;
             }
 
             const size_t offset = (size_t)i * (size_t)CHUNK_PAYLOAD_SIZE;
-            const size_t data_size = ((FRAME_BYTES - offset) > (size_t)CHUNK_PAYLOAD_SIZE)
+            const size_t bytes_remaining = frame_payload_bytes - offset;
+            const size_t data_size = (bytes_remaining > (size_t)CHUNK_PAYLOAD_SIZE)
                                    ? (size_t)CHUNK_PAYLOAD_SIZE
-                                   : (FRAME_BYTES - offset);
+                                   : bytes_remaining;
 
             msg[0] = (uint8_t)((frame_id >> 8) & 0xFFU);
             msg[1] = (uint8_t)(frame_id & 0xFFU);
@@ -290,49 +415,71 @@ void mqttFrameTask(void *arg)
             msg[7] = (uint8_t)(min_val & 0xFFU);
             msg[8] = (uint8_t)((max_val >> 8) & 0xFFU);
             msg[9] = (uint8_t)(max_val & 0xFFU);
-            (void)memcpy(&msg[CHUNK_HEADER_SIZE], &fb[offset], data_size);
+            if (use_udp_fast8) {
+                framePack8BitChunk(&msg[CHUNK_HEADER_SIZE], fb, offset, data_size, min_val, max_val);
+            } else {
+                (void)memcpy(&msg[CHUNK_HEADER_SIZE], &fb[offset], data_size);
+            }
 
-            int32_t retry_count = 0;
-            int32_t ret = -1;
-            while (retry_count < 3) {
-                ret = (int32_t)esp_mqtt_client_publish(s_client,
-                                                       CHUNK_TOPIC,
-                                                       (const char *)msg,
-                                                       (int)(CHUNK_HEADER_SIZE + data_size),
-                                                       0,
-                                                       0);
-                if (ret >= 0) {
-                    break;
+            if (use_mqtt) {
+                int32_t retry_count = 0;
+                int32_t ret = -1;
+                while (retry_count < 3) {
+                    ret = (int32_t)esp_mqtt_client_publish(s_client,
+                                                           CHUNK_TOPIC,
+                                                           (const char *)msg,
+                                                           (int)(CHUNK_HEADER_SIZE + data_size),
+                                                           0,
+                                                           0);
+                    if (ret >= 0) {
+                        break;
+                    }
+
+                    (void)printf("Chunk send failed: frame=%u chunk=%u ret=%d retry=%d/3\n",
+                                 (unsigned int)frame_id,
+                                 (unsigned int)i,
+                                 (int)ret,
+                                 (int)(retry_count + 1));
+                    vTaskDelay(delayTicksAtLeast1(MQTT_FRAME_CHUNK_RETRY_DELAY_MS));
+                    retry_count++;
                 }
 
-                (void)printf("Chunk send failed: frame=%u chunk=%u ret=%d retry=%d/3\n",
-                             (unsigned int)frame_id,
-                             (unsigned int)i,
-                             (int)ret,
-                             (int)(retry_count + 1));
-                vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_CHUNK_RETRY_DELAY_MS));
-                retry_count++;
+                if (ret < 0) {
+                    send_ok = false;
+                    failed_chunk = (int)i;
+                    break;
+                }
             }
 
-            if (ret < 0) {
-                send_ok = false;
-                failed_chunk = (int)i;
-                break;
+            if (use_udp) {
+                const int udp_sent = udpStreamSend(msg, CHUNK_HEADER_SIZE + data_size);
+                if (udp_sent < 0) {
+                    (void)printf("UDP send failed: frame=%u chunk=%u len=%u\n",
+                                 (unsigned int)frame_id,
+                                 (unsigned int)i,
+                                 (unsigned int)(CHUNK_HEADER_SIZE + data_size));
+                }
+                if (use_udp_fast8 &&
+                    ((((uint16_t)(i + 1U)) % UDP_FAST_CHUNK_YIELD_INTERVAL) == 0U)) {
+                    vTaskDelay(UDP_FAST_FRAME_YIELD_TICKS);
+                }
             }
 
-            if ((i == 0U) || (((i + 1U) % 8U) == 0U) || ((i + 1U) == total_chunks)) {
+            if (verbose_frame_log && ((i == 0U) || ((i + 1U) == total_chunks))) {
                 (void)printf("Frame chunk progress: id=%u chunk=%u/%u\n",
                              (unsigned int)frame_id,
                              (unsigned int)(i + 1U),
                              (unsigned int)total_chunks);
             }
 
-            vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_CHUNK_DELAY_MS));
+            if ((MQTT_FRAME_CHUNK_DELAY_MS > 0U) && !use_udp_fast8) {
+                vTaskDelay(delayTicksAtLeast1(MQTT_FRAME_CHUNK_DELAY_MS));
+            }
         }
 
-        if (send_ok) {
+        if (send_ok && verbose_frame_log) {
             (void)printf("Frame sent OK: id=%u\n", (unsigned int)frame_id);
-        } else {
+        } else if (!send_ok) {
             (void)printf("Frame send incomplete: id=%u failed_chunk=%d/%u\n",
                          (unsigned int)frame_id,
                          failed_chunk + 1,
@@ -340,7 +487,12 @@ void mqttFrameTask(void *arg)
         }
 
         frameLinkReleaseReadyFrame(buffer_idx);
-        vTaskDelay(pdMS_TO_TICKS(MQTT_FRAME_BACKOFF_DELAY_MS));
+        if (use_udp_fast8) {
+            // Let IDLE run often enough to satisfy the task watchdog under sustained UDP load.
+            vTaskDelay(UDP_FAST_FRAME_YIELD_TICKS);
+        } else if (MQTT_FRAME_BACKOFF_DELAY_MS > 0U) {
+            vTaskDelay(delayTicksAtLeast1(MQTT_FRAME_BACKOFF_DELAY_MS));
+        }
     }
 }
 

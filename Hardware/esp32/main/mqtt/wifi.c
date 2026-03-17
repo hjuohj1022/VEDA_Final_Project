@@ -1,6 +1,18 @@
 #include "wifi.h"
 #include "mqtt.h"
+#include "udp_stream.h"
 #include "../device/cmd_uart.h"
+#if defined(__has_include)
+#if __has_include("../app_secrets.h")
+#include "../app_secrets.h"
+#else
+#include "../app_secrets.defaults.h"
+#endif
+#else
+#include "../app_secrets.defaults.h"
+#endif
+
+static volatile bool s_wifi_connected = false;
 
 static void wifiConfigureBandMode(void)
 {
@@ -37,7 +49,9 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
         }
         else if (event_id == (int32_t)WIFI_EVENT_STA_DISCONNECTED)
         {
+            s_wifi_connected = false;
             (void)printf("WiFi disconnected\n");
+            udpStreamReset();
             (void)esp_wifi_connect();
         }
         else
@@ -49,10 +63,16 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
     {
         if (event_id == (int32_t)IP_EVENT_STA_GOT_IP)
         {
+            s_wifi_connected = true;
             (void)printf("WiFi connected, got IP\n");
             (void)printf("Free heap: %lu\n", (uint32_t)esp_get_free_heap_size());
             cmdUartFlushInput();
-            (void)mqttClient();
+            (void)udpStreamInit();
+            if (APP_FRAME_STREAM_MODE != FRAME_STREAM_MODE_UDP_ONLY) {
+                (void)mqttClient();
+            } else {
+                (void)printf("MQTT client disabled by APP_FRAME_STREAM_MODE=UDP_ONLY\n");
+            }
         }
         else
         {
@@ -63,6 +83,11 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
     {
         /* Other event bases */
     }
+}
+
+bool wifiIsConnected(void)
+{
+    return s_wifi_connected;
 }
 
 esp_err_t wifiConnect(const wifi_config_t *conf)

@@ -14,6 +14,11 @@
 #include "app_secrets.defaults.h"
 #endif
 
+#define TASK_PRIO_FRAME_LINK   6U
+#define TASK_PRIO_FRAME_SEND   4U
+#define TASK_PRIO_CMD_UART     4U
+#define TASK_PRIO_HEALTH       2U
+
 esp_err_t systemInit(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -56,17 +61,17 @@ void app_main(void)
         (void)printf("STM32 command bridge disabled: %s\n", esp_err_to_name(ret));
     }
 
-    task_ok = xTaskCreate(frameLinkTask, "frame_link", 8192U, NULL, 5U, NULL);
+    task_ok = xTaskCreate(frameLinkTask, "frame_link", 8192U, NULL, TASK_PRIO_FRAME_LINK, NULL);
     (void)printf("Task create frame_link: %s\n", (task_ok == pdPASS) ? "OK" : "FAIL");
 
-    task_ok = xTaskCreate(mqttFrameTask, "mqtt_frame", 8192U, NULL, 5U, NULL);
+    task_ok = xTaskCreate(mqttFrameTask, "mqtt_frame", 8192U, NULL, TASK_PRIO_FRAME_SEND, NULL);
     (void)printf("Task create mqtt_frame: %s\n", (task_ok == pdPASS) ? "OK" : "FAIL");
 
-    task_ok = xTaskCreate(mqttHealthTask, "mqtt_health", 4096U, NULL, 4U, NULL);
+    task_ok = xTaskCreate(mqttHealthTask, "mqtt_health", 4096U, NULL, TASK_PRIO_HEALTH, NULL);
     (void)printf("Task create mqtt_health: %s\n", (task_ok == pdPASS) ? "OK" : "FAIL");
 
     if (cmd_uart_enabled) {
-        task_ok = xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, 5U, NULL);
+        task_ok = xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, TASK_PRIO_CMD_UART, NULL);
         (void)printf("Task create stm32_uart: %s\n", (task_ok == pdPASS) ? "OK" : "FAIL");
         (void)printf("STM32 command bridge enabled: UART1(GPIO8/9) -> USART1(PA9/PA10)\n");
     }

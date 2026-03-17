@@ -7,7 +7,11 @@
 #include "certs/cert.h"
 #include <stdbool.h>
 
-#define CHUNK_PAYLOAD_SIZE  1024
+#define FRAME_STREAM_MODE_MQTT_ONLY  0
+#define FRAME_STREAM_MODE_UDP_ONLY   1
+#define FRAME_STREAM_MODE_BOTH       2
+
+#define CHUNK_PAYLOAD_SIZE  1200
 #define CHUNK_HEADER_SIZE   10
 #define CHUNK_MSG_SIZE      (CHUNK_HEADER_SIZE + CHUNK_PAYLOAD_SIZE)
 #define CHUNK_TOPIC         "lepton/frame/chunk"

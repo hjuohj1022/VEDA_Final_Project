@@ -4,5 +4,9 @@
 #define APP_WIFI_SSID ""
 #define APP_WIFI_PASS ""
 #define APP_MQTT_BROKER_URI ""
+#define APP_UDP_TARGET_IP ""
+#define APP_UDP_TARGET_PORT 5005
+#define APP_FRAME_STREAM_MODE 2
+#define APP_UDP_FRAME_8BIT 1
 
 #endif

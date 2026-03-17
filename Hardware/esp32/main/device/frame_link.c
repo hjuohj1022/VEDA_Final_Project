@@ -88,7 +88,10 @@ static bool queueIsFull(void)
     return is_full;
 }
 
-bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf, uint16_t *frame_id, int *buffer_idx)
+bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf,
+                                uint16_t *frame_id,
+                                int *buffer_idx,
+                                bool drop_stale_frames)
 {
     bool ok = false;
 
@@ -99,7 +102,7 @@ bool frameLinkAcquireReadyFrame(const uint8_t **frame_buf, uint16_t *frame_id, i
     if ((s_frame_mutex != NULL) &&
         (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(20U)) == pdTRUE)) {
         if ((s_frame_ready > 0U) && (s_read_idx >= 0) && (s_read_idx < (int)s_allocated_buffers)) {
-            if ((s_allocated_buffers > 0U) && (s_frame_ready > 1U)) {
+            if (drop_stale_frames && (s_allocated_buffers > 0U) && (s_frame_ready > 1U)) {
                 const uint8_t dropped_count = (uint8_t)(s_frame_ready - 1U);
                 s_read_idx = (s_read_idx + (int)dropped_count) % (int)s_allocated_buffers;
                 s_stale_frame_drops += (uint32_t)dropped_count;

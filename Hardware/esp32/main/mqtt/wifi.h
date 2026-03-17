@@ -6,5 +6,6 @@
 #include "esp_netif.h"
 
 esp_err_t wifiConnect(const wifi_config_t *conf);
+bool wifiIsConnected(void);
 
 #endif
