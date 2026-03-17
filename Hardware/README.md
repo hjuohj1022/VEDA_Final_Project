@@ -1,122 +1,193 @@
-# Thermal Imaging & Remote Motor Control System
+# Thermal Imaging and Remote Actuation Hardware
 
-열화상 전송과 원격 모터 제어를 하나의 파이프라인으로 묶은 하드웨어 프로젝트다.
+이 저장소는 3개 보드가 협력하는 하드웨어 펌웨어를 담고 있습니다.
 
-- 열화상 경로: `Teensy -> ESP32 -> MQTT broker -> Python viewer`
-- 모터 제어 경로: `GUI/Server -> MQTT broker -> ESP32 -> UART -> STM32 -> PCA9685 -> Servo`
+- 열화상 경로: `Lepton -> Teensy 4.1 -> SPI frame link -> ESP32-C5 -> UDP 또는 MQTT`
+- 제어 경로: `Client/Server -> MQTT -> ESP32-C5 -> UART -> STM32F401RE -> PCA9685 -> Servo / Laser`
 
-현재 저장소 기준으로 문서는 다음 구현 상태를 반영한다.
+현재 코드 기준으로 활성 구현은 다음 경로에 있습니다.
 
-- MQTT/TLS 유지
-- ESP32 health topic 주기 발행 + 즉시 요청 응답
-- STM32 모터 명령의 엄격한 숫자 파싱
-- `release`와 `stop` 의미 분리
-- 연속 `press` 동작의 끝각도 자동 해제
+- `esp32/`: ESP-IDF 프로젝트, 실제 앱 소스는 `esp32/main/`
+- `STM32/SMT_SPI_Slave/`: STM32CubeIDE 기반 STM32F401RE 펌웨어
+- `teensy/TeensyC/`: Zephyr 기반 Teensy 4.1 펌웨어
+
+보조 코드도 함께 들어 있습니다.
+
+- `teensy/TeensyIno/`: Arduino/benchmark 스케치
+- `esp32/src/`: 이전 단계 소스 흔적
 
 ## 시스템 개요
 
 ```text
-[ GUI / Python Client ]
-          |
-          | MQTT
-          |  - motor/control
-          |  - motor/response
-          |  - system/status
-          |  - system/control
-          |  - lepton/frame/chunk
-          v
-[ MQTT Broker ] <---- TLS ----> [ ESP32-C3 ]
-                                     | \
-                                     |  \ SPI frame link
-                                     |   \------> thermal frame handling
-                                     |
-                                     | UART1 (GPIO21 / GPIO20)
-                                     v
-                               [ STM32F401RE ]
-                                     |
-                                     | I2C1 (PB8 / PB9)
-                                     v
-                                 [ PCA9685 ]
-                                     |
-                                     | PWM x3
-                                     v
-                              [ Servo Motors x3 ]
+[ Client / Server ]
+        |
+        | MQTT
+        |  - motor/control
+        |  - motor/response
+        |  - laser/control
+        |  - system/status
+        |  - system/control
+        v
+[ MQTT Broker ] <----------------------> [ ESP32-C5 ]
+                                              |
+                                              | UART1 115200 8N1
+                                              v
+                                        [ STM32F401RE ]
+                                              |
+                                              | I2C1
+                                              v
+                                          [ PCA9685 ]
+                                              |
+                                              +--> Servo 1
+                                              +--> Servo 2
+                                              +--> Servo 3
+                                              +--> Laser GPIO
+
+[ FLIR Lepton ] <--> [ Teensy 4.1 ] -- SPI frame link --> [ ESP32-C5 ]
+                                                        |
+                                                        +--> UDP frame stream (current default)
+                                                        +--> MQTT frame chunk publish (optional)
 ```
 
-## 핀맵
+## 보드별 역할
 
-### 1. ESP32-C3 <-> STM32F401RE UART
+### ESP32-C5
 
-| 기능 | ESP32-C3 | STM32F401RE |
-| --- | --- | --- |
-| UART TX | `GPIO21` | `PA10 (USART1_RX)` |
-| UART RX | `GPIO20` | `PA9 (USART1_TX)` |
-| GND | `GND` | `GND` |
+- Wi-Fi STA 연결 및 MQTT/TLS 클라이언트
+- STM32 명령 브리지: MQTT 명령을 UART로 전달하고 STM32 응답을 다시 MQTT로 publish
+- Teensy에서 들어오는 SPI frame link 패킷 수신 및 프레임 재조립
+- health/watchdog JSON publish
+- 기본 설정상 열화상 프레임은 UDP 8-bit 스트리밍 모드로 전송
 
-배선:
+### STM32F401RE
 
-- `ESP32 GPIO21 (TX)` -> `STM32 PA10 (RX)`
-- `ESP32 GPIO20 (RX)` <- `STM32 PA9 (TX)`
-- `GND` 공통
+- `USART1`로 ASCII 라인 명령 수신
+- `I2C1`로 PCA9685 제어
+- 서보 3축 제어 및 연속 이동 상태 관리
+- 레이저 GPIO on/off 처리
+- 부팅 시 I2C 스캔과 `READY` 응답 출력
 
-UART 설정:
+### Teensy 4.1
 
-- `115200 8N1`
-- 라인 종료: `\r`, `\n`, `\r\n`
+- FLIR Lepton 초기화 및 프레임 캡처
+- 프레임을 256바이트 chunk로 분할해 ESP32로 SPI 전송
+- 캡처 timeout 누적 시 Lepton reset
 
-### 2. STM32F401RE <-> PCA9685 I2C
+## 디렉터리 맵
 
-| 기능 | STM32F401RE | PCA9685 |
-| --- | --- | --- |
-| I2C SCL | `PB8` | `SCL` |
-| I2C SDA | `PB9` | `SDA` |
-| Power | `3V3 / 5V` | `VCC` |
-| GND | `GND` | `GND` |
-
-참고:
-
-- 현재 코드 기준 I2C 핀은 `PB8/PB9`
-- 예전 문서의 `PB6/PB7` 기준은 더 이상 사용하지 않음
-
-### 3. PCA9685 <-> Servo
-
-| PCA9685 채널 | Servo |
+| 경로 | 설명 |
 | --- | --- |
-| `CH0` | `motor1` |
-| `CH1` | `motor2` |
-| `CH2` | `motor3` |
+| `esp32/main/main.c` | ESP32 진입점 |
+| `esp32/main/device/frame_link.c` | Teensy -> ESP32 SPI slave 프레임 링크 |
+| `esp32/main/device/cmd_uart.c` | ESP32 <-> STM32 UART 브리지 |
+| `esp32/main/mqtt/mqtt.c` | MQTT/UDP 전송, health publish |
+| `STM32/SMT_SPI_Slave/Core/Src/main.c` | STM32 진입점, UART 명령 파서, 레이저 제어 |
+| `STM32/SMT_SPI_Slave/Core/Src/motor.c` | PCA9685 기반 3축 서보 제어 |
+| `teensy/TeensyC/src/main.c` | Lepton 캡처 및 SPI frame sender |
+| `command.md` | STM32 명령 레퍼런스 |
 
-### 4. Teensy <-> ESP32 열화상 SPI 링크
+## 인터페이스와 핀맵
 
-| 기능 | Teensy | ESP32-C3 |
+### ESP32-C5 <-> STM32F401RE UART
+
+코드 기준 UART 설정:
+
+- 포트: `UART1` <-> `USART1`
+- 속도: `115200 8N1`
+- 줄 종료: `\r`, `\n`, `\r\n`
+
+| 신호 | ESP32-C5 | STM32F401RE |
 | --- | --- | --- |
-| CS | `pin 0` | `GPIO7` |
-| MISO | `pin 1` | `GPIO5` |
-| MOSI | `pin 26` | `GPIO6` |
-| SCK | `pin 27` | `GPIO4` |
+| TX | `GPIO11` | `PA10 (USART1_RX)` |
+| RX | `GPIO12` | `PA9 (USART1_TX)` |
 | GND | `GND` | `GND` |
 
-## MQTT 토픽
+### STM32F401RE <-> PCA9685
 
-### 제어 / 응답
+| 신호 | STM32F401RE | PCA9685 |
+| --- | --- | --- |
+| SCL | `PB8` | `SCL` |
+| SDA | `PB9` | `SDA` |
+| VCC | `3V3/5V` | `VCC` |
+| GND | `GND` | `GND` |
+
+서보 매핑:
+
+- `CH0` -> `motor1`
+- `CH1` -> `motor2`
+- `CH2` -> `motor3`
+
+레이저 출력:
+
+- `PA5` -> Laser enable GPIO
+
+### Teensy 4.1 <-> FLIR Lepton
+
+| 기능 | Teensy 4.1 핀 |
+| --- | --- |
+| Lepton I2C SCL | `19` |
+| Lepton I2C SDA | `18` |
+| Lepton SPI CS | `10` |
+| Lepton SPI MOSI | `11` |
+| Lepton SPI MISO | `12` |
+| Lepton SPI SCK | `13` |
+
+### Teensy 4.1 <-> ESP32-C5 SPI frame link
+
+| 신호 | Teensy 4.1 | ESP32-C5 |
+| --- | --- | --- |
+| CS | `0` | `GPIO27` |
+| MOSI | `26` | `GPIO24` |
+| MISO | `1` | `GPIO25` |
+| SCK | `27` | `GPIO23` |
+| GND | `GND` | `GND` |
+
+패킷 형식:
+
+- 총 길이: `256 bytes`
+- 헤더: `14 bytes`
+- payload: `242 bytes`
+- 헤더 magic: `"TEST"`
+
+## 통신 프로토콜
+
+### MQTT 토픽
 
 | 토픽 | 방향 | 설명 |
 | --- | --- | --- |
-| `motor/control` | Client -> ESP32 | STM32로 전달할 모터 제어 명령 |
+| `motor/control` | Client -> ESP32 | STM32 서보 제어 명령 |
 | `motor/response` | STM32/ESP32 -> Client | STM32 응답 라인 |
-| `system/status` | ESP32 -> Client | ESP32 health / watchdog JSON |
-| `system/control` | Server -> ESP32 | watchdog/status 즉시 요청 |
+| `laser/control` | Client -> ESP32 | 레이저 on/off 명령 |
+| `system/status` | ESP32 -> Client | health/watchdog JSON |
+| `system/control` | Client -> ESP32 | `publish_status_now` 요청 |
+| `lepton/frame/chunk` | ESP32 -> Client | MQTT 프레임 chunk 전송 시 사용 |
+| `lepton/status` | ESP32 -> Client | Lepton 상태 메시지 |
 
-### 열화상
+### 현재 기본 프레임 전송 모드
 
-| 토픽 | 방향 | 설명 |
-| --- | --- | --- |
-| `lepton/frame/chunk` | ESP32 -> Client | 열화상 프레임 chunk |
-| `lepton/status` | ESP32 -> Client | 열화상 상태 메시지 |
+`esp32/main/app_secrets.defaults.h` 기준 기본값:
+
+- `APP_FRAME_STREAM_MODE = 3`
+- `APP_UDP_FRAME_8BIT = 1`
+
+즉 현재 기본 동작은 다음과 같습니다.
+
+- 제어/응답/health: MQTT 사용
+- 열화상 프레임: UDP 사용
+- UDP payload: 8-bit 정규화 프레임 chunk
+
+MQTT 프레임 전송은 지원되지만, 현재 기본 설정에서는 비활성입니다. 필요하면 `APP_FRAME_STREAM_MODE`를 변경해야 합니다.
+
+### UDP 스트리밍
+
+- 대상 IP: `APP_UDP_TARGET_IP`
+- 대상 포트: `APP_UDP_TARGET_PORT`
+- 코드 기본 포트: `5005`
+- 대상 주소가 비어 있으면 UDP 스트림 비활성
 
 ## STM32 명령 프로토콜
 
-STM32는 UART 라인 기반 ASCII 명령을 사용한다.
+STM32는 ASCII 라인 명령을 받습니다.
 
 지원 명령:
 
@@ -127,56 +198,43 @@ STM32는 UART 라인 기반 ASCII 명령을 사용한다.
 - `motor1 set 90`
 - `motor1 left 10`
 - `motor1 right 10`
+- `motor2 ...`
+- `motor3 ...`
 - `read`
 - `ping`
 - `stopall`
+- `LED ON`
+- `LED OFF`
+- `LASER ON`
+- `LASER OFF`
 - `help`
 
-주요 응답:
+대표 응답:
 
+- `BOOT USART1 PA9/PA10`
+- `I2C scan start`
+- `I2C 0x40`
 - `READY`
 - `OK 90 90 90`
 - `ANGLES 90 90 90`
 - `PONG`
+- `LED ON`
+- `LED OFF`
 - `ERR`
 - `ERR overflow`
 
-상세 명령 설명은 [command.md](/C:/Users/1-21/Desktop/MyGitMISRA/VEDA_Final_Project/Hardware/command.md)에 정리되어 있다.
+동작 규칙:
 
-## 각 보드 역할
+- `release`: PWM 출력을 끄고 holding torque도 해제
+- `stop`: 현재 각도 PWM은 유지하고 이동만 중단
+- `left press` / `right press`: 20ms 주기로 1도씩 연속 이동
+- 연속 이동 중 `0` 또는 `180`에 도달하면 자동 `release`
 
-### ESP32
+상세 명령 설명은 `command.md`를 참고하면 됩니다.
 
-- Teensy로부터 SPI로 열화상 frame 수신
-- `lepton/frame/chunk` 토픽으로 MQTT publish
-- `motor/control` 구독
-- 수신한 명령을 UART로 STM32에 전달
-- STM32 응답을 줄 단위로 `motor/response`에 재publish
-- `system/status` health JSON 발행
-- MQTT connect 후 `system/control` 구독
-- `system/control`에서 `publish_status_now` 요청을 받으면 즉시 `system/status` 1회 발행
+## Health JSON
 
-### STM32
-
-- `USART1 (PA9/PA10)`로 명령 수신
-- `I2C1 (PB8/PB9)`로 PCA9685 제어
-- `PCA9685 CH0/CH1/CH2`로 3개 서보 제어
-- `Motor_Update()` 루프로 연속 이동 처리
-
-### Teensy
-
-- Lepton 센서에서 frame 읽기
-- SPI frame link로 ESP32에 frame 전달
-- Lepton I2C/SPI 초기화 실패 시 재시도 및 오류 전파
-
-## ESP32 Health Topic
-
-`system/status`는 단순 로그 대체가 아니라, 현재 ESP32가 살아 있는지와 병목 위치가 어디인지 외부에서 판단하기 위한 운영용 토픽이다.
-
-### 발행 방식
-
-- 주기 발행: `60초`마다 `system/status`
-- 즉시 응답: `system/control`에서 `publish_status_now` 요청 수신 시 즉시 `system/status`
+`system/status`는 주기적으로 60초마다 publish되며, `system/control`에 `publish_status_now`를 보내면 즉시 한 번 더 publish됩니다.
 
 예시:
 
@@ -185,128 +243,99 @@ topic: system/control
 payload: publish_status_now
 ```
 
-예상 응답:
+주요 필드:
 
-```text
-topic: system/status
-payload: {"uptime_sec":123, ...}
-```
-
-### payload 형식
-
-ESP32는 JSON 문자열을 발행한다.
-
-예시:
-
-```json
-{
-  "uptime_sec": 123,
-  "wifi_connected": true,
-  "wifi_rssi": -61,
-  "mqtt_connected": true,
-  "free_heap": 65280,
-  "min_heap": 56596,
-  "cmd_queue_depth": 0,
-  "frame_packets": 3824,
-  "frame_completed": 1,
-  "frame_timeouts": 38,
-  "frame_errors": 0,
-  "bad_magic": 1169,
-  "bad_checksum": 1064,
-  "bad_len": 105,
-  "seq_errors": 1006,
-  "queue_full_drops": 0,
-  "frame_ready": 0
-}
-```
-
-### Server Watchdog API
-
-- `/esp32/watchdog/request`: MQTT `system/control`로 `publish_status_now` 요청 publish
-- server는 `system/status`를 계속 subscribe 하여 최신 health/watchdog 상태를 cache
-- `/esp32/watchdog/config`는 제거되었으며 더 이상 사용하지 않음
-
-### 필드 설명
-
-기본 상태:
-
-- `uptime_sec`: ESP32 부팅 후 경과 시간
+- `uptime_sec`: 부팅 후 경과 시간
 - `wifi_connected`: AP 연결 여부
-- `wifi_rssi`: 현재 Wi-Fi RSSI
-- `mqtt_connected`: MQTT broker 연결 여부
-
-메모리 / 큐:
-
+- `wifi_rssi`: 현재 RSSI
+- `mqtt_connected`: 브로커 연결 여부
 - `free_heap`: 현재 free heap
 - `min_heap`: 부팅 이후 최소 free heap
-- `cmd_queue_depth`: STM32 UART 명령 큐 적재 개수
-
-열화상 링크:
-
-- `frame_packets`: Teensy -> ESP32 총 수신 패킷
+- `cmd_queue_depth`: STM32 UART 명령 큐 적재량
+- `frame_packets`: Teensy -> ESP32 수신 packet 수
 - `frame_completed`: 완성된 frame 수
 - `frame_timeouts`: SPI receive timeout 누적
-- `frame_errors`: SPI driver 에러 누적
-- `bad_magic`: frame header magic mismatch
+- `frame_errors`: SPI driver error 누적
+- `bad_magic`: frame magic mismatch
 - `bad_checksum`: checksum mismatch
 - `bad_len`: payload length 오류
-- `seq_errors`: sequence 불일치
-- `queue_full_drops`: frame queue 가득 참으로 인한 drop
-- `frame_ready`: 아직 소비되지 않은 ready frame 개수
+- `seq_errors`: chunk 순서 불일치
+- `queue_full_drops`: frame buffer 부족 drop
+- `stale_frame_drops`: 오래된 frame drop
+- `frame_ready`: 아직 소비되지 않은 ready frame 수
 
-## 모터 동작 의미
+## 빌드와 실행
 
-현재 코드 기준으로 `release`와 `stop`은 다르게 동작한다.
+### ESP32
 
-- `motor<N> release`
-  - 현재 이동을 중단
-  - 해당 채널 PWM output을 끔
-  - 서보 holding torque를 해제
+로컬 설정 파일 생성:
 
-- `motor<N> stop`
-  - 현재 이동을 중단
-  - 현재 각도 PWM은 유지
-  - 즉, 현재 위치를 계속 잡고 있음
+1. `esp32/main/app_secrets.example.h`를 `esp32/main/app_secrets.h`로 복사
+2. Wi-Fi, MQTT broker, UDP target 값을 채움
 
-- 연속 `press` 동작
-  - `left press` / `right press`로 연속 이동 시작
-  - `release`가 없으면 계속 이동 가능
-  - 다만 현재 펌웨어는 `0도` 또는 `180도`에 도달하면 자동으로 `release` 처리해서 끝각도에서 계속 버티며 과열되는 상황을 줄임
+빌드:
 
-## 빠른 점검
-
-### Motor Path
-
-정상이라면 다음 흐름이 보여야 한다.
-
-- client가 `motor/control` publish
-- ESP32 로그에서 UART queue 적재 확인
-- STM32 응답이 `motor/response`로 publish
-
-예시:
-
-```text
-motor/control -> motor1 left press
-motor/response -> OK 91 90 90
+```powershell
+cd esp32
+idf.py set-target esp32c5
+idf.py build
 ```
 
-### Health Path
+플래시 및 모니터:
 
-정상이라면 broker subscriber에서 다음을 확인할 수 있어야 한다.
+```powershell
+idf.py -p COMx flash monitor
+```
 
-- `system/status`가 60초 주기로 도착
-- `/esp32/watchdog/request` 호출 직후 `system/status`가 즉시 도착
+비고:
 
-정상 상태 예시:
+- 인증서는 `esp32/main/certs/`에서 embed
+- 현재 ESP-IDF 빌드는 `esp32/main/` 소스를 사용
 
-- `wifi_connected=true`
-- `mqtt_connected=true`
-- `free_heap`가 급격히 0 근처로 내려가지 않음
-- `cmd_queue_depth=0` 또는 낮은 수준 유지
+### STM32
 
-## 운영 메모
+프로젝트 경로:
 
-- STM32 UART는 현재 `USART1 (PA9/PA10)` 기준
-- PCA9685 I2C는 현재 `PB8/PB9` 기준
-- `motor/control`과 `lepton/frame/chunk`는 토픽 자체로는 충돌하지 않지만, 둘 다 같은 ESP32 리소스를 공유하므로 부하 영향은 있을 수 있음
-- 고 FPS thermal streaming에서는 여전히 ESP32-C3 자원 한계가 존재할 수 있음
+```text
+STM32/SMT_SPI_Slave
+```
+
+권장 방법:
+
+- STM32CubeIDE에서 `.ioc` 또는 프로젝트 폴더를 열어 빌드/플래시
+
+### Teensy 4.1
+
+Zephyr workspace 초기화:
+
+```powershell
+cd teensy/TeensyC
+west init -l .
+west update
+```
+
+빌드:
+
+```powershell
+west build -b teensy41 .
+```
+
+플래시:
+
+```powershell
+west flash
+```
+
+## 빠른 점검 순서
+
+1. Teensy가 Lepton 초기화 후 프레임을 보내는지 확인
+2. ESP32 로그에서 `Frame link SPI slave init OK`와 Wi-Fi 연결 확인
+3. STM32 부팅 후 `READY`가 UART를 통해 올라오는지 확인
+4. MQTT에서 `motor/control` 명령 publish 후 `motor/response` 응답 확인
+5. `system/control -> publish_status_now` 요청 후 `system/status` 즉시 응답 확인
+
+## 참고
+
+- `command.md`: STM32 명령 상세
+- `esp32/README.md`: ESP32 빌드 중심 안내
+- `teensy/TeensyC/README.md`: Teensy Zephyr 워크스페이스 안내

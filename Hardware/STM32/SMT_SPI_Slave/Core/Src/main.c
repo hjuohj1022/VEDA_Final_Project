@@ -51,6 +51,8 @@ static void uartSendAngles(void);
 static void uartSendBootDiagnostics(void);
 static void uartSendOkWithAngles(void);
 static char *trimCommand(char *text);
+static void laserInit(void);
+static void laserSet(bool enabled);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -72,6 +74,7 @@ int main(void)
     MX_I2C1_Init();
 
     /* USER CODE BEGIN 2 */
+    laserInit();
     uartSendBootDiagnostics();
 
     {
@@ -159,6 +162,26 @@ static char *trimCommand(char *text)
     return start;
 }
 
+static void laserInit(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, GPIO_PIN_SET);
+
+    GPIO_InitStruct.Pin = LASER_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(LASER_GPIO_Port, &GPIO_InitStruct);
+}
+
+static void laserSet(bool enabled)
+{
+    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
+}
+
 static void uartSendBootDiagnostics(void)
 {
     char response[48];
@@ -234,13 +257,25 @@ static void processUartCommand(void)
         Motor_StopAll();
         uartSendOkWithAngles();
     }
+    else if ((strcmp(cmd, "LED ON") == 0) || (strcmp(cmd, "led on") == 0) ||
+             (strcmp(cmd, "LASER ON") == 0) || (strcmp(cmd, "laser on") == 0))
+    {
+        laserSet(true);
+        uartSendText("LED ON\r\n");
+    }
+    else if ((strcmp(cmd, "LED OFF") == 0) || (strcmp(cmd, "led off") == 0) ||
+             (strcmp(cmd, "LASER OFF") == 0) || (strcmp(cmd, "laser off") == 0))
+    {
+        laserSet(false);
+        uartSendText("LED OFF\r\n");
+    }
     else if ((strcmp(cmd, "help") == 0) || (strcmp(cmd, "HELP") == 0))
     {
         uartSendText("CMD motor<N> left press\r\n");
         uartSendText("CMD motor<N> right press\r\n");
         uartSendText("CMD motor<N> release\r\n");
         uartSendText("CMD motor<N> set <deg>\r\n");
-        uartSendText("CMD read | ping | stopall\r\n");
+        uartSendText("CMD read | ping | stopall | LED ON | LED OFF\r\n");
     }
     else
     {
