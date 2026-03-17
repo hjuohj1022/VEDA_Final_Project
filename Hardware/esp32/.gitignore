@@ -18,3 +18,4 @@ secrets/
 *.secrets
 sdkconfig
 sdkconfig.old
+*.py

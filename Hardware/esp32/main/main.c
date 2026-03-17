@@ -16,7 +16,7 @@
 
 #define TASK_PRIO_FRAME_LINK   6U
 #define TASK_PRIO_FRAME_SEND   4U
-#define TASK_PRIO_CMD_UART     4U
+#define TASK_PRIO_CMD_UART     5U
 #define TASK_PRIO_HEALTH       2U
 
 esp_err_t systemInit(void)

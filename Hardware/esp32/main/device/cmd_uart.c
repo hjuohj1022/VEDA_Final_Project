@@ -47,7 +47,7 @@ esp_err_t cmdUartInit(void)
         return ret;
     }
 
-    g_cmd_uart_queue = xQueueCreate(10U, sizeof(cmd_uart_msg_t));
+    g_cmd_uart_queue = xQueueCreate(16U, sizeof(cmd_uart_msg_t));
     if (g_cmd_uart_queue == NULL) {
         (void)printf("STM32 UART queue create failed\n");
         (void)uart_driver_delete(CMD_UART_NUM);
@@ -107,7 +107,8 @@ void cmdUartTask(void *arg)
                     if (line_len > 0U) {
                         line_buf[line_len] = '\0';
                         (void)printf("STM32 UART RX: %s\n", line_buf);
-                        mqttPublishText(STM32_RESP_TOPIC, line_buf, 0);
+                        // Control/ack traffic should be delivered reliably even under frame load.
+                        mqttPublishText(STM32_RESP_TOPIC, line_buf, 1);
                         line_len = 0U;
                     }
                     continue;

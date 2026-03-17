@@ -55,13 +55,15 @@ static bool frameStreamUseMqtt(void)
 static bool frameStreamUseUdp(void)
 {
     return ((APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_ONLY) ||
-            (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH)) &&
+            (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH) ||
+            (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_FRAME_MQTT_CONTROL)) &&
            udpStreamIsEnabled();
 }
 
 static bool frameStreamUseUdpFast8(void)
 {
-    return (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_ONLY) &&
+    return ((APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_ONLY) ||
+            (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_FRAME_MQTT_CONTROL)) &&
            (APP_UDP_FRAME_8BIT != 0) &&
            udpStreamIsEnabled();
 }
@@ -144,6 +146,57 @@ static bool mqttPayloadEquals(const esp_mqtt_event_handle_t event, const char *p
            (strncmp(event->data, payload, payload_len) == 0);
 }
 
+static bool mqttQueueStmCommand(const char *command, size_t command_len)
+{
+    cmd_uart_msg_t cmd = {0};
+
+    if ((command == NULL) || (command_len == 0U)) {
+        return false;
+    }
+
+    if (g_cmd_uart_queue == NULL) {
+        (void)printf("STM32 UART bridge unavailable, command ignored\n");
+        return false;
+    }
+
+    cmd.len = (command_len > (size_t)(CMD_MAX_LEN - 1))
+              ? (uint8_t)(CMD_MAX_LEN - 1)
+              : (uint8_t)command_len;
+    (void)memcpy(cmd.data, command, (size_t)cmd.len);
+    cmd.data[cmd.len] = '\0';
+
+    if (xQueueSend(g_cmd_uart_queue, &cmd, pdMS_TO_TICKS(100U)) != pdPASS) {
+        (void)printf("STM32 UART queue full, command dropped: '%.*s'\n",
+                     (int)cmd.len,
+                     (const char *)cmd.data);
+        return false;
+    }
+
+    (void)printf("Queued to STM32 UART: '%.*s'\n",
+                 (int)cmd.len,
+                 (const char *)cmd.data);
+    return true;
+}
+
+static const char *mqttResolveLaserCommand(const esp_mqtt_event_handle_t event)
+{
+    if (mqttPayloadEquals(event, "laser on") ||
+        mqttPayloadEquals(event, "LASER ON") ||
+        mqttPayloadEquals(event, "on") ||
+        mqttPayloadEquals(event, "ON")) {
+        return "LASER ON";
+    }
+
+    if (mqttPayloadEquals(event, "laser off") ||
+        mqttPayloadEquals(event, "LASER OFF") ||
+        mqttPayloadEquals(event, "off") ||
+        mqttPayloadEquals(event, "OFF")) {
+        return "LASER OFF";
+    }
+
+    return NULL;
+}
+
 static bool mqttBuildHealthPayload(char *payload, size_t payload_size)
 {
     frame_link_stats_t stats = {0};
@@ -214,6 +267,7 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
         s_last_connect_us = esp_timer_get_time();
         s_next_health_publish_us = s_last_connect_us + MQTT_HEALTH_PERIOD_US;
         (void)esp_mqtt_client_subscribe(event->client, CMD_TOPIC, 1);
+        (void)esp_mqtt_client_subscribe(event->client, LASER_CMD_TOPIC, 1);
         (void)esp_mqtt_client_subscribe(event->client, HEALTH_CONTROL_TOPIC, 1);
         (void)esp_mqtt_client_publish(s_client, "lepton/status", "Lepton ready", 12, 1, 0);
         (void)printf("MQTT connected: SPI frame-link mode, frame topic qos=0, cmd/control topic qos=1\n");
@@ -237,30 +291,22 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
             break;
         }
 
+        if (mqttTopicEquals(event, LASER_CMD_TOPIC)) {
+            const char *laser_cmd = mqttResolveLaserCommand(event);
+
+            if (laser_cmd == NULL) {
+                (void)printf("Ignoring unsupported laser/control command\n");
+            } else {
+                (void)mqttQueueStmCommand(laser_cmd, strlen(laser_cmd));
+            }
+            break;
+        }
+
         if (!mqttTopicEquals(event, CMD_TOPIC)) {
             break;
         }
 
-        if (g_cmd_uart_queue != NULL) {
-            cmd_uart_msg_t cmd = {0};
-            cmd.len = (event->data_len > (int)(CMD_MAX_LEN - 1))
-                      ? (uint8_t)(CMD_MAX_LEN - 1)
-                      : (uint8_t)event->data_len;
-            (void)memcpy(cmd.data, event->data, (size_t)cmd.len);
-            cmd.data[cmd.len] = '\0';
-
-            if (xQueueSend(g_cmd_uart_queue, &cmd, pdMS_TO_TICKS(100U)) != pdPASS) {
-                (void)printf("STM32 UART queue full, command dropped: '%.*s'\n",
-                             (int)cmd.len,
-                             (const char *)cmd.data);
-            } else {
-                (void)printf("Queued to STM32 UART: '%.*s'\n",
-                             (int)cmd.len,
-                             (const char *)cmd.data);
-            }
-        } else {
-            (void)printf("STM32 UART bridge unavailable, command ignored\n");
-        }
+        (void)mqttQueueStmCommand(event->data, (size_t)event->data_len);
         break;
     }
 
