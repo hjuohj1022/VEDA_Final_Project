@@ -1,17 +1,5 @@
 pipeline {
     agent any
-
-    options {
-        disableConcurrentBuilds()
-    }
-
-    // parameters {             
-    //     // === 1. 버전 관리 설정 (여기서 메이저/마이너 관리) ===                                                                                                                                                                                             
-    //       string(name: 'PROJECT_NAME', defaultValue: 'AEGIS', description: 'Project Name')                                                                                                                                 
-    //       string(name: 'MAJOR_VER', defaultValue: '1', description: 'Major Version')                                                                                                                                          
-    //       string(name: 'MINOR_VER', defaultValue: '0', description: 'Minor Version')                                                                                                                                          
-    //       string(name: 'PATCH_VER', defaultValue: '0', description: 'Patch Version')                                                                                                                                            
-    //   }
     
     environment {
         GIT_URL = 'https://github.com/hjuohj1022/VEDA_Final_Project' 
