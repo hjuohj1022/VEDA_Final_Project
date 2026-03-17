@@ -359,7 +359,7 @@ void registerThermalProxyRoutes(crow::SimpleApp& app)
     });
 
     CROW_WEBSOCKET_ROUTE(app, "/thermal/stream")
-        .onaccept([](const crow::request& req) {
+        .onaccept([](const crow::request& req, void**) {
             return isAuthorized(req);
         })
         .onopen([](crow::websocket::connection& conn) {
