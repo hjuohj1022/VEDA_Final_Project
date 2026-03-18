@@ -6,11 +6,138 @@ Item {
     id: root
     property var theme
     property var store
+    property var clientInfo: ({})
+    property bool clientInfoReady: false
+    property int lastCpuPercent: -1
 
     visible: store ? (!store.showCameraControls && !store.showPlaybackControls) : false
-    Layout.preferredHeight: visible ? 440 : 0
-    Layout.maximumHeight: visible ? 440 : 0
-    Layout.minimumHeight: visible ? 440 : 0
+    Layout.fillHeight: visible
+    Layout.preferredHeight: visible ? 1 : 0
+    Layout.minimumHeight: visible ? 1 : 0
+
+    function refreshClientInfo() {
+        var info = backend.getClientSystemInfo()
+        if (!info) {
+            return
+        }
+        clientInfo = info
+        clientInfoReady = true
+        var cpu = Number(info.cpuUsagePercent)
+        if (!isNaN(cpu) && cpu >= 0) {
+            lastCpuPercent = Math.round(cpu)
+        }
+    }
+
+    function clientMainValue() {
+        if (!clientInfoReady && lastCpuPercent < 0) {
+            return "Initializing"
+        }
+        if (lastCpuPercent < 0) {
+            return "Initializing"
+        }
+        return "CPU " + lastCpuPercent + "%"
+    }
+
+    function parseGiB(text) {
+        if (!text || typeof text !== "string") {
+            return NaN
+        }
+        var m = text.match(/([0-9]+(?:\.[0-9]+)?)/)
+        if (!m || m.length < 2) {
+            return NaN
+        }
+        return Number(m[1])
+    }
+
+    function clientSubText() {
+        if (!clientInfoReady) {
+            return "Initializing"
+        }
+        var totalGiB = parseGiB(clientInfo.ramTotal)
+        var availGiB = parseGiB(clientInfo.ramAvailable)
+        var ramText = "RAM Unknown"
+        if (!isNaN(totalGiB) && totalGiB > 0 && !isNaN(availGiB)) {
+            var usedPercent = ((totalGiB - availGiB) / totalGiB) * 100.0
+            if (usedPercent < 0) {
+                usedPercent = 0
+            }
+            if (usedPercent > 100) {
+                usedPercent = 100
+            }
+            ramText = "RAM " + Math.round(usedPercent) + "%"
+        }
+        var gpu = (clientInfo.gpuModel && clientInfo.gpuModel.length > 0) ? clientInfo.gpuModel : "GPU Unknown"
+        return ramText + " · " + gpu
+    }
+
+    // 상태 텍스트별 카드 색상 계산
+    function statusColor(status) {
+        if (status === "GOOD") {
+            return "#22c55e"
+        }
+        if (status === "DOWN") {
+            return "#ef4444"
+        }
+        if (status === "DEGRADED") {
+            return "#f97316"
+        }
+        return (theme ? theme.textSecondary : "#a1a1aa")
+    }
+
+    // API 상태 판정
+    function apiStatusText() {
+        if (backend.isLoggedIn) {
+            return "GOOD"
+        }
+        if (backend.storageTotal && backend.storageTotal !== "0 GB") {
+            return "GOOD"
+        }
+        return "DOWN"
+    }
+
+    // RTSP 상태 판정
+    function rtspStatusText() {
+        if (backend.activeCameras <= 0) {
+            return "DOWN"
+        }
+        if (backend.currentFps >= 5) {
+            return "GOOD"
+        }
+        if (backend.currentFps > 0) {
+            return "DEGRADED"
+        }
+        return "DEGRADED"
+    }
+
+    // MQTT 상태 판정
+    function mqttStatusText() {
+        var status = (backend.networkStatus || "").toLowerCase().trim()
+        if (status.length === 0) {
+            return "DEGRADED"
+        }
+        if (status.indexOf("connected") >= 0 || status.indexOf("good") >= 0 || status.indexOf("ok") >= 0 || status.indexOf("up") >= 0) {
+            return "GOOD"
+        }
+        if (status.indexOf("error") >= 0 || status.indexOf("disconnect") >= 0 || status.indexOf("down") >= 0 || status.indexOf("tls config error") >= 0) {
+            return "DOWN"
+        }
+        return "DEGRADED"
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            refreshClientInfo()
+        }
+    }
+
+    Component.onCompleted: refreshClientInfo()
+
+    Timer {
+        interval: 2000
+        repeat: true
+        running: root.visible
+        onTriggered: root.refreshClientInfo()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -132,24 +259,36 @@ Item {
             }
         }
 
-        GridLayout {
+        ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 168
-            columns: 2
-            columnSpacing: 8
-            rowSpacing: 8
+            Layout.fillHeight: true
+            spacing: 8
 
             Repeater {
                 model: [
-                    { label: "Active Cameras", value: backend.activeCameras + "", sub: "of 4 total", icon: "\uD83C\uDFA5" },
-                    { label: "Detected Objects", value: "-", sub: "Connection Needed", icon: "\uD83E\uDDE0" },
-                    { label: "Storage Used", value: backend.storagePercent + "%", sub: backend.storageUsed + " / " + backend.storageTotal, icon: "\uD83D\uDCBE" },
-                    { label: "Network Status", value: "-", sub: "Connection Needed", icon: "\uD83D\uDCE1" }
+                    { label: "ACTIVE", value: backend.activeCameras + "", sub: "of 4 total", icon: "\uD83C\uDFA5" },
+                    {
+                        label: "STORAGE",
+                        value: (backend.storageTotal && backend.storageTotal !== "0 GB") ? (backend.storagePercent + "%") : "Initializing",
+                        sub: (backend.storageTotal && backend.storageTotal !== "0 GB") ? (backend.storageUsed + " / " + backend.storageTotal) : "Unknown",
+                        icon: "\uD83D\uDCBE"
+                    },
+                    { label: "CLIENT", value: root.clientMainValue(), sub: root.clientSubText(), icon: "\uD83D\uDCBB" },
+                    {
+                        label: "SERVER",
+                        icon: "\uD83D\uDDA5",
+                        parts: [
+                            { name: "API", status: root.apiStatusText() },
+                            { name: "RTSP", status: root.rtspStatusText() },
+                            { name: "MQTT", status: root.mqttStatusText() }
+                        ]
+                    }
                 ]
 
                 delegate: Rectangle {
+                    property var cardData: modelData
                     Layout.fillWidth: true
-                    height: 80
+                    Layout.fillHeight: true
                     color: theme ? theme.bgComponent : "#18181b"
                     radius: 8
                     border.color: theme ? theme.border : "#27272a"
@@ -167,10 +306,10 @@ Item {
                                 height: 20
                                 color: theme ? theme.border : "#27272a"
                                 radius: 4
-                                Text { anchors.centerIn: parent; text: modelData.icon; font.pixelSize: 10 }
+                                Text { anchors.centerIn: parent; text: cardData.icon; font.pixelSize: 10 }
                             }
                             Text {
-                                text: modelData.label.split(" ")[0]
+                                text: cardData.label
                                 color: theme ? theme.textSecondary : "#71717a"
                                 font.bold: true
                                 font.pixelSize: 9
@@ -178,31 +317,56 @@ Item {
                             }
                         }
 
-                        Text { text: modelData.value; color: theme ? theme.textPrimary : "white"; font.bold: true; font.pixelSize: 16 }
-                        Text { text: modelData.sub; color: theme ? theme.textSecondary : "#52525b"; font.pixelSize: 9 }
+                        RowLayout {
+                            visible: cardData.label === "SERVER"
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: 4
+
+                            Repeater {
+                                model: cardData.parts ? cardData.parts : []
+                                delegate: ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+                                    Text {
+                                        text: modelData.status
+                                        color: root.statusColor(modelData.status)
+                                        font.bold: true
+                                        font.pixelSize: 15
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: modelData.name
+                                        color: theme ? theme.textSecondary : "#52525b"
+                                        font.pixelSize: 9
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: cardData.label !== "SERVER"
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                text: (cardData && cardData.value !== undefined) ? String(cardData.value) : ""
+                                color: cardData.valueColor ? cardData.valueColor : (theme ? theme.textPrimary : "white")
+                                font.bold: true
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                text: (cardData && cardData.sub !== undefined) ? String(cardData.sub) : ""
+                                color: theme ? theme.textSecondary : "#52525b"
+                                font.pixelSize: 9
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                        }
                     }
                 }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 50
-            color: theme ? theme.bgComponent : "#18181b"
-            radius: 8
-            border.color: "#4e2c0e"
-            border.width: 1
-
-            ColumnLayout {
-                anchors.centerIn: parent
-                spacing: 2
-
-                RowLayout {
-                    spacing: 6
-                    Rectangle { width: 6; height: 6; radius: 3; color: theme ? theme.accent : "#f97316" }
-                    Text { text: "AI STATUS"; color: theme ? theme.accent : "#f97316"; font.bold: true; font.pixelSize: 9 }
-                }
-                Text { text: "Active on all feeds"; color: theme ? theme.textSecondary : "#71717a"; font.pixelSize: 10 }
             }
         }
     }
