@@ -166,8 +166,6 @@ bin/
 *.key
 *.csr
 *.srl
-<<<<<<< Updated upstream
-=======
 /CCTV/fact/checkpoints/DA3METRIC-LARGE
 /CCTV/fact/checkpoints/DA3MONO-LARGE
 /CCTV/fact/Depth-Anything-3
@@ -182,6 +180,5 @@ Hardware/esp32/main/mqtt/laser_test.py
 Hardware/laser.md
 /Hardware/esp32/main/certs
 Hardware/esp32/main/app_secrets.defaults.h
->>>>>>> Stashed changes
 Hardware/esp32/.pio-core/.cache/telemetry.json
 /Hardware/esp32/.pio-core
