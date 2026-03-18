@@ -3,7 +3,6 @@
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
 
-#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -225,8 +224,6 @@ void BackendMediaStorageService::checkStorage(Backend *backend, BackendPrivate *
         return;
     }
 
-    const auto reqTimer = std::make_shared<QElapsedTimer>();
-    reqTimer->start();
     const bool debugStorage = (state->m_env.value("STORAGE_DEBUG", "0").trimmed() == "1");
 
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/storage");
@@ -234,7 +231,7 @@ void BackendMediaStorageService::checkStorage(Backend *backend, BackendPrivate *
     QNetworkReply *reply = state->m_manager->get(request);
     backend->attachIgnoreSslErrors(reply, "SUNAPI_STORAGE_CHECK");
 
-    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, reqTimer, debugStorage]() {
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, debugStorage]() {
         const QByteArray data = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
@@ -270,7 +267,6 @@ void BackendMediaStorageService::checkStorage(Backend *backend, BackendPrivate *
                     << "display=" << state->m_storageUsed << "/" << state->m_storageTotal;
         }
         emit backend->storageChanged();
-        backend->setLatency(static_cast<int>(reqTimer->elapsed()));
         reply->deleteLater();
     });
 }

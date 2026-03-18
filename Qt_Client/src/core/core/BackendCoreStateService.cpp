@@ -52,8 +52,35 @@ void BackendCoreStateService::setCurrentFps(Backend *backend, BackendPrivate *st
 
 void BackendCoreStateService::setLatency(Backend *backend, BackendPrivate *state, int ms)
 {
-    if (state->m_latency != ms) {
-        state->m_latency = ms;
+    // Guard invalid/outlier input range.
+    if (ms < 0) {
+        ms = 0;
+    } else if (ms > 3000) {
+        ms = 3000;
+    }
+    state->m_latencyRaw = ms;
+
+    // Smooth jittery request/connect latency by EMA and damp one-shot spikes.
+    constexpr double kAlpha = 0.25;   // New sample weight
+    constexpr double kSpikeAbs = 250; // Absolute spike threshold (ms)
+    constexpr double kSpikeMul = 2.0; // Relative spike threshold
+    constexpr double kSpikeCap = 120; // Max reflected jump for one sample
+
+    if (!state->m_latencyEmaInitialized) {
+        state->m_latencyEma = static_cast<double>(ms);
+        state->m_latencyEmaInitialized = true;
+    } else {
+        const double ema = state->m_latencyEma;
+        double sample = static_cast<double>(ms);
+        if (sample > (ema + kSpikeAbs) && sample > (ema * kSpikeMul)) {
+            sample = ema + kSpikeCap;
+        }
+        state->m_latencyEma = ((1.0 - kAlpha) * ema) + (kAlpha * sample);
+    }
+
+    const int smoothed = static_cast<int>(state->m_latencyEma + 0.5);
+    if (state->m_latency != smoothed) {
+        state->m_latency = smoothed;
         emit backend->latencyChanged();
     }
 }

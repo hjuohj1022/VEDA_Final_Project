@@ -15,6 +15,9 @@
   - `SERVER`는 단일 상태가 아니라 `API`, `RTSP`, `MQTT`를 각각 독립 상태로 표시
     - 상단: `GOOD / DEGRADED / DOWN` (각 항목별 상태값)
     - 하단: `API / RTSP / MQTT` 라벨
+  - `LATENCY`는 RTSP 연결 지표 기반으로 표시
+    - 스토리지 API 응답시간으로 latency를 덮어쓰지 않음
+    - 단발성 스파이크 완화를 위해 내부 스무딩(EMA) 적용
   - 기존 `AI STATUS` 카드는 제거
 
 ### 2. Playback

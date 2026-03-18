@@ -155,11 +155,6 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
     QTimer *simTimer = new QTimer(backend);
     simTimer->setInterval(5000);
     QObject::connect(simTimer, &QTimer::timeout, backend, [backend, state]() {
-        const QString rtspScheme = state->m_env.value("RTSP_SCHEME", "rtsp").trimmed().toLower();
-        if (rtspScheme == "rtsps") {
-            return;
-        }
-
         static bool probeInFlight = false;
         if (probeInFlight) {
             return;
