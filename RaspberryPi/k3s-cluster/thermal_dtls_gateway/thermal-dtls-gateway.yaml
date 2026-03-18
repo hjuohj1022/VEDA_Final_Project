@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thermal-dtls-gateway
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thermal-dtls-gateway
+  template:
+    metadata:
+      labels:
+        app: thermal-dtls-gateway
+    spec:
+      containers:
+      - name: thermal-dtls-gateway
+        image: docker.io/hjuohj/thermal-dtls-gateway:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5005
+          protocol: UDP
+        env:
+        - name: DTLS_BIND_HOST
+          value: "0.0.0.0"
+        - name: DTLS_BIND_PORT
+          value: "5005"
+        - name: CROW_FORWARD_HOST
+          value: "crow-server-service"
+        - name: CROW_FORWARD_PORT
+          value: "5005"
+        - name: DTLS_PSK_IDENTITY
+          valueFrom:
+            secretKeyRef:
+              name: thermal-dtls-secret
+              key: DTLS_PSK_IDENTITY
+        - name: DTLS_PSK_KEY_HEX
+          valueFrom:
+            secretKeyRef:
+              name: thermal-dtls-secret
+              key: DTLS_PSK_KEY_HEX
+        - name: DTLS_COOKIE_SECRET_HEX
+          valueFrom:
+            secretKeyRef:
+              name: thermal-dtls-secret
+              key: DTLS_COOKIE_SECRET_HEX
+              optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thermal-dtls-gateway-service
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: thermal-dtls-gateway
+  ports:
+  - name: dtls-udp
+    protocol: UDP
+    port: 5005
+    targetPort: 5005

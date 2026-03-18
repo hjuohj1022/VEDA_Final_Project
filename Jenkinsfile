@@ -6,6 +6,7 @@ pipeline {
         DOCKER_CRED = 'docker-hub-login'
         KUBE_CONFIG = 'k3s-kubeconfig'
         GIT_CREDENTIAL_ID = 'github-login'
+        THERMAL_DTLS_SECRET_CRED = 'thermal-dtls-secret-yaml'
     }
 
     stages {
@@ -499,6 +500,39 @@ pipeline {
         //         archiveArtifacts artifacts: 'Qt_Client/QtClient_Windows_VMS.zip', fingerprint: true
         //     }
         // }
+        stage('Thermal DTLS Gateway Deploy') {
+            when {
+                anyOf {
+                    changeset 'RaspberryPi/k3s-cluster/thermal_dtls_gateway/**'
+                    triggeredBy 'UserIdCause'
+                }
+            }
+            steps {
+                script {
+                    dir('RaspberryPi/k3s-cluster/thermal_dtls_gateway') {
+                        echo "Thermal DTLS Gateway build: ${env.DOCKER_VER}"
+                        withCredentials([usernamePassword(credentialsId: DOCKER_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo $PASS | docker login -u $USER --password-stdin"
+                            sh "docker buildx build --platform linux/arm64 -t hjuohj/thermal-dtls-gateway:${env.DOCKER_VER} -t hjuohj/thermal-dtls-gateway:latest --push ."
+                        }
+                    }
+
+                    withCredentials([
+                        file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG'),
+                        file(credentialsId: THERMAL_DTLS_SECRET_CRED, variable: 'THERMAL_DTLS_SECRET_FILE')
+                    ]) {
+                        sh '''
+                            set -euo pipefail
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f "$THERMAL_DTLS_SECRET_FILE"
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-gateway.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-networkpolicy.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/thermal-dtls-gateway
+                            kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/thermal-dtls-gateway --timeout=180s
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     // === 🏁 빌드 후 처리 (성공 시에만 버전 태그 생성) ===
