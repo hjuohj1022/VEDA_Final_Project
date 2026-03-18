@@ -10,3 +10,5 @@ __pycache__/
 !**/README.md
 
 /STM32/SMT_SPI_Slave/Debug
+/STM32/SMT_SPI_Slave/.settings
+/STM32/SMT_SPI_Slave/.settings/language.settings.xml
