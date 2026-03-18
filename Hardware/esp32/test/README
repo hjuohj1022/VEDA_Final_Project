@@ -1,3 +1,0 @@
-This directory is reserved for future ESP32 tests.
-
-The current project is built with ESP-IDF (`idf.py`) rather than PlatformIO.

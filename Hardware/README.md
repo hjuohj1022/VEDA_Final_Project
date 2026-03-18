@@ -1,27 +1,22 @@
 # Thermal Imaging and Remote Actuation Hardware
 
-이 저장소는 3개 보드가 협력하는 하드웨어 펌웨어를 담고 있습니다.
+이 디렉터리는 현재 동작 중인 하드웨어 펌웨어와 보드 간 인터페이스를 한 곳에 정리한 문서입니다.
 
-- 열화상 경로: `Lepton -> Teensy 4.1 -> SPI frame link -> ESP32-C5 -> UDP 또는 MQTT`
-- 제어 경로: `Client/Server -> MQTT -> ESP32-C5 -> UART -> STM32F401RE -> PCA9685 -> Servo / Laser`
+- 열화상 경로: `FLIR Lepton -> Teensy 4.1 -> SPI frame link -> ESP32-C5 -> UDP`
+- 제어 경로: `Client/Server -> MQTT/TLS -> ESP32-C5 -> UART -> STM32F401RE -> PCA9685 -> Servo / Laser`
 
-현재 코드 기준으로 활성 구현은 다음 경로에 있습니다.
+현재 코드 기준 활성 구현 경로는 아래 3개입니다.
 
 - `esp32/`: ESP-IDF 프로젝트, 실제 앱 소스는 `esp32/main/`
 - `STM32/SMT_SPI_Slave/`: STM32CubeIDE 기반 STM32F401RE 펌웨어
 - `teensy/TeensyC/`: Zephyr 기반 Teensy 4.1 펌웨어
-
-보조 코드도 함께 들어 있습니다.
-
-- `teensy/TeensyIno/`: Arduino/benchmark 스케치
-- `esp32/src/`: 이전 단계 소스 흔적
 
 ## 시스템 개요
 
 ```text
 [ Client / Server ]
         |
-        | MQTT
+        | MQTT/TLS
         |  - motor/control
         |  - motor/response
         |  - laser/control
@@ -45,7 +40,7 @@
 
 [ FLIR Lepton ] <--> [ Teensy 4.1 ] -- SPI frame link --> [ ESP32-C5 ]
                                                         |
-                                                        +--> UDP frame stream (current default)
+                                                        +--> UDP frame stream (default)
                                                         +--> MQTT frame chunk publish (optional)
 ```
 
@@ -70,7 +65,8 @@
 ### Teensy 4.1
 
 - FLIR Lepton 초기화 및 프레임 캡처
-- 프레임을 256바이트 chunk로 분할해 ESP32로 SPI 전송
+- 프레임을 256바이트 패킷으로 분할해 ESP32로 SPI 전송
+- free/ready queue 기반으로 캡처와 전송 경로 분리
 - 캡처 timeout 누적 시 Lepton reset
 
 ## 디렉터리 맵
@@ -84,7 +80,6 @@
 | `STM32/SMT_SPI_Slave/Core/Src/main.c` | STM32 진입점, UART 명령 파서, 레이저 제어 |
 | `STM32/SMT_SPI_Slave/Core/Src/motor.c` | PCA9685 기반 3축 서보 제어 |
 | `teensy/TeensyC/src/main.c` | Lepton 캡처 및 SPI frame sender |
-| `command.md` | STM32 명령 레퍼런스 |
 
 ## 인터페이스와 핀맵
 
@@ -170,13 +165,13 @@
 - `APP_FRAME_STREAM_MODE = 3`
 - `APP_UDP_FRAME_8BIT = 1`
 
-즉 현재 기본 동작은 다음과 같습니다.
+즉 현재 기본 동작은 아래와 같습니다.
 
-- 제어/응답/health: MQTT 사용
+- 제어, 응답, health: MQTT 사용
 - 열화상 프레임: UDP 사용
 - UDP payload: 8-bit 정규화 프레임 chunk
 
-MQTT 프레임 전송은 지원되지만, 현재 기본 설정에서는 비활성입니다. 필요하면 `APP_FRAME_STREAM_MODE`를 변경해야 합니다.
+MQTT 프레임 전송도 지원되지만 기본 설정에서는 비활성입니다. 필요하면 `APP_FRAME_STREAM_MODE`를 변경해야 합니다.
 
 ### UDP 스트리밍
 
@@ -230,7 +225,16 @@ STM32는 ASCII 라인 명령을 받습니다.
 - `left press` / `right press`: 20ms 주기로 1도씩 연속 이동
 - 연속 이동 중 `0` 또는 `180`에 도달하면 자동 `release`
 
-상세 명령 설명은 `command.md`를 참고하면 됩니다.
+GUI 기준 자주 쓰는 명령 매핑:
+
+- `Hold L`: `motor<N> left press`
+- `Hold R`: `motor<N> right press`
+- 버튼 release: `motor<N> release`
+- `-10`: `motor<N> left 10`
+- `+10`: `motor<N> right 10`
+- `Center All`: `motor1 set 90`, `motor2 set 90`, `motor3 set 90`
+- `Read Angles`: `read`
+- `Stop All`: `stopall`
 
 ## Health JSON
 
@@ -272,6 +276,7 @@ payload: publish_status_now
 
 1. `esp32/main/app_secrets.example.h`를 `esp32/main/app_secrets.h`로 복사
 2. Wi-Fi, MQTT broker, UDP target 값을 채움
+3. 필요하면 `esp32/main/mqtt/app_client_config.example.py`를 `esp32/main/mqtt/app_client_config.py`로 복사
 
 빌드:
 
@@ -290,6 +295,7 @@ idf.py -p COMx flash monitor
 비고:
 
 - 인증서는 `esp32/main/certs/`에서 embed
+- `sdkconfig`는 로컬 ESP-IDF 환경에서 갱신됨
 - 현재 ESP-IDF 빌드는 `esp32/main/` 소스를 사용
 
 ### STM32
@@ -326,6 +332,20 @@ west build -b teensy41 .
 west flash
 ```
 
+MCUXpresso for VS Code를 쓰는 경우:
+
+- Repository type: `Zephyr`
+- Repository path: `Hardware/teensy/TeensyC`
+- Manifest file: `west.yml`
+- Project type: `Repository application`
+
+주요 Zephyr 진입 파일:
+
+- `CMakeLists.txt`
+- `prj.conf`
+- `app.overlay`
+- `west.yml`
+
 ## 빠른 점검 순서
 
 1. Teensy가 Lepton 초기화 후 프레임을 보내는지 확인
@@ -333,9 +353,3 @@ west flash
 3. STM32 부팅 후 `READY`가 UART를 통해 올라오는지 확인
 4. MQTT에서 `motor/control` 명령 publish 후 `motor/response` 응답 확인
 5. `system/control -> publish_status_now` 요청 후 `system/status` 즉시 응답 확인
-
-## 참고
-
-- `command.md`: STM32 명령 상세
-- `esp32/README.md`: ESP32 빌드 중심 안내
-- `teensy/TeensyC/README.md`: Teensy Zephyr 워크스페이스 안내

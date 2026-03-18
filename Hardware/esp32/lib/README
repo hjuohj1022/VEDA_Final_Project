@@ -1,4 +1,0 @@
-This directory is reserved for optional local libraries.
-
-The current ESP32 firmware builds directly with ESP-IDF and does not require
-any extra local libraries here.

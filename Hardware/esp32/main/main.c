@@ -73,7 +73,7 @@ void app_main(void)
     if (cmd_uart_enabled) {
         task_ok = xTaskCreate(cmdUartTask, "stm32_uart", 4096U, NULL, TASK_PRIO_CMD_UART, NULL);
         (void)printf("Task create stm32_uart: %s\n", (task_ok == pdPASS) ? "OK" : "FAIL");
-        (void)printf("STM32 command bridge enabled: UART1(GPIO8/9) -> USART1(PA9/PA10)\n");
+        (void)printf("STM32 command bridge enabled: UART1(GPIO11/12) -> USART1(PA9/PA10)\n");
     }
 
     wifi_config_t wifi_config = {
