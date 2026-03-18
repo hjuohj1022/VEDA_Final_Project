@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -9,10 +9,12 @@ Window {
     property var hostWindow
     property string statusText: "모터 제어 대기"
     property bool statusError: false
+    property var holdDirectionByMotor: ({1: "", 2: "", 3: ""})
+    property var pressedHoldMotors: []
 
     transientParent: hostWindow
     width: 420
-    height: 330
+    height: 420
     visible: false
     modality: Qt.NonModal
     flags: Qt.Dialog | Qt.FramelessWindowHint
@@ -25,6 +27,7 @@ Window {
     }
 
     function closeDialog() {
+        stopAllMotorHolds()
         visible = false
     }
 
@@ -32,12 +35,32 @@ Window {
         return Number(motorCombo.currentText)
     }
 
-    function selectedDirection() {
-        return directionCombo.currentText
-    }
-
     function selectedAngle() {
         return Number(angleField.text)
+    }
+
+    // 선택된 방향 반환 함수
+    function selectedDirection() {
+        return directionCombo.currentIndex === 0 ? "left" : "right"
+    }
+
+    // 선택된 Target/Direction 기준 Hold 적용 함수
+    function startSelectedMotorHolds() {
+        var motorId = selectedMotor()
+        var direction = selectedDirection()
+        startMotorHold(motorId, direction)
+        pressedHoldMotors = [motorId]
+        statusText = "모터 hold 적용 - M" + motorId + ":" + (direction === "left" ? "L" : "R")
+        statusError = false
+        return true
+    }
+
+    // Hold 버튼 손떼기 시 자동 release 처리 함수
+    function releasePressedMotorHolds() {
+        var motors = pressedHoldMotors || []
+        for (var i = 0; i < motors.length; ++i)
+            stopMotorHold(motors[i])
+        pressedHoldMotors = []
     }
 
     function sanitizeAngle(raw) {
@@ -50,9 +73,92 @@ Window {
         return String(n)
     }
 
-    onVisibleChanged: {
-        if (!visible)
+    function simplifyMotorStatusMessage(message) {
+        var text = String(message || "").replace(/\s+/g, " ").trim()
+        if (text.length === 0)
+            return "Motor command response"
+
+        var successIdx = text.indexOf(" success:")
+        if (successIdx >= 0) {
+            var action = text.substring(0, successIdx)
+            var detail = text.substring(successIdx + 9).trim()
+            if (detail.indexOf("OK ") === 0)
+                return action + " success (" + detail + ")"
+            return action + " success"
+        }
+
+        var failedIdx = text.indexOf(" failed")
+        if (failedIdx >= 0) {
+            var base = text.substring(0, failedIdx)
+            if (text.indexOf("(HTTP ") >= 0) {
+                var httpStart = text.indexOf("(HTTP ")
+                var httpEnd = text.indexOf(")", httpStart)
+                if (httpEnd > httpStart) {
+                    var httpPart = text.substring(httpStart, httpEnd + 1)
+                    return base + " failed " + httpPart
+                }
+            }
+            return base + " failed"
+        }
+
+        if (text.indexOf("{") >= 0)
+            text = text.substring(0, text.indexOf("{")).trim()
+
+        if (text.length > 96)
+            text = text.substring(0, 96) + "..."
+
+        return text
+    }
+
+    function holdDirection(motor) {
+        return holdDirectionByMotor[motor] || ""
+    }
+
+    function setHoldDirection(motor, direction) {
+        var next = {
+            1: holdDirectionByMotor[1] || "",
+            2: holdDirectionByMotor[2] || "",
+            3: holdDirectionByMotor[3] || ""
+        }
+        next[motor] = direction
+        holdDirectionByMotor = next
+    }
+
+    function startMotorHold(motor, direction) {
+        var current = holdDirection(motor)
+        if (current === direction)
             return
+
+        if (current.length > 0) {
+            backend.resetSessionTimer()
+            backend.motorRelease(motor)
+        }
+
+        backend.resetSessionTimer()
+        backend.motorPress(motor, direction)
+        setHoldDirection(motor, direction)
+    }
+
+    function stopMotorHold(motor) {
+        if (holdDirection(motor).length === 0)
+            return
+        backend.resetSessionTimer()
+        backend.motorRelease(motor)
+        setHoldDirection(motor, "")
+    }
+
+    function stopAllMotorHolds() {
+        stopMotorHold(1)
+        stopMotorHold(2)
+        stopMotorHold(3)
+        pressedHoldMotors = []
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            stopAllMotorHolds()
+            return
+        }
         backend.resetSessionTimer()
         if (hostWindow) {
             x = hostWindow.x + (hostWindow.width - width) / 2
@@ -107,7 +213,7 @@ Window {
                 spacing: 8
 
                 Text {
-                    text: "Motor"
+                    text: "Target"
                     color: theme ? theme.textSecondary : "#a1a1aa"
                     Layout.preferredWidth: 44
                 }
@@ -119,16 +225,23 @@ Window {
                     currentIndex: 0
                 }
 
+                Item { Layout.fillWidth: true }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
                 Text {
-                    text: "Direction"
+                    text: "Dir"
                     color: theme ? theme.textSecondary : "#a1a1aa"
-                    Layout.preferredWidth: 62
+                    Layout.preferredWidth: 44
                 }
 
                 ComboBox {
                     id: directionCombo
-                    Layout.preferredWidth: 90
-                    model: ["left", "right"]
+                    Layout.preferredWidth: 100
+                    model: ["Left", "Right"]
                     currentIndex: 0
                 }
 
@@ -140,20 +253,16 @@ Window {
                 spacing: 8
 
                 Button {
-                    text: "Press"
+                    text: "Hold"
                     Layout.fillWidth: true
-                    onClicked: {
-                        backend.resetSessionTimer()
-                        backend.motorPress(selectedMotor(), selectedDirection())
+                    onPressed: {
+                        root.startSelectedMotorHolds()
                     }
-                }
-
-                Button {
-                    text: "Release"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        backend.resetSessionTimer()
-                        backend.motorRelease(selectedMotor())
+                    onReleased: {
+                        root.releasePressedMotorHolds()
+                    }
+                    onCanceled: {
+                        root.releasePressedMotorHolds()
                     }
                 }
 
@@ -161,8 +270,10 @@ Window {
                     text: "Stop"
                     Layout.fillWidth: true
                     onClicked: {
+                        var motorId = root.selectedMotor()
+                        root.stopMotorHold(motorId)
                         backend.resetSessionTimer()
-                        backend.motorStop(selectedMotor())
+                        backend.motorStop(motorId)
                     }
                 }
             }
@@ -220,6 +331,7 @@ Window {
                     text: "Stop All"
                     Layout.fillWidth: true
                     onClicked: {
+                        root.stopAllMotorHolds()
                         backend.resetSessionTimer()
                         backend.motorStopAll()
                     }
@@ -253,8 +365,9 @@ Window {
                 return
             if (message.indexOf("Motor ") !== 0)
                 return
-            root.statusText = message
+            root.statusText = root.simplifyMotorStatusMessage(message)
             root.statusError = isError
         }
     }
 }
+
