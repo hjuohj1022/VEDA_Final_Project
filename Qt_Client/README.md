@@ -1,14 +1,21 @@
 ﻿# Qt CCTV Client (Live + Playback VMS)
 
 이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
-실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신 + 로컬 렌더링)을 제공합니다.
+실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신 + 로컬 렌더링), 그리고 **Playback WebSocket 제어 송신 + 로컬 UDP RTP 송출** 경로를 제공합니다.
 
 ## 주요 기능
 
 ### 1. Live 모니터링
 - 2x2 그리드 4채널 동시 표시
 - MediaMTX 경유 RTSP/RTSPS 재생
-- FPS/Latency/Storage(카메라 SD 기준) 등 사이드바 메트릭 표시
+- 우측 `System Metrics` 패널 제공
+  - 상단: `FPS`, `LATENCY` 차트
+  - 하단: `ACTIVE`, `STORAGE`, `CLIENT`, `SERVER` 4개 카드 세로 배치(패널 높이 전체 사용)
+  - `CLIENT`는 실시간 CPU 사용률/메모리 사용률/GPU 정보 표시
+  - `SERVER`는 단일 상태가 아니라 `API`, `RTSP`, `MQTT`를 각각 독립 상태로 표시
+    - 상단: `GOOD / DEGRADED / DOWN` (각 항목별 상태값)
+    - 하단: `API / RTSP / MQTT` 라벨
+  - 기존 `AI STATUS` 카드는 제거
 
 ### 2. Playback
 - 채널/날짜/시간 지정 재생
@@ -16,6 +23,8 @@
 - 하단 타임라인(녹화 구간 초록색), 시각 이동(seek), 줌(휠) 지원
 - Play / Pause / Resume 제어
 - 화면 전환 시 Playback 세션 정리(disconnect)
+- Playback 제어 패킷을 WebSocket Binary로 송신(`OPTIONS/SETUP/PLAY/GET_PARAMETER`)
+- WebSocket interleaved RTP 수신 데이터를 로컬 UDP(`127.0.0.1:5004`)로 송출
 - Playback Controls 내 Export(내보내기) 지원
   - 선택 시각 기준 시작/종료 구간 지정
   - SUNAPI `export/create` 우선 시도
@@ -50,7 +59,9 @@
 
 ### 4. Thermal 모니터링
 - 상단 탭의 `Thermal` 진입 시 열화상 스트림 시작, 이탈 시 자동 중지
-- MQTT 청크 프레임(160x120, 16-bit) 재조립 후 QML `Image`로 표시
+- 전송 경로 선택 지원: `THERMAL_TRANSPORT=ws|mqtt` (기본 `ws`)
+- `ws` 모드: `POST /thermal/control/start` -> `ws(s)://<API_HOST>/thermal/stream` 수신 -> `POST /thermal/control/stop`
+- `mqtt` 모드: MQTT 청크 토픽 구독 후 프레임 재조립
 - 팔레트(`Jet`/`Gray`/`Iron`) 및 Auto/Manual range 제어 지원
 - 관련 구현: `src/core/thermal/BackendThermal.cpp`, `src/ui/qml/thermal/ThermalViewer.qml`
 
@@ -178,10 +189,22 @@
    - 다중 `SETUP` (track별 interleaved channel)  
    - `PLAY`  
 6. RTP interleaved 수신 + 디코딩 경로로 전달  
+   - Qt 클라이언트에서 수신 RTP를 로컬 UDP(`127.0.0.1:5004`)로 writeDatagram 송출
 7. `GET_PARAMETER` keepalive로 세션 유지  
 8. `PAUSE/PLAY`로 일시정지/재개 제어
 
 Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1회 호출이 아니라 WS + RTSP 제어 시퀀스가 핵심입니다.
+
+## UDP + WebSocket 데이터 경로 요약
+
+- Playback 제어 송신(클라이언트 -> 서버)
+  - `BackendStreamingWsService::streamingWsSendHex()`에서 RTSP 텍스트를 Hex Binary로 WebSocket 송신
+- Playback 미디어 전달(클라이언트 내부)
+  - WebSocket interleaved RTP 수신 후 `BackendPlaybackWsRuntimeService::forwardPlaybackInterleavedRtp()`에서 로컬 UDP 포트로 송출
+  - 기본 포트: `127.0.0.1:5004`
+- Thermal 스트림
+  - `THERMAL_TRANSPORT=ws`이면 Thermal WS 연결로 바이너리 청크 수신
+  - `THERMAL_TRANSPORT=mqtt`이면 MQTT thermal topic 수신 경로 사용
 
 ## Playback Export 작동 원리
 
@@ -202,7 +225,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 - Media: Qt Multimedia (FFmpeg backend)
 - Network: Qt Network / WebSocket
 - Backend API: Crow + MariaDB (외부 서버)
-- Protocol: RTSP/RTSPS, HTTP/HTTPS, WebSocket
+- Protocol: RTSP/RTSPS, HTTP/HTTPS, WebSocket, UDP
 
 ## 환경 설정 (.env)
 
@@ -234,6 +257,11 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `PLAYBACK_WS_SDP_FILE_PROTOCOL`
   - `PLAYBACK_EXPORT_FFMPEG_PATH` (선택, 예: `C:/ffmpeg/bin/ffmpeg.exe`)
   - `THERMAL_DEBUG` (1이면 열화상 청크 조립 디버그 로그 활성화)
+- Thermal 전송 경로
+  - `THERMAL_TRANSPORT` (`ws` 기본, `mqtt` 선택)
+  - `THERMAL_START_PATH` (기본 `/thermal/control/start`)
+  - `THERMAL_STOP_PATH` (기본 `/thermal/control/stop`)
+  - `THERMAL_WS_PATH` (기본 `/thermal/stream`)
 
 ffmpeg 배치/버전 관리:
 - 저장소에는 `tools/ffmpeg.exe`를 커밋하지 않습니다(`.gitignore` 제외).
@@ -254,6 +282,9 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/2fa/setup/confirm` | OTP 등록 완료(첫 OTP 검증) |
 | `POST` | `/2fa/disable` | 현재 OTP로 2FA 비활성화 |
 | `POST` | `/account/delete` | 비밀번호 재입력 기반 회원탈퇴(2FA 계정은 OTP 추가) |
+| `POST` | `/thermal/control/start` | Thermal 스트림 시작 (`THERMAL_TRANSPORT=ws`일 때 사용) |
+| `POST` | `/thermal/control/stop` | Thermal 스트림 중지 (`THERMAL_TRANSPORT=ws`일 때 사용) |
+| `WS` | `/thermal/stream` | Thermal 바이너리 청크 수신 (`THERMAL_TRANSPORT=ws`) |
 | `GET` | `/api/sunapi/storage` | 카메라 SD 저장소 조회 (Crow 프록시) |
 | `GET` | `/api/sunapi/timeline` | Playback 타임라인 조회 |
 | `GET` | `/api/sunapi/month-days` | Playback 월 단위 녹화일 조회 |

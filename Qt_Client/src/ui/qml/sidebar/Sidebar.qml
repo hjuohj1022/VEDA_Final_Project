@@ -145,7 +145,7 @@ Rectangle {
         }
 
         Item {
-            Layout.fillHeight: !store.showPlaybackControls
+            Layout.fillHeight: store.showPlaybackControls || store.showCameraControls
         }
     }
 }

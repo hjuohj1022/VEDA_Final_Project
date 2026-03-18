@@ -62,6 +62,65 @@ QString formatGiB(qulonglong bytes)
     return QString::number(gib, 'f', 1) + " GB";
 }
 
+#ifdef Q_OS_WIN
+int sampleCpuUsagePercent()
+{
+    static ULONGLONG prevIdle = 0;
+    static ULONGLONG prevKernel = 0;
+    static ULONGLONG prevUser = 0;
+    static bool initialized = false;
+
+    FILETIME idleTime {};
+    FILETIME kernelTime {};
+    FILETIME userTime {};
+    if (!GetSystemTimes(&idleTime, &kernelTime, &userTime)) {
+        return -1;
+    }
+
+    ULARGE_INTEGER idle {};
+    ULARGE_INTEGER kernel {};
+    ULARGE_INTEGER user {};
+    idle.LowPart = idleTime.dwLowDateTime;
+    idle.HighPart = idleTime.dwHighDateTime;
+    kernel.LowPart = kernelTime.dwLowDateTime;
+    kernel.HighPart = kernelTime.dwHighDateTime;
+    user.LowPart = userTime.dwLowDateTime;
+    user.HighPart = userTime.dwHighDateTime;
+
+    const ULONGLONG curIdle = idle.QuadPart;
+    const ULONGLONG curKernel = kernel.QuadPart;
+    const ULONGLONG curUser = user.QuadPart;
+
+    if (!initialized) {
+        prevIdle = curIdle;
+        prevKernel = curKernel;
+        prevUser = curUser;
+        initialized = true;
+        return -1;
+    }
+
+    const ULONGLONG idleDelta = curIdle - prevIdle;
+    const ULONGLONG kernelDelta = curKernel - prevKernel;
+    const ULONGLONG userDelta = curUser - prevUser;
+    const ULONGLONG totalDelta = kernelDelta + userDelta;
+
+    prevIdle = curIdle;
+    prevKernel = curKernel;
+    prevUser = curUser;
+
+    if (totalDelta == 0 || totalDelta < idleDelta) {
+        return -1;
+    }
+
+    const double usage = (static_cast<double>(totalDelta - idleDelta) * 100.0)
+                         / static_cast<double>(totalDelta);
+    int value = static_cast<int>(usage + 0.5);
+    if (value < 0) value = 0;
+    if (value > 100) value = 100;
+    return value;
+}
+#endif
+
 } // namespace
 
 QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, BackendPrivate *state)
@@ -103,6 +162,7 @@ QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, 
 
     QString ramTotalText = "Unknown";
     QString ramAvailText = "Unknown";
+    int cpuUsagePercent = -1;
 #ifdef Q_OS_WIN
     MEMORYSTATUSEX mem;
     mem.dwLength = sizeof(mem);
@@ -110,9 +170,11 @@ QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, 
         ramTotalText = formatGiB(mem.ullTotalPhys);
         ramAvailText = formatGiB(mem.ullAvailPhys);
     }
+    cpuUsagePercent = sampleCpuUsagePercent();
 #endif
     out.insert("ramTotal", ramTotalText);
     out.insert("ramAvailable", ramAvailText);
+    out.insert("cpuUsagePercent", cpuUsagePercent);
 
     const QStorageInfo root(QDir::rootPath());
     out.insert("systemDrivePath", root.rootPath());
