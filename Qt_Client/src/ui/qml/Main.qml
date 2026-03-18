@@ -54,8 +54,13 @@ ApplicationWindow {
     property var clientSystemSpecsCache: ({})
     property bool clientSystemSpecsLoaded: false
     property bool startupOverlayVisible: true
+    property bool startupOverlayDismissed: false
     property bool startupBootReady: false
     property bool startupMinElapsed: false
+    property bool startupCameraReady: false
+    property bool startupTimeoutElapsed: false
+    property int startupCameraTarget: 4
+    property int startupMaxWaitMs: 10000
     property string startupStatusText: "초기 리소스 준비 중..."
 
     QtObject {
@@ -106,8 +111,58 @@ ApplicationWindow {
         systemSpecsDialog.showWithData(clientSystemSpecsCache)
     }
 
+    // 시작 오버레이 카메라 준비 상태 계산
+    function refreshStartupCameraReady() {
+        if (!streamPrewarmEnabled) {
+            startupCameraReady = true
+            return
+        }
+        startupCameraReady = backend.activeCameras >= startupCameraTarget
+    }
+
+    // 시작 오버레이 상태 문구 갱신
+    function updateStartupStatusText() {
+        if (startupOverlayDismissed) {
+            startupStatusText = "로그인 화면 준비 완료"
+            return
+        }
+        if (!startupBootReady) {
+            startupStatusText = "초기 리소스 준비 중..."
+            return
+        }
+        if (!startupMinElapsed) {
+            startupStatusText = "초기 UI 준비 중..."
+            return
+        }
+        if (startupCameraReady) {
+            startupStatusText = "로그인 화면 준비 완료"
+            return
+        }
+        if (startupTimeoutElapsed) {
+            startupStatusText = "일부 카메라 준비 지연, 로그인 화면으로 이동"
+            return
+        }
+        var count = Math.max(0, backend.activeCameras)
+        startupStatusText = "카메라 스트림 준비 중... (" + count + "/" + startupCameraTarget + ")"
+    }
+
+    // 시작 오버레이 표시/해제 상태 갱신
     function updateStartupOverlayState() {
-        startupOverlayVisible = !(startupBootReady && startupMinElapsed)
+        if (startupOverlayDismissed) {
+            startupOverlayVisible = false
+            startupStatusText = "로그인 화면 준비 완료"
+            return
+        }
+        refreshStartupCameraReady()
+        startupOverlayVisible = !(startupBootReady && startupMinElapsed && (startupCameraReady || startupTimeoutElapsed))
+        updateStartupStatusText()
+        if (!startupOverlayVisible) {
+            startupOverlayDismissed = true
+            startupStatusText = "로그인 화면 준비 완료"
+            if (startupTimeoutTimer.running) {
+                startupTimeoutTimer.stop()
+            }
+        }
     }
 
     function urlToLocalPath(u) {
@@ -270,6 +325,8 @@ ApplicationWindow {
         startupBootReady = true
         updateStartupOverlayState()
     }
+
+    onStreamPrewarmEnabledChanged: updateStartupOverlayState()
 
     function sanitizeIpv4Input(raw) {
         var txt = raw.replace(/[^0-9.]/g, "")
@@ -863,6 +920,11 @@ ApplicationWindow {
 
     Connections {
         target: backend
+        function onActiveCamerasChanged() {
+            if (window.startupOverlayDismissed)
+                return
+            window.updateStartupOverlayState()
+        }
         function onIsLoggedInChanged() {
             if (!backend.isLoggedIn) {
                 inlineMainViewVisible = false
@@ -1031,7 +1093,17 @@ ApplicationWindow {
         running: true
         onTriggered: {
             startupMinElapsed = true
-            startupStatusText = "로그인 화면 준비 완료"
+            updateStartupOverlayState()
+        }
+    }
+
+    Timer {
+        id: startupTimeoutTimer
+        interval: startupMaxWaitMs
+        repeat: false
+        running: true
+        onTriggered: {
+            startupTimeoutElapsed = true
             updateStartupOverlayState()
         }
     }
