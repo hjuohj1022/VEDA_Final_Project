@@ -28,6 +28,8 @@ constexpr int kDefaultDtlsPort = 5005;
 constexpr int kDefaultForwardPort = 5005;
 constexpr size_t kMaxThermalPacketBytes = 4096;
 constexpr int kMinPskBytes = 16;
+constexpr int kHandshakeTimeoutSeconds = 15;
+constexpr int kSessionIdleTimeoutSeconds = 30;
 
 std::string trimCopy(const std::string& value)
 {
@@ -154,6 +156,20 @@ int bindUdpSocket(const std::string& host, int port)
         throw std::runtime_error("Failed to bind UDP socket");
     }
     return fd;
+}
+
+void configureSocketTimeout(int fd, int seconds)
+{
+    timeval timeout{};
+    timeout.tv_sec = seconds;
+    timeout.tv_usec = 0;
+
+    if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        throw std::runtime_error(std::string("Failed to set UDP receive timeout: ") + std::strerror(errno));
+    }
+    if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) {
+        throw std::runtime_error(std::string("Failed to set UDP send timeout: ") + std::strerror(errno));
+    }
 }
 
 struct UdpTarget {
@@ -345,45 +361,42 @@ public:
                 continue;
             }
 
-            SSL_free(listenSsl);
-
-            SSL* sessionSsl = SSL_new(ctx_);
-            BIO* sessionBio = BIO_new_dgram(listenFd_, BIO_NOCLOSE);
-            if (sessionSsl == nullptr || sessionBio == nullptr) {
-                if (sessionSsl != nullptr) {
-                    SSL_free(sessionSsl);
-                } else if (sessionBio != nullptr) {
-                    BIO_free(sessionBio);
-                }
-                BIO_ADDR_free(peer);
-                disconnectUdpSocket(listenFd_);
-                throw std::runtime_error("Failed to prepare DTLS session BIO");
-            }
-
-            SSL_set_bio(sessionSsl, sessionBio, sessionBio);
-            BIO_ctrl(sessionBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
-            SSL_set_accept_state(sessionSsl);
+            BIO_ctrl(listenBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
+            configureSocketTimeout(listenFd_, kHandshakeTimeoutSeconds);
 
             std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
 
-            const int acceptRc = SSL_accept(sessionSsl);
+            const int acceptRc = SSL_accept(listenSsl);
             if (acceptRc <= 0) {
-                printOpenSslErrors("[DTLS] SSL_accept failed");
-                SSL_free(sessionSsl);
+                const int sslError = SSL_get_error(listenSsl, acceptRc);
+                if (BIO_dgram_recv_timedout(listenBio) == 1 || BIO_dgram_send_timedout(listenBio) == 1) {
+                    std::cerr << "[DTLS] SSL_accept timed out for peer " << sockaddrToString(peerSock) << '\n';
+                } else {
+                    std::cerr << "[DTLS] SSL_accept failed with sslError=" << sslError
+                              << " errno=" << errno << " (" << std::strerror(errno) << ")\n";
+                    printOpenSslErrors("[DTLS] SSL_accept failed");
+                }
+                SSL_free(listenSsl);
                 BIO_ADDR_free(peer);
                 disconnectUdpSocket(listenFd_);
+                configureSocketTimeout(listenFd_, 0);
                 continue;
             }
 
+            std::cout << "[DTLS] Handshake complete for peer " << sockaddrToString(peerSock) << '\n';
+            configureSocketTimeout(listenFd_, kSessionIdleTimeoutSeconds);
+
             std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
             for (;;) {
-                const int bytesRead = SSL_read(sessionSsl, buffer.data(), static_cast<int>(buffer.size()));
+                const int bytesRead = SSL_read(listenSsl, buffer.data(), static_cast<int>(buffer.size()));
                 if (bytesRead <= 0) {
-                    const int sslError = SSL_get_error(sessionSsl, bytesRead);
+                    const int sslError = SSL_get_error(listenSsl, bytesRead);
                     if (sslError == SSL_ERROR_ZERO_RETURN) {
                         std::cout << "[DTLS] Peer closed session\n";
                     } else if (sslError == SSL_ERROR_WANT_READ || sslError == SSL_ERROR_WANT_WRITE) {
                         continue;
+                    } else if (BIO_dgram_recv_timedout(listenBio) == 1 || BIO_dgram_send_timedout(listenBio) == 1) {
+                        std::cout << "[DTLS] DTLS session timed out for peer " << sockaddrToString(peerSock) << '\n';
                     } else {
                         printOpenSslErrors("[DTLS] SSL_read failed");
                     }
@@ -395,10 +408,11 @@ public:
                 }
             }
 
-            SSL_shutdown(sessionSsl);
-            SSL_free(sessionSsl);
+            SSL_shutdown(listenSsl);
+            SSL_free(listenSsl);
             BIO_ADDR_free(peer);
             disconnectUdpSocket(listenFd_);
+            configureSocketTimeout(listenFd_, 0);
         }
     }
 
