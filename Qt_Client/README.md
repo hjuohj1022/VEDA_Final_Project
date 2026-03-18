@@ -12,6 +12,8 @@
   - 상단: `FPS`, `LATENCY` 차트
   - 하단: `ACTIVE`, `STORAGE`, `CLIENT`, `SERVER` 4개 카드 세로 배치(패널 높이 전체 사용)
   - `CLIENT`는 실시간 CPU 사용률/메모리 사용률/GPU 정보 표시
+    - 주기 갱신 시 무거운 시스템 모델 조회(CPU/GPU/DirectX)는 캐시 사용
+    - 반복 PowerShell/WMI 호출로 인한 UI 프레임 드랍/4채널 FPS 튐 현상 완화
   - `SERVER`는 단일 상태가 아니라 `API`, `RTSP`, `MQTT`를 각각 독립 상태로 표시
     - 상단: `GOOD / DEGRADED / DOWN` (각 항목별 상태값)
     - 하단: `API / RTSP / MQTT` 라벨

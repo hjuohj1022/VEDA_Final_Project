@@ -140,25 +140,33 @@ QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, 
     out.insert("qtVersion", QString::fromLatin1(qVersion()));
     out.insert("logicalCores", QThread::idealThreadCount());
 
-    QString cpuModel = qEnvironmentVariable("PROCESSOR_IDENTIFIER").trimmed();
+    // 무거운 시스템 조회 결과 1회 캐시 사용.
+    static bool modelInfoCached = false;
+    static QString cachedCpuModel = "Unknown";
+    static QString cachedGpuModel = "Unknown";
+    static QString cachedDirectX = "Unknown";
+
+    if (!modelInfoCached) {
+        QString cpuModel = qEnvironmentVariable("PROCESSOR_IDENTIFIER").trimmed();
 #ifdef Q_OS_WIN
-    if (cpuModel.isEmpty()) {
-        cpuModel = runPowerShellOneLine("(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)");
+        if (cpuModel.isEmpty()) {
+            cpuModel = runPowerShellOneLine("(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)");
+        }
+#endif
+        cachedCpuModel = cpuModel.isEmpty() ? QString("Unknown") : cpuModel;
+
+#ifdef Q_OS_WIN
+        const QString gpuModel = runPowerShellOneLine("(Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name)");
+        cachedGpuModel = gpuModel.isEmpty() ? QString("Unknown") : gpuModel;
+
+        const QString directxVersion = runPowerShellOneLine("(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\DirectX').Version");
+        cachedDirectX = directxVersion.isEmpty() ? QString("Unknown") : directxVersion;
+#endif
+        modelInfoCached = true;
     }
-#endif
-    out.insert("cpuModel", cpuModel.isEmpty() ? QString("Unknown") : cpuModel);
-
-    QString gpuModel;
-#ifdef Q_OS_WIN
-    gpuModel = runPowerShellOneLine("(Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name)");
-#endif
-    out.insert("gpuModel", gpuModel.isEmpty() ? QString("Unknown") : gpuModel);
-
-    QString directxVersion;
-#ifdef Q_OS_WIN
-    directxVersion = runPowerShellOneLine("(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\DirectX').Version");
-#endif
-    out.insert("directxVersion", directxVersion.isEmpty() ? QString("Unknown") : directxVersion);
+    out.insert("cpuModel", cachedCpuModel);
+    out.insert("gpuModel", cachedGpuModel);
+    out.insert("directxVersion", cachedDirectX);
 
     QString ramTotalText = "Unknown";
     QString ramAvailText = "Unknown";
