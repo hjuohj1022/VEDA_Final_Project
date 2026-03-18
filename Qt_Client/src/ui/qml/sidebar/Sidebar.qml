@@ -10,6 +10,7 @@ Rectangle {
     property alias cameraNames: store.cameraNames
     property alias showCameraControls: store.showCameraControls
     property alias showPlaybackControls: store.showPlaybackControls
+    property alias showThermalControls: store.showThermalControls
     property alias selectedCameraIndex: store.selectedCameraIndex
     property alias cameraControlStatus: store.cameraControlStatus
     property alias cameraControlError: store.cameraControlError
@@ -120,7 +121,9 @@ Rectangle {
         Text {
             text: store.showCameraControls
                   ? "Camera Controls"
-                  : (store.showPlaybackControls ? "Playback Controls" : "System Metrics")
+                  : (store.showPlaybackControls
+                     ? "Playback Controls"
+                     : (store.showThermalControls ? "Thermal Panel" : "System Metrics"))
             color: theme ? theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14
@@ -138,6 +141,13 @@ Rectangle {
             store: store
         }
 
+        SidebarThermalControlsPanel {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
+            theme: root.theme
+            store: store
+        }
+
         SidebarSystemMetricsPanel {
             Layout.fillWidth: true
             theme: root.theme
@@ -145,7 +155,7 @@ Rectangle {
         }
 
         Item {
-            Layout.fillHeight: store.showPlaybackControls || store.showCameraControls
+            Layout.fillHeight: store.showPlaybackControls || store.showCameraControls || store.showThermalControls
         }
     }
 }

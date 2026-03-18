@@ -7,6 +7,7 @@ Item {
     property var cameraNames: ["Main Entrance", "Parking Lot A", "Loading Bay", "Reception Area"]
     property bool showCameraControls: false
     property bool showPlaybackControls: false
+    property bool showThermalControls: false
     property int selectedCameraIndex: -1
     property string cameraControlStatus: ""
     property bool cameraControlError: false

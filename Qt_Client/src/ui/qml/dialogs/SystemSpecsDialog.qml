@@ -6,15 +6,43 @@ Dialog {
     id: root
     property var theme
     property var specs: ({})
+    property real dragStartX: 0
+    property real dragStartY: 0
+    property real popupStartX: 0
+    property real popupStartY: 0
 
     modal: true
     width: 640
     height: 500
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
+    // 다이얼로그를 부모 기준 중앙에 배치
+    function centerInParent() {
+        if (!parent)
+            return
+        root.x = Math.round((parent.width - root.width) / 2)
+        root.y = Math.round((parent.height - root.height) / 2)
+    }
+
+    // 드래그 시 다이얼로그 위치를 부모 영역 안으로 제한
+    function setClampedPosition(nextX, nextY) {
+        if (!parent) {
+            root.x = nextX
+            root.y = nextY
+            return
+        }
+        var minX = 0
+        var minY = 0
+        var maxX = Math.max(0, parent.width - root.width)
+        var maxY = Math.max(0, parent.height - root.height)
+        root.x = Math.max(minX, Math.min(maxX, nextX))
+        root.y = Math.max(minY, Math.min(maxY, nextY))
+    }
+
     function showWithData(data) {
         specs = data || ({})
         open()
+        Qt.callLater(centerInParent)
     }
 
     function valueOf(key, fallbackValue) {
@@ -73,6 +101,11 @@ Dialog {
                 color: root.theme ? root.theme.textSecondary : "#a1a1aa"
                 font.pixelSize: 11
             }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: false
         }
     }
 
@@ -214,4 +247,6 @@ Dialog {
         border.color: root.theme ? root.theme.border : "#27272a"
         radius: 10
     }
+
+    onOpened: centerInParent()
 }

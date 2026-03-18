@@ -70,6 +70,14 @@
 - 팔레트(`Jet`/`Gray`/`Iron`) 및 Auto/Manual range 제어 지원
 - 관련 구현: `src/core/thermal/BackendThermal.cpp`, `src/ui/qml/thermal/ThermalViewer.qml`
 
+### 4-1. Thermal 화면 UI 구성
+- Thermal 탭 진입 시 우측 패널은 `System Metrics` 대신 `Thermal Panel`로 전환
+- `Return to Live View` 버튼 제거
+- `Start/Stop` 버튼을 `Thermal Controls` 헤더 우측으로 이동
+- Thermal Controls 패널 내부 간격/정렬을 재조정해 세로 공간을 균등 사용
+- Palette 콤보박스/Auto Range 토글/슬라이더 스타일을 다크 테마 기준으로 정리
+- 하단 상태 표시를 단일 라인으로 유지하고, 중복 대형 에러 텍스트 노출 제거
+
 ### 5. CCTV 3D Map (1차: API + WS 수신/로컬 렌더)
 - Camera Controls에서 `줌- + 오토포커스` 준비 버튼, `3D Map 모드 ON/OFF` 버튼으로 시작/중지
 - 3D Map 전용 새 창(프레임리스, UI 통일)에서 수신 프레임 표시 및 드래그 회전
@@ -493,6 +501,11 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - 에디터 권장: UTF-8 고정(`autoGuessEncoding` 비활성)
   - Git 권장 설정: `core.autocrlf=input`, `core.eol=lf`
   - 문자열 리터럴 수정 후 빌드 에러 발생 시 따옴표/이스케이프(`\"`, `\n`) 먼저 확인
+
+- Windows 실행 중 아이콘이 기본 아이콘으로 보일 때
+  - 아이콘 리소스(`.ico`, `.rc`, CMake`) 변경 후에는 `Clean`만으로 반영이 안 될 수 있음
+  - `build/Desktop_Qt_6_10_2_MinGW_64_bit-Release` 폴더 삭제 후 재빌드 권장
+  - 작업표시줄 고정 아이콘 사용 중이면 고정 해제 후 재실행/재고정 필요
 
 ## License
 
