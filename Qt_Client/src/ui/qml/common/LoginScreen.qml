@@ -397,240 +397,65 @@ Item {
         }
     }
     
-    // 로그인 이후 화면 (열화상 패널)
-    RowLayout {
+    // 로그인 이후 화면 (열화상 뷰)
+    Item {
         anchors.fill: parent
         visible: root.isLoggedIn
-        spacing: 16
 
         Rectangle {
-            Layout.preferredWidth: 300
-            Layout.fillHeight: true
-            color: theme ? theme.bgComponent : "#18181b"
+            anchors.fill: parent
+            anchors.margins: 10
+            color: theme ? theme.bgSecondary : "#09090b"
             radius: 8
             border.color: theme ? theme.border : "#27272a"
-            border.width: 1
+            border.width: 2
+            clip: true
 
-            ColumnLayout {
+            Item {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 12
+                anchors.margins: 2
 
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Text {
-                        text: "Thermal Panel"
-                        color: theme ? theme.textPrimary : "white"
-                        font.bold: true
-                        font.pixelSize: 18
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: backend.thermalStreaming ? "Stop" : "Start"
-                        scale: down ? 0.97 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                        background: Rectangle {
-                            color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
-                            radius: 4
-                            border.color: theme ? theme.border : "#27272a"
-                        }
-                        contentItem: Text { text: parent.text; color: theme ? theme.textSecondary : "#a1a1aa"; anchors.centerIn: parent }
-                        onClicked: {
-                            if (backend.thermalStreaming)
-                                backend.stopThermalStream()
-                            else
-                                backend.startThermalStream()
-                        }
-                        ToolTip.visible: hovered
-                        ToolTip.text: "열화상 스트리밍 시작/중지"
-                    }
+                Rectangle {
+                    anchors.fill: parent
+                    color: "black"
                 }
 
-                Button {
-                    Layout.fillWidth: true
-                    height: 36
-                    text: "Return to Live View"
-                    scale: down ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-
-                    background: Rectangle {
-                        color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
-                        radius: 6
-                    }
-
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-
-                    onClicked: root.requestReturnLiveView()
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    fillMode: Image.PreserveAspectFit
+                    retainWhileLoading: true
+                    smooth: false
+                    cache: false
+                    source: backend.thermalFrameDataUrl
                 }
 
                 Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: theme ? theme.bgSecondary : "#0f172a"
-                    radius: 8
-                    border.color: theme ? theme.border : "#27272a"
-                    border.width: 1
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 10
-
-                        Text {
-                            text: "Thermal Controls"
-                            color: theme ? theme.textPrimary : "white"
-                            font.bold: true
-                            font.pixelSize: 14
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Text {
-                                text: "Palette"
-                                color: theme ? theme.textSecondary : "#a1a1aa"
-                                Layout.preferredWidth: 72
-                            }
-                            ComboBox {
-                                id: paletteCombo
-                                Layout.fillWidth: true
-                                model: ["Gray", "Iron", "Jet"]
-                                Component.onCompleted: {
-                                    var idx = model.indexOf(backend.thermalPalette)
-                                    currentIndex = idx >= 0 ? idx : 2
-                                }
-                                onActivated: backend.setThermalPalette(currentText)
-                            }
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: "Auto Range"
-                                color: theme ? theme.textSecondary : "#a1a1aa"
-                                Layout.fillWidth: true
-                            }
-                            Switch {
-                                checked: backend.thermalAutoRange
-                                onToggled: backend.setThermalAutoRange(checked)
-                            }
-                        }
-
-                        Text {
-                            text: "Auto Window: " + backend.thermalAutoRangeWindowPercent + "%"
-                            color: theme ? theme.textSecondary : "#a1a1aa"
-                            visible: backend.thermalAutoRange
-                        }
-                        Slider {
-                            id: autoWindowSlider
-                            Layout.fillWidth: true
-                            from: 50
-                            to: 100
-                            stepSize: 1
-                            enabled: backend.thermalAutoRange
-                            visible: backend.thermalAutoRange
-                            value: backend.thermalAutoRangeWindowPercent
-                            onMoved: backend.setThermalAutoRangeWindowPercent(Math.round(value))
-                        }
-
-                        Text {
-                            text: "Min: " + backend.thermalManualMin
-                            color: theme ? theme.textSecondary : "#a1a1aa"
-                        }
-                        Slider {
-                            id: minSlider
-                            Layout.fillWidth: true
-                            from: 0
-                            to: 30000
-                            stepSize: 10
-                            enabled: !backend.thermalAutoRange
-                            value: backend.thermalManualMin
-                            onMoved: backend.setThermalManualRange(value, maxSlider.value)
-                        }
-
-                        Text {
-                            text: "Max: " + backend.thermalManualMax
-                            color: theme ? theme.textSecondary : "#a1a1aa"
-                        }
-                        Slider {
-                            id: maxSlider
-                            Layout.fillWidth: true
-                            from: 100
-                            to: 35000
-                            stepSize: 10
-                            enabled: !backend.thermalAutoRange
-                            value: backend.thermalManualMax
-                            onMoved: backend.setThermalManualRange(minSlider.value, value)
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            radius: 6
-                            color: "transparent"
-                            border.color: theme ? theme.border : "#27272a"
-                            border.width: 1
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
-                                Text {
-                                    text: "Emissivity (추후 확장)"
-                                    color: theme ? theme.textSecondary : "#a1a1aa"
-                                    font.pixelSize: 12
-                                }
-                                Text {
-                                    text: "Ambient (추후 확장)"
-                                    color: theme ? theme.textSecondary : "#a1a1aa"
-                                    font.pixelSize: 12
-                                }
-                            }
-                        }
-
-                        Item { Layout.fillHeight: true }
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: "black"
-
-            Image {
-                anchors.fill: parent
-                anchors.margins: 8
-                fillMode: Image.PreserveAspectFit
-                retainWhileLoading: true
-                smooth: false
-                cache: false
-                source: backend.thermalFrameDataUrl
-            }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 40
-                color: "#18181b"
-                border.color: "#27272a"
-                border.width: 1
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.leftMargin: 12
-                    text: backend.thermalInfoText
-                    color: "#d4d4d8"
-                    font.pixelSize: 12
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 30
+                    color: "transparent"
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        width: parent.width
+                        height: 1
+                        color: theme ? theme.border : "#27272a"
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: backend.thermalInfoText
+                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        font.pixelSize: 12
+                    }
                 }
             }
         }

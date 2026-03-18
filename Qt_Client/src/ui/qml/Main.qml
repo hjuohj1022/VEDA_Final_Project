@@ -414,20 +414,37 @@ ApplicationWindow {
             border.color: theme.border
             border.width: 1
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 6
-                spacing: 8
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 6
+                    spacing: 8
 
-                Text {
-                    text: "Vision VMS"
-                    color: theme.textPrimary
-                    font.pixelSize: 12
-                    font.bold: true
-                }
+                    RowLayout {
+                        spacing: 6
 
-                Item { Layout.fillWidth: true }
+                        Image {
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 14
+                            Layout.preferredHeight: 14
+                            source: "qrc:/qt/qml/Team3VideoReceiver/icons/Hanwha_logo.ico"
+                            fillMode: Image.PreserveAspectFit
+                            sourceSize.width: 14
+                            sourceSize.height: 14
+                            clip: true
+                            smooth: true
+                            mipmap: true
+                        }
+
+                        Text {
+                            text: "Vision VMS"
+                            color: theme.textPrimary
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
 
                 Rectangle {
                     id: minBtn
@@ -794,6 +811,7 @@ ApplicationWindow {
                 visible: backend.isLoggedIn
                 showCameraControls: window.inlineMainViewVisible && stackLayout.currentIndex === 3
                 showPlaybackControls: backend.isLoggedIn && stackLayout.currentIndex === 2
+                showThermalControls: backend.isLoggedIn && stackLayout.currentIndex === 1
                 selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
                 cameraNames: window.cameraNames
                 onRequestCameraNameChange: function(cameraIndex, name) {
