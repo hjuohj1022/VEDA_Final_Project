@@ -281,7 +281,9 @@ public:
         SSL_CTX_set_psk_server_callback(ctx_, &DtlsGateway::pskServerCallback);
         SSL_CTX_set_cookie_generate_cb(ctx_, &DtlsGateway::generateCookie);
         SSL_CTX_set_cookie_verify_cb(ctx_, &DtlsGateway::verifyCookie);
-        SSL_CTX_set_psk_identity_hint(ctx_, pskIdentity_.c_str());
+        if (SSL_CTX_use_psk_identity_hint(ctx_, pskIdentity_.c_str()) != 1) {
+            throw std::runtime_error("Failed to configure DTLS PSK identity hint");
+        }
 
         if (SSL_CTX_set_cipher_list(ctx_, "PSK-AES128-CCM8:PSK-AES128-GCM-SHA256:PSK-AES128-CBC-SHA256") != 1) {
             throw std::runtime_error("Failed to configure DTLS PSK cipher list");
