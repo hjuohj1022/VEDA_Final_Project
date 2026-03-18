@@ -51,6 +51,9 @@ struct BackendPrivate
     int m_activeCameras = 0;
     int m_currentFps = 0;
     int m_latency = 0;
+    int m_latencyRaw = 0;
+    double m_latencyEma = 0.0;
+    bool m_latencyEmaInitialized = false;
     QString m_storageUsed = "0 GB";
     QString m_storageTotal = "0 GB";
     int m_storagePercent = 0;
