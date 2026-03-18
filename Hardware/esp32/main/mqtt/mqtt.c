@@ -3,6 +3,7 @@
 #include "wifi.h"
 #include "../device/frame_link.h"
 #include "../device/cmd_uart.h"
+#include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -351,6 +352,9 @@ void mqttPublishText(const char *topic, const char *payload, int qos)
 
 esp_mqtt_client_handle_t mqttClient(void)
 {
+    const int mqtt_buffer_size = frameStreamUseMqtt() ? 4096 : 1024;
+    const int mqtt_out_buffer_size = frameStreamUseMqtt() ? 4096 : 1024;
+
     if (s_client != NULL) {
         return s_client;
     }
@@ -360,10 +364,18 @@ esp_mqtt_client_handle_t mqttClient(void)
         return NULL;
     }
 
+    (void)printf("MQTT client init: free=%lu min=%lu\n",
+                 (unsigned long)esp_get_free_heap_size(),
+                 (unsigned long)esp_get_minimum_free_heap_size());
+    (void)printf("MQTT client init: largest_8bit=%lu buffer=%d out_buffer=%d\n",
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                 mqtt_buffer_size,
+                 mqtt_out_buffer_size);
+
     const esp_mqtt_client_config_t cfg = {
         .broker.address.uri                               = APP_MQTT_BROKER_URI,
-        .buffer.size                                      = 4096,
-        .buffer.out_size                                  = 4096,
+        .buffer.size                                      = mqtt_buffer_size,
+        .buffer.out_size                                  = mqtt_out_buffer_size,
         .network.timeout_ms                               = 15000,
         .network.reconnect_timeout_ms                     = 8000,
         .session.keepalive                                = 90,

@@ -67,11 +67,15 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
             (void)printf("WiFi connected, got IP\n");
             (void)printf("Free heap: %lu\n", (uint32_t)esp_get_free_heap_size());
             cmdUartFlushInput();
-            (void)udpStreamInit();
             if (APP_FRAME_STREAM_MODE != FRAME_STREAM_MODE_UDP_ONLY) {
                 (void)mqttClient();
             } else {
                 (void)printf("MQTT client disabled by APP_FRAME_STREAM_MODE=UDP_ONLY\n");
+            }
+            if ((APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH) ||
+                (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_FRAME_MQTT_CONTROL)) {
+                udpStreamDeferInit(3000U);
+                (void)printf("DTLS init deferred for 3000 ms to let MQTT/TLS start first\n");
             }
         }
         else
