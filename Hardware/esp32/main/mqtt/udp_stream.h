@@ -3,10 +3,12 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 bool udpStreamInit(void);
 bool udpStreamIsEnabled(void);
 bool udpStreamIsReady(void);
+void udpStreamDeferInit(uint32_t delay_ms);
 void udpStreamReset(void);
 int udpStreamSend(const void *payload, size_t len);
 

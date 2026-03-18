@@ -1,9 +1,11 @@
 #include "udp_stream.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -47,6 +49,8 @@
 
 #define DTLS_STRINGIFY_IMPL(x) #x
 #define DTLS_STRINGIFY(x) DTLS_STRINGIFY_IMPL(x)
+#define DTLS_MAX_PSK_BYTES 64U
+#define DTLS_ERRBUF_LEN 128U
 
 static const char *TAG = "udp_stream";
 static const TickType_t UDP_SEND_RETRY_DELAY_TICKS = 1U;
@@ -54,8 +58,7 @@ static const int UDP_SEND_RETRY_COUNT = 3;
 static const uint32_t DTLS_HANDSHAKE_MIN_MS = 1000U;
 static const uint32_t DTLS_HANDSHAKE_MAX_MS = 8000U;
 static const uint32_t DTLS_READ_TIMEOUT_MS = 1000U;
-static const size_t DTLS_MAX_PSK_BYTES = 64U;
-static const size_t DTLS_ERRBUF_LEN = 128U;
+static const uint32_t DTLS_RETRY_BACKOFF_MS = 10000U;
 
 static mbedtls_net_context s_dtls_net;
 static mbedtls_ssl_context s_dtls_ssl;
@@ -67,12 +70,33 @@ static mbedtls_timing_delay_context s_dtls_timer;
 static bool s_udp_enabled = false;
 static bool s_dtls_context_initialized = false;
 static bool s_dtls_configured = false;
+static int64_t s_dtls_retry_after_us = 0;
 
 static void dtlsLogError(const char *message, int err)
 {
     char errbuf[DTLS_ERRBUF_LEN] = {0};
     mbedtls_strerror(err, errbuf, sizeof(errbuf));
     ESP_LOGW(TAG, "%s ret=%d (%s)", message, err, errbuf);
+}
+
+static void dtlsLogHeap(const char *message)
+{
+    ESP_LOGI(TAG,
+             "%s free_heap=%lu min_heap=%lu largest_8bit=%lu",
+             message,
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)esp_get_minimum_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
+
+static void dtlsSetRetryDelayMs(uint32_t delay_ms)
+{
+    if (delay_ms == 0U) {
+        s_dtls_retry_after_us = 0;
+        return;
+    }
+
+    s_dtls_retry_after_us = esp_timer_get_time() + ((int64_t)delay_ms * 1000LL);
 }
 
 static int dtlsHexNibble(char ch)
@@ -145,7 +169,7 @@ void udpStreamReset(void)
     s_dtls_configured = false;
 
     if (s_dtls_context_initialized) {
-        mbedtls_ssl_session_reset(&s_dtls_ssl);
+        (void)mbedtls_ssl_session_reset(&s_dtls_ssl);
         mbedtls_ssl_free(&s_dtls_ssl);
         mbedtls_ssl_config_free(&s_dtls_conf);
         mbedtls_ctr_drbg_free(&s_dtls_ctr_drbg);
@@ -154,6 +178,11 @@ void udpStreamReset(void)
         memset(&s_dtls_timer, 0, sizeof(s_dtls_timer));
         s_dtls_context_initialized = false;
     }
+}
+
+void udpStreamDeferInit(uint32_t delay_ms)
+{
+    dtlsSetRetryDelayMs(delay_ms);
 }
 
 static bool udpStreamConfigValid(void)
@@ -301,6 +330,8 @@ static int dtlsPerformHandshake(void)
 
 bool udpStreamInit(void)
 {
+    const int64_t now_us = esp_timer_get_time();
+
     if (udpStreamIsReady()) {
         return true;
     }
@@ -310,9 +341,16 @@ bool udpStreamInit(void)
         return false;
     }
 
+    if ((s_dtls_retry_after_us != 0) && (now_us < s_dtls_retry_after_us)) {
+        return false;
+    }
+
     udpStreamReset();
+    dtlsLogHeap("DTLS init begin");
 
     if (dtlsConfigureClient() != 0) {
+        dtlsSetRetryDelayMs(DTLS_RETRY_BACKOFF_MS);
+        dtlsLogHeap("DTLS init failed");
         udpStreamReset();
         return false;
     }
@@ -321,13 +359,17 @@ bool udpStreamInit(void)
         const int handshake_ret = dtlsPerformHandshake();
         if (handshake_ret != 0) {
             dtlsLogError("DTLS handshake failed", handshake_ret);
+            dtlsSetRetryDelayMs(DTLS_RETRY_BACKOFF_MS);
+            dtlsLogHeap("DTLS handshake failed");
             udpStreamReset();
             return false;
         }
     }
 
+    s_dtls_retry_after_us = 0;
     s_dtls_configured = true;
     s_udp_enabled = true;
+    dtlsLogHeap("DTLS init OK");
     ESP_LOGI(TAG,
              "DTLS stream target=%s:%d identity=%s",
              APP_DTLS_TARGET_HOST,
@@ -373,6 +415,7 @@ int udpStreamSend(const void *payload, size_t len)
             || (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
 #endif
            ) {
+            dtlsSetRetryDelayMs(DTLS_RETRY_BACKOFF_MS);
             udpStreamReset();
             break;
         }

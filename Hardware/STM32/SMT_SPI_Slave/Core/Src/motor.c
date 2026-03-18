@@ -11,11 +11,14 @@
 
 static I2C_HandleTypeDef *s_hi2c = NULL;
 static int16_t s_angle[MOTOR_NUM] = {90, 90, 90};
+static int16_t s_target_angle[MOTOR_NUM] = {90, 90, 90};
 static int8_t s_moving[MOTOR_NUM] = {0, 0, 0};
 static uint32_t s_last_tick[MOTOR_NUM] = {0, 0, 0};
 
 #define SMOOTH_STEP_DEG    1
 #define MOVING_INTERVAL_MS 20
+#define SET_STEP_DEG       1
+#define SET_INTERVAL_MS    35
 
 static HAL_StatusTypeDef pca_write(uint8_t reg, uint8_t val)
 {
@@ -178,6 +181,7 @@ int32_t Motor_Init(I2C_HandleTypeDef *hi2c)
     for (uint8_t i = 0U; i < (uint8_t)MOTOR_NUM; i++)
     {
         s_angle[i] = 90;
+        s_target_angle[i] = 90;
         s_moving[i] = 0;
         pca_set_pwm(i, PULSE_US_TO_TICK(s_cal_center[i]));
     }
@@ -203,15 +207,16 @@ void Motor_SetAngle(uint8_t motor_id, int16_t angle)
         target_angle = (int16_t)MOTOR_ANGLE_MAX;
     }
 
-    s_angle[motor_id] = target_angle;
-    pca_set_pwm(motor_id, angle_to_tick(motor_id, s_angle[motor_id]));
+    s_target_angle[motor_id] = target_angle;
+    s_moving[motor_id] = 0;
+    s_last_tick[motor_id] = HAL_GetTick();
 }
 
 void Motor_MoveRelative(uint8_t motor_id, int16_t delta)
 {
     if (motor_id < (uint8_t)MOTOR_NUM)
     {
-        Motor_SetAngle(motor_id, (int16_t)(s_angle[motor_id] + delta));
+        Motor_SetAngle(motor_id, (int16_t)(s_target_angle[motor_id] + delta));
     }
 }
 
@@ -232,6 +237,7 @@ void Motor_StartMove(uint8_t motor_id, int8_t dir)
     if (motor_id < (uint8_t)MOTOR_NUM)
     {
         pca_set_pwm(motor_id, angle_to_tick(motor_id, s_angle[motor_id]));
+        s_target_angle[motor_id] = s_angle[motor_id];
         s_moving[motor_id] = dir;
         s_last_tick[motor_id] = HAL_GetTick();
     }
@@ -242,6 +248,7 @@ void Motor_Stop(uint8_t motor_id)
     if (motor_id < (uint8_t)MOTOR_NUM)
     {
         s_moving[motor_id] = 0;
+        s_target_angle[motor_id] = s_angle[motor_id];
         pca_set_pwm(motor_id, angle_to_tick(motor_id, s_angle[motor_id]));
     }
 }
@@ -251,6 +258,7 @@ static void Motor_Release(uint8_t motor_id)
     if (motor_id < (uint8_t)MOTOR_NUM)
     {
         s_moving[motor_id] = 0;
+        s_target_angle[motor_id] = s_angle[motor_id];
         pca_release_pwm(motor_id);
     }
 }
@@ -260,6 +268,7 @@ void Motor_StopAll(void)
     for (uint8_t i = 0U; i < (uint8_t)MOTOR_NUM; i++)
     {
         s_moving[i] = 0;
+        s_target_angle[i] = s_angle[i];
     }
 }
 
@@ -285,6 +294,7 @@ void Motor_Update(void)
             if (next_angle != s_angle[i])
             {
                 s_angle[i] = next_angle;
+                s_target_angle[i] = next_angle;
                 pca_set_pwm(i, angle_to_tick(i, s_angle[i]));
             }
             s_last_tick[i] = now;
@@ -294,6 +304,33 @@ void Motor_Update(void)
             {
                 Motor_Release(i);
             }
+        }
+        else if ((s_moving[i] == 0) &&
+                 (s_angle[i] != s_target_angle[i]) &&
+                 ((now - s_last_tick[i]) >= (uint32_t)SET_INTERVAL_MS))
+        {
+            int16_t next_angle = s_angle[i];
+
+            if (s_target_angle[i] > s_angle[i])
+            {
+                next_angle = (int16_t)(s_angle[i] + (int16_t)SET_STEP_DEG);
+                if (next_angle > s_target_angle[i])
+                {
+                    next_angle = s_target_angle[i];
+                }
+            }
+            else
+            {
+                next_angle = (int16_t)(s_angle[i] - (int16_t)SET_STEP_DEG);
+                if (next_angle < s_target_angle[i])
+                {
+                    next_angle = s_target_angle[i];
+                }
+            }
+
+            s_angle[i] = next_angle;
+            pca_set_pwm(i, angle_to_tick(i, s_angle[i]));
+            s_last_tick[i] = now;
         }
     }
 }

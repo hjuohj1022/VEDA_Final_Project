@@ -173,3 +173,12 @@ bin/
 
 # 인증서 관련 파일
 server_ext.cnf
+/Hardware/archive/esp32/src/certs
+/Hardware/archive/teensy/evkmimxrt1060_hello_world
+/Hardware/archive
+Hardware/esp32/main/mqtt/laser_test.py
+Hardware/laser.md
+/Hardware/esp32/main/certs
+Hardware/esp32/main/app_secrets.defaults.h
+Hardware/esp32/.pio-core/.cache/telemetry.json
+/Hardware/esp32/.pio-core
