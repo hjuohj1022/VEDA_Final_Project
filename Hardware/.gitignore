@@ -8,3 +8,5 @@ __pycache__/
 *.txt
 !README.md
 !**/README.md
+
+/STM32/SMT_SPI_Slave/Debug
