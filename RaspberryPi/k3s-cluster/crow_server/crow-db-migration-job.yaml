@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crow-db-migration
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: hjuohj/mariadb-server:latest
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mariadb \
+                --host="${DB_HOST}" \
+                --user="${DB_USER}" \
+                --password="${DB_PASSWORD}" \
+                "${DB_NAME}" \
+                < /migrations/2fa_migration.sql
+          env:
+            - name: DB_HOST
+              value: "mariadb-service"
+            - name: DB_NAME
+              value: "veda_db"
+            - name: DB_USER
+              value: "veda_user"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: user-password
+          volumeMounts:
+            - name: migration-sql
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migration-sql
+          configMap:
+            name: crow-db-migration-sql

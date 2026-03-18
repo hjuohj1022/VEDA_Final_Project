@@ -1,43 +1,467 @@
 openapi: 3.0.0
 info:
   title: Crow Server API (VEDA Project)
-  description: CCTV Recording and Management System API
+  description: CCTV 녹화, SUNAPI 연동, 모터 제어, ESP32 상태 확인을 제공하는 서버 API
   version: 1.0.0
 servers:
-  - url: http://localhost:8080
-    description: Local Test Server
+  - url: https://192.168.55.200/
+    description: 개발 서버
+
 paths:
-  /login:
+  /register:
     post:
-      summary: User Login (JWT Issue)
+      summary: 사용자 회원가입
+      description: ID와 비밀번호를 받아 새 사용자를 등록합니다.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - id
+                - password
               properties:
                 id:
                   type: string
                 password:
                   type: string
       responses:
+        '201':
+          description: 회원가입 성공
+        '400':
+          description: JSON 형식 오류 또는 필수 파라미터 누락
+        '409':
+          description: 이미 존재하는 ID
+          content:
+            text/plain:
+              example: 'Registration Failed: ID already exists'
+        '500':
+          description: 데이터베이스 오류로 회원가입 실패
+          content:
+            text/plain:
+              example: 'Registration Failed: DB error'
+
+  /login:
+    post:
+      summary: 사용자 로그인 및 JWT 발급
+      description: |
+        로그인 테스트의 시작점입니다.
+        2FA가 비활성화된 계정은 최종 JWT를 바로 반환합니다.
+        2FA가 활성화된 계정은 최종 JWT 대신 'pre_auth_token'을 반환하며,
+        이 경우 '/2fa/verify'에 OTP를 보내서 최종 로그인을 완료해야 합니다.
+      requestBody:
+        required: true
+        description: |
+          먼저 이 요청을 실행해서 계정의 기본 인증 상태를 확인합니다.
+          응답에 'token'이 있으면 로그인 완료,
+          'pre_auth_token'이 있으면 OTP 추가 인증이 필요한 상태입니다.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - password
+              properties:
+                id:
+                  type: string
+                  example: testuser
+                password:
+                  type: string
+                  example: testpw1234
+            examples:
+              basicLogin:
+                summary: 기본 로그인 요청
+                value:
+                  id: testuser
+                  password: testpw1234
+      responses:
         '200':
-          description: Login successful
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  requires_2fa:
+                    type: boolean
+                  token:
+                    type: string
+                  pre_auth_token:
+                    type: string
+                  expires_in:
+                    type: integer
+              examples:
+                without2fa:
+                  summary: 2FA 비활성 사용자 로그인 성공
+                  value:
+                    status: success
+                    requires_2fa: false
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.full_access_token
+                with2fa:
+                  summary: 비밀번호 통과 후 OTP 필요
+                  value:
+                    status: 2fa_required
+                    requires_2fa: true
+                    pre_auth_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                    expires_in: 300
         '401':
-          description: Authentication failed
-  /recordings:
-    get:
-      summary: Get MP4 recording list
+          description: 인증 실패
+          content:
+            text/plain:
+              example: 'Login Failed: Check ID or Password'
+
+  /2fa/setup/init:
+    post:
+      summary: Start TOTP 2FA setup
+      description: |
+        TOTP 2FA 설정을 시작합니다.
+        이 요청은 이미 로그인된 상태의 최종 JWT가 필요합니다.
+        응답으로 받은 'manual_key'를 Google Authenticator 등에 등록하고,
+        이어서 '/2fa/setup/confirm'으로 첫 OTP를 확인하면 2FA가 활성화됩니다.
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Success
+          description: Pending 2FA setup created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  manual_key:
+                    type: string
+                  otpauth_url:
+                    type: string
+                  expires_in:
+                    type: integer
+              example:
+                status: pending
+                manual_key: JBSWY3DPEHPK3PXP
+                otpauth_url: otpauth://totp/VEDA%3Atestuser?secret=JBSWY3DPEHPK3PXP&issuer=VEDA&algorithm=SHA1&digits=6&period=30
+                expires_in: 300
         '401':
           description: Unauthorized
+          content:
+            text/plain:
+              example: Unauthorized
+        '409':
+          description: 2FA already enabled
+          content:
+            text/plain:
+              example: 2FA is already enabled
+
+  /2fa/status:
+    get:
+      summary: Get current TOTP 2FA status
+      description: |
+        현재 로그인한 사용자의 TOTP 2FA 활성화 여부를 조회합니다.
+        프로필 메뉴를 열 때 이 값을 확인해 'OTP 생성' 또는 'OTP 삭제'를 분기하는 용도로 사용할 수 있습니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 2FA status loaded
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: true
+                has_pending_setup: false
+                pending_expires_in: 0
+        '401':
+          description: Unauthorized
+          content:
+            text/plain:
+              example: Unauthorized
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+
+  /2fa/setup/confirm:
+    post:
+      summary: Confirm TOTP 2FA setup
+      description: |
+        '/2fa/setup/init'으로 받은 secret을 앱에 등록한 뒤,
+        앱에 표시된 첫 6자리 OTP를 보내 2FA를 최종 활성화합니다.
+        Authorization 헤더에는 최종 JWT가 필요합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - otp
+              properties:
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              confirmSetup:
+                summary: 앱에 표시된 첫 OTP
+                value:
+                  otp: '123456'
+      responses:
+        '200':
+          description: 2FA enabled
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: true
+        '400':
+          description: Missing or invalid setup state
+          content:
+            text/plain:
+              examples:
+                missingOtp:
+                  summary: 요청 바디에 otp가 없음
+                  value: Missing otp
+                noPendingSetup:
+                  summary: setup/init을 먼저 하지 않음
+                  value: No pending 2FA setup found
+        '401':
+          description: Invalid OTP
+          content:
+            text/plain:
+              example: Invalid OTP
+        '410':
+          description: Pending setup expired
+          content:
+            text/plain:
+              example: Pending 2FA setup expired
+
+  /2fa/verify:
+    post:
+      summary: Verify OTP after password login
+      description: |
+        '/login' 결과가 'requires_2fa=true'일 때 사용하는 2차 인증 엔드포인트입니다.
+        '/login'에서 받은 'pre_auth_token'과 현재 OTP를 보내면
+        최종 JWT를 발급받을 수 있습니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pre_auth_token
+                - otp
+              properties:
+                pre_auth_token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              verify2fa:
+                summary: pre_auth_token과 OTP로 최종 JWT 발급
+                value:
+                  pre_auth_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.pre_auth_token
+                  otp: '123456'
+      responses:
+        '200':
+          description: OTP verified and JWT issued
+          content:
+            application/json:
+              example:
+                status: success
+                requires_2fa: false
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.full_access_token
+        '400':
+          description: Missing request field or 2FA not enabled
+          content:
+            text/plain:
+              examples:
+                missingBody:
+                  summary: pre_auth_token 또는 otp 누락
+                  value: Missing pre_auth_token or otp
+                notEnabled:
+                  summary: 계정에 2FA가 켜져 있지 않음
+                  value: 2FA is not enabled
+        '401':
+          description: Invalid pre_auth_token or OTP
+          content:
+            text/plain:
+              examples:
+                invalidToken:
+                  summary: pre_auth_token이 만료되었거나 유효하지 않음
+                  value: Invalid pre-auth token
+                invalidOtp:
+                  summary: OTP가 일치하지 않음
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+
+  /2fa/disable:
+    post:
+      summary: Disable TOTP 2FA
+      description: |
+        현재 로그인한 사용자의 TOTP 2FA를 비활성화합니다.
+        Authorization 헤더에는 최종 JWT가 필요하며,
+        현재 Authenticator 앱에 표시되는 OTP도 함께 보내야 합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - otp
+              properties:
+                otp:
+                  type: string
+                  example: '123456'
+            examples:
+              disable2fa:
+                summary: 현재 OTP로 2FA 비활성화
+                value:
+                  otp: '123456'
+      responses:
+        '200':
+          description: 2FA disabled
+          content:
+            application/json:
+              example:
+                status: success
+                two_factor_enabled: false
+        '400':
+          description: Missing OTP or 2FA already disabled
+          content:
+            text/plain:
+              examples:
+                missingOtp:
+                  summary: otp 누락
+                  value: Missing otp
+                alreadyDisabled:
+                  summary: 이미 2FA가 꺼져 있음
+                  value: 2FA is already disabled
+        '401':
+          description: Unauthorized or invalid OTP
+          content:
+            text/plain:
+              examples:
+                unauthorized:
+                  summary: JWT가 없거나 유효하지 않음
+                  value: Unauthorized
+                invalidOtp:
+                  summary: OTP가 일치하지 않음
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+
+  /account/delete:
+    post:
+      summary: Delete current account
+      description: |
+        Deletes the currently authenticated account.
+        The caller must always re-enter the current password.
+        If TOTP 2FA is enabled for the account, the current OTP code must also be provided.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  example: testpw1234
+                otp:
+                  type: string
+                  description: Required only when 2FA is enabled for the account.
+                  example: '123456'
+            examples:
+              without2fa:
+                summary: Delete account without OTP
+                value:
+                  password: testpw1234
+              with2fa:
+                summary: Delete account with OTP
+                value:
+                  password: testpw1234
+                  otp: '123456'
+      responses:
+        '200':
+          description: Account deleted
+          content:
+            application/json:
+              example:
+                status: success
+                deleted: true
+        '400':
+          description: Missing or invalid request field
+          content:
+            text/plain:
+              examples:
+                missingPassword:
+                  summary: password is missing
+                  value: Missing password
+                missingOtp:
+                  summary: otp is required because 2FA is enabled
+                  value: Missing otp
+        '401':
+          description: Unauthorized, invalid password, or invalid OTP
+          content:
+            text/plain:
+              examples:
+                unauthorized:
+                  summary: JWT is missing or invalid
+                  value: Unauthorized
+                invalidPassword:
+                  summary: password does not match the current account
+                  value: Invalid password
+                invalidOtp:
+                  summary: otp does not match the authenticator app
+                  value: Invalid OTP
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              example: User not found
+        '500':
+          description: Database or delete operation failure
+          content:
+            text/plain:
+              example: Failed to delete user
+
+  /recordings:
+    get:
+      summary: MP4 녹화 파일 목록 조회
+      description: 서버에 저장된 MP4 녹화 파일 목록을 반환합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 조회 성공
+        '401':
+          description: 인증되지 않음
     delete:
-      summary: Delete recording file
+      summary: 녹화 파일 삭제
+      description: 파일명을 기준으로 지정한 녹화 파일을 삭제합니다.
       security:
         - bearerAuth: []
       parameters:
@@ -46,15 +470,17 @@ paths:
           required: true
           schema:
             type: string
-          description: Filename to delete (e.g., recording_1.mp4)
+          description: "삭제할 파일명 예시 'recording_1.mp4'"
       responses:
         '200':
-          description: Deleted
+          description: 삭제 성공
         '404':
-          description: Not Found
+          description: 파일을 찾을 수 없음
+
   /stream:
     get:
-      summary: Video Streaming (Range support)
+      summary: 녹화 영상 스트리밍
+      description: Range 요청을 지원하는 MP4 스트리밍 API입니다.
       security:
         - bearerAuth: []
       parameters:
@@ -65,13 +491,1260 @@ paths:
             type: string
       responses:
         '206':
-          description: Partial Content
-  /health:
+          description: 부분 콘텐츠 응답
+
+  /system/storage:
     get:
-      summary: Server health check
+      summary: 시스템 저장소 사용량 조회
+      description: 녹화 저장소 기준 전체, 사용, 가용 용량을 반환합니다.
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: OK
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_bytes:
+                    type: integer
+                  used_bytes:
+                    type: integer
+                  available_bytes:
+                    type: integer
+        '401':
+          description: 인증되지 않음
+
+  /api/sunapi/storage:
+    get:
+      summary: 카메라 저장소 정보 조회
+      description: SUNAPI 프록시를 통해 카메라 저장소 원본 응답을 전달합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/timeline:
+    get:
+      summary: 날짜별 재생 타임라인 조회
+      description: 채널과 날짜를 기준으로 녹화 타임라인을 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '2026-03-05'
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/month-days:
+    get:
+      summary: 월별 녹화 존재 일자 조회
+      description: 지정한 연월에 녹화가 존재하는 날짜 목록을 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/export/create:
+    get:
+      summary: 재생 구간 export 작업 생성
+      description: 지정한 시간 구간을 export하기 위한 SUNAPI 작업을 생성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: start_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '2026-03-06 08:36:41'
+        - name: end_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '2026-03-06 08:41:41'
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            example: AVI
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/export/status:
+    get:
+      summary: export 작업 상태 조회
+      description: 생성된 export 작업의 진행 상태를 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/export/download:
+    get:
+      summary: export 결과 다운로드
+      description: 작업 ID를 기준으로 생성된 export 파일을 다운로드합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [default, backup, start]
+      responses:
+        '200':
+          description: export 바이너리 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/ptz/focus:
+    post:
+      summary: PTZ Focus/Zoom 제어
+      description: 고정 명령 세트를 사용해 줌 및 포커스 동작을 제어합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: command
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [zoom_in, zoom_out, zoom_stop, focus_near, focus_far, focus_stop, autofocus]
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/display/settings:
+    get:
+      summary: 영상 표시 설정 조회
+      description: contrast, brightness, sharpness, saturation 설정을 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+    post:
+      summary: 영상 표시 설정 변경
+      description: UserPreset1 기준으로 영상 표시 설정 값을 변경합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: contrast
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: brightness
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: sharpness_level
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 32
+        - name: sharpness_enable
+          in: query
+          required: true
+          schema:
+            type: boolean
+        - name: color_level
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/display/reset:
+    post:
+      summary: 영상 표시 설정 초기화
+      description: 장치 기본 표시 설정 값으로 초기화합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: SUNAPI 응답 전달 성공
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/playback/session:
+    get:
+      summary: 재생용 RTSP-over-WS 세션 정보 생성
+      description: 재생에 필요한 RTSP digest 인증 정보와 WebSocket 경로를 생성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '2026-03-06'
+        - name: time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '13:36:18'
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: 세션 정보 생성 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Uri:
+                    type: string
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+                  Response:
+                    type: string
+                  Username:
+                    type: string
+                  Cnonce:
+                    type: string
+                  Nc:
+                    type: string
+                  Method:
+                    type: string
+                  WsPath:
+                    type: string
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '500':
+          description: 서버 설정 오류
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/export/session:
+    get:
+      summary: export용 RTSP-over-WS 세션 정보 생성
+      description: export 재생에 필요한 RTSP digest 인증 정보와 WebSocket 경로를 생성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '2026-03-06'
+        - name: start_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '13:36:18'
+        - name: end_time
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '13:41:18'
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: 세션 정보 생성 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Uri:
+                    type: string
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+                  Response:
+                    type: string
+                  Username:
+                    type: string
+                  Cnonce:
+                    type: string
+                  Nc:
+                    type: string
+                  Method:
+                    type: string
+                  WsPath:
+                    type: string
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '500':
+          description: 서버 설정 오류
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/playback/digestauth:
+    get:
+      summary: 재생용 digest 응답 생성
+      description: RTSP over WebSocket 재생에 필요한 digest 응답 값을 생성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: method
+          in: query
+          required: true
+          schema:
+            type: string
+            example: OPTIONS
+        - name: realm
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: nonce
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: uri
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: cnonce
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: nc
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '00000001'
+      responses:
+        '200':
+          description: Response 값을 포함한 SUNAPI digestauth 응답
+        '400':
+          description: 필수 쿼리 파라미터 누락
+        '401':
+          description: 인증되지 않음
+        '500':
+          description: 서버 설정 오류
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /api/sunapi/playback/challenge:
+    get:
+      summary: 재생용 RTSP digest challenge 조회
+      description: RTSP 접속 전에 필요한 realm, nonce 값을 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uri
+          in: query
+          required: true
+          schema:
+            type: string
+            example: 'rtsp://192.168.55.16/0/recording/20260306071236/play.smp'
+        - name: rtsp_port
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 554
+      responses:
+        '200':
+          description: challenge 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Realm:
+                    type: string
+                  Nonce:
+                    type: string
+        '400':
+          description: 쿼리 파라미터 누락 또는 형식 오류
+        '401':
+          description: 인증되지 않음
+        '500':
+          description: 서버 설정 오류
+        '502':
+          description: 업스트림 카메라 연동 오류
+
+  /sunapi/stw-cgi/{tail}:
+    get:
+      summary: SUNAPI GET 프록시 요청
+      description: Digest 인증을 사용해 카메라 SUNAPI GET 요청을 그대로 전달합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "'stw-cgi' 뒤에 붙는 경로"
+      responses:
+        '200':
+          description: 프록시 응답 전달 성공
+        '401':
+          description: 인증되지 않음
+        '502':
+          description: 업스트림 카메라 연동 오류
+    post:
+      summary: SUNAPI POST 프록시 요청
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 프록시 응답 전달 성공
+    put:
+      summary: SUNAPI PUT 프록시 요청
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 프록시 응답 전달 성공
+    delete:
+      summary: SUNAPI DELETE 프록시 요청
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tail
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 프록시 응답 전달 성공
+
+  /health:
+    get:
+      summary: 서버 상태 확인
+      responses:
+        '200':
+          description: 서버 동작 중
+
+  /esp32/watchdog/request:
+    post:
+      summary: ESP32 상태 즉시 발행 요청
+      description: ESP32에 현재 상태를 즉시 발행하도록 MQTT 요청을 보냅니다.
+      responses:
+        '202':
+          description: MQTT로 요청 발행 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+
+  /esp32/watchdog/latest:
+    get:
+      summary: 최신 ESP32 상태 payload 조회
+      description: 최근 'system/status' 메시지와 메타데이터를 반환합니다.
+      responses:
+        '200':
+          description: 최신 상태 payload 및 메타데이터
+
+  /esp32/watchdog/status:
+    get:
+      summary: ESP32 watchdog MQTT 브리지 상태 조회
+      description: MQTT 연결 상태와 최근 요청 및 상태 메타데이터를 확인합니다.
+      responses:
+        '200':
+          description: MQTT 연결 상태와 최근 상태 정보
+
+  /motor/control/command:
+    post:
+      summary: 원시 모터 명령 전송
+      description: |
+        'motor/control' 토픽으로 원시 ASCII 명령을 발행하고 다음 'motor/response' 응답을 기다립니다.
+        예시:
+        - 'motor1 left press'
+        - 'motor2 release'
+        - 'motor3 set 120'
+        - 'read'
+        - 'ping'
+        - 'stopall'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/press:
+    post:
+      summary: 모터 연속 회전 시작
+      description: 지정한 모터를 left 또는 right 방향으로 계속 움직입니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - direction
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                direction:
+                  type: string
+                  enum: [left, right]
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/release:
+    post:
+      summary: 단일 모터 연속 회전 해제
+      description: 지정한 모터의 연속 회전을 멈춥니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/stop:
+    post:
+      summary: 단일 모터 정지
+      description: release와 동일하게 동작하며 지정한 모터를 정지합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/set:
+    post:
+      summary: 모터 절대 각도 설정
+      description: 지정한 모터를 목표 절대 각도로 이동시킵니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - angle
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                angle:
+                  type: integer
+                  minimum: 0
+                  maximum: 180
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/move:
+    post:
+      summary: 모터 상대 각도 이동
+      description: 현재 각도를 기준으로 지정한 방향으로 상대 이동합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - direction
+                - degrees
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                direction:
+                  type: string
+                  enum: [left, right]
+                degrees:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/stopall:
+    post:
+      summary: 전체 모터 정지
+      description: 연속 동작 중인 모든 모터를 한 번에 정지합니다.
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/control/center:
+    post:
+      summary: 모든 모터를 동일 각도로 정렬
+      description: 모든 모터를 지정한 목표 각도 또는 기본 90도로 이동시킵니다.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                angle:
+                  type: integer
+                  minimum: 0
+                  maximum: 180
+                  default: 90
+      responses:
+        '200':
+          description: 모터별 처리 결과 반환
+        '400':
+          description: 잘못된 요청
+
+  /motor/angles:
+    get:
+      summary: 전체 모터 각도 조회
+      description: 모든 모터의 현재 각도 값을 읽어옵니다.
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/ping:
+    get:
+      summary: 모터 컨트롤러 연결 확인
+      description: 핑 명령으로 모터 컨트롤러의 응답 여부를 확인합니다.
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
+  /motor/status:
+    get:
+      summary: 모터 MQTT 브리지 상태 조회
+      description: 서버 측 모터 브리지 연결 상태와 최근 응답 정보를 확인합니다.
+      responses:
+        '200':
+          description: 현재 모터 브리지 상태
+
+  /cctv/control/start:
+    post:
+      summary: CCTV 처리 시작
+      description: 백엔드 서버에서 채널별 point cloud 처리 작업을 시작합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: integer
+                  description: 채널 번호 (0-3)
+                mode:
+                  type: string
+                  description: "실행 모드 'headless' 또는 'gui'"
+      responses:
+        '200':
+          description: 처리 성공
+        '202':
+          description: 백그라운드 실행 요청 수락
+        '400':
+          description: 잘못된 요청
+
+  /cctv/control/command:
+    post:
+      summary: 원시 CCTV 제어 명령 전송
+      description: |
+        원시 명령 문자열을 CCTV 백엔드로 그대로 전달합니다.
+        예시:
+        - 'pause'
+        - 'resume'
+        - 'stop'
+        - 'channel=0 headless'
+        - 'channel=1 gui'
+        - 'pc_view rx=-20 ry=35 flipx=0 flipy=0 flipz=0 wire=1 mesh=0'
+        - 'depth_stream'
+        - 'rgbd_stream'
+        - 'pc_stream'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+      responses:
+        '200':
+          description: 처리 성공
+        '202':
+          description: 스트림 외 제어 명령을 백그라운드 실행으로 수락
+        '400':
+          description: 잘못된 요청
+
+  /cctv/control/stop:
+    post:
+      summary: CCTV 처리 중지
+      responses:
+        '200':
+          description: 처리 성공
+        '202':
+          description: 백그라운드 실행 요청 수락
+
+  /cctv/control/pause:
+    post:
+      summary: CCTV 처리 일시정지
+      responses:
+        '202':
+          description: 백그라운드 실행 요청 수락
+
+  /cctv/control/resume:
+    post:
+      summary: CCTV 처리 재개
+      responses:
+        '202':
+          description: 백그라운드 실행 요청 수락
+
+  /cctv/control/view:
+    post:
+      summary: 뷰 파라미터 변경
+      description: |
+        point cloud 뷰 설정(rotation, flip 등)을 변경합니다.
+        'rx' 또는 'ry'가 포함된 요청은 500ms마다 한 번만 수락됩니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rx:
+                  type: number
+                ry:
+                  type: number
+                flipx:
+                  type: boolean
+                flipy:
+                  type: boolean
+                flipz:
+                  type: boolean
+                wire:
+                  type: boolean
+                mesh:
+                  type: boolean
+      responses:
+        '202':
+          description: "백그라운드 실행 수락 또는 'status=THROTTLED' 제한 응답"
+
+  /cctv/control/stream:
+    post:
+      summary: CCTV 스트림 모드 시작
+      description: |
+        '/cctv/stream' 사용 전에 백엔드 스트림 명령 하나를 먼저 선택합니다.
+        다음 중 하나만 선택해야 합니다.
+        - 'pc_stream': 서버 렌더링 PNG 스트림
+        - 'rgbd_stream': depth32f + bgr24 원시 스트림
+        - 'depth_stream': depth32f 전용 원시 스트림
+        동시에 여러 스트림 명령을 혼합해서 사용하지 마십시오.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - stream
+              properties:
+                stream:
+                  type: string
+                  enum: [pc_stream, rgbd_stream, depth_stream]
+            examples:
+              pcStream:
+                summary: 서버 렌더링 point cloud 스트림
+                value:
+                  stream: pc_stream
+              rgbdStream:
+                summary: 원시 RGBD 스트림
+                value:
+                  stream: rgbd_stream
+              depthStream:
+                summary: Depth 전용 원시 스트림
+                value:
+                  stream: depth_stream
+      responses:
+        '200':
+          description: 처리 성공
+        '400':
+          description: 잘못된 요청
+
+  /cctv/status:
+    get:
+      summary: CCTV 상태 조회
+      description: 백엔드 연결 여부와 현재 스트림 모드 상태를 반환합니다.
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backend_connected:
+                    type: boolean
+                  stream_mode:
+                    type: integer
+                    description: "'0=NONE', '1=PC_IMAGE', '2=RGBD_RAW', '3=DEPTH_RAW'"
+
+  /cctv/stream:
+    get:
+      summary: Point Cloud 스트림 (WebSocket)
+      description: |
+        WebSocket으로 CCTV 바이너리 스트림을 수신합니다.
+        스트림 모드에 따라 다음 형식 중 하나가 전달됩니다.
+        - PC 이미지 스트림: '16B Header + Image'
+        - RGBD 스트림: '20B Header + Depth + BGR'
+        - Depth 전용 스트림: '16B Header + Depth'
+      responses:
+        '101':
+          description: WebSocket 프로토콜 전환
+
+  /thermal/control/start:
+    post:
+      summary: 열화상 스트림 수신 시작
+      description: |
+        서버 쪽 UDP 수신기를 준비하고 WebSocket 열화상 스트림 사용 정보를 반환합니다.
+        실제 열화상 프레임은 '/thermal/stream' WebSocket에서 binary message로 전달됩니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: 열화상 스트림 준비 요청 accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  stream:
+                    type: string
+                    example: thermal16
+                  transport:
+                    type: string
+                    example: websocket
+                  ws_path:
+                    type: string
+                    example: /thermal/stream
+                  udp_bind_host:
+                    type: string
+                    example: 0.0.0.0
+                  udp_port:
+                    type: integer
+                    example: 5005
+                  format:
+                    type: object
+                    properties:
+                      width:
+                        type: integer
+                        example: 160
+                      height:
+                        type: integer
+                        example: 120
+                      pixel:
+                        type: string
+                        example: u16be
+                      header_bytes:
+                        type: integer
+                        example: 10
+                      frame_bytes:
+                        type: integer
+                        example: 38400
+        '401':
+          description: Unauthorized
+
+  /thermal/control/stop:
+    post:
+      summary: 열화상 스트림 수신 종료 요청
+      description: |
+        WebSocket 클라이언트가 모두 빠진 상태라면 서버 UDP 수신기를 정리합니다.
+        활성 클라이언트가 남아 있으면 수신기는 계속 유지됩니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: 종료 요청 accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  note:
+                    type: string
+                    example: receiver stops when no WebSocket clients remain
+        '401':
+          description: Unauthorized
+
+  /thermal/status:
+    get:
+      summary: 열화상 수신 상태 조회
+      description: 현재 UDP bind 상태, WebSocket 클라이언트 수, 최근 수신 chunk 메타데이터를 조회합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 상태 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  stream:
+                    type: string
+                    example: thermal16
+                  udp_bound:
+                    type: boolean
+                  receiver_running:
+                    type: boolean
+                  udp_bind_host:
+                    type: string
+                    example: 0.0.0.0
+                  udp_port:
+                    type: integer
+                    example: 5005
+                  ws_clients:
+                    type: integer
+                  last_frame_id:
+                    type: integer
+                  last_chunk_index:
+                    type: integer
+                  last_total_chunks:
+                    type: integer
+                  last_min_val:
+                    type: integer
+                  last_max_val:
+                    type: integer
+                  last_packet_bytes:
+                    type: integer
+                  last_packet_at_ms:
+                    type: integer
+                  packets_received:
+                    type: integer
+                  bytes_received:
+                    type: integer
+                  last_error:
+                    type: string
+                  format:
+                    type: object
+                    properties:
+                      width:
+                        type: integer
+                        example: 160
+                      height:
+                        type: integer
+                        example: 120
+                      pixel:
+                        type: string
+                        example: u16be
+                      header_bytes:
+                        type: integer
+                        example: 10
+                      frame_bytes:
+                        type: integer
+                        example: 38400
+        '401':
+          description: Unauthorized
+
+  /thermal/stream:
+    get:
+      summary: 열화상 스트림 WebSocket
+      description: |
+        Authorization Bearer JWT가 포함된 WebSocket handshake로 접속합니다.
+        서버는 ESP32가 보낸 UDP datagram 원본을 그대로 binary message로 재브로드캐스트합니다.
+        각 binary message 형식은 '10B header + thermal payload'이며 header는 big-endian입니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '101':
+          description: WebSocket protocol switch
+
 components:
   securitySchemes:
     bearerAuth:

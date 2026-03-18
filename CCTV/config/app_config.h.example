@@ -1,0 +1,33 @@
+#pragma once
+
+#include <array>
+#include <string>
+
+// =========================================================
+// [앱 설정 예시 파일]
+// 이 파일의 이름을 'app_config.h'로 변경하고 값을 수정해서 사용하세요.
+// =========================================================
+
+// TensorRT 엔진 파일 경로
+static const std::string ENGINE_PATH = "ml_assets/engines/your_model.engine";
+
+// RTSP 채널 목록 (0~3)
+static const std::array<std::string, 4> RTSP_URLS = {
+    "rtsps://test:test@192.168.x.x:8554/0/main",
+    "rtsps://test:test@192.168.x.x:8554/1/main",
+    "rtsps://test:test@192.168.x.x:8554/2/main",
+    "rtsps://test:test@192.168.x.x:8554/3/main"
+};
+
+// 사용할 RTSP 채널 인덱스 (0~3)
+static constexpr int RTSP_CHANNEL = 0;
+static_assert((RTSP_CHANNEL >= 0) && (RTSP_CHANNEL < static_cast<int>(RTSP_URLS.size())),
+              "RTSP_CHANNEL must be within RTSP_URLS range.");
+
+inline const std::string& GetSelectedRtspUrl() {
+    return RTSP_URLS[static_cast<std::size_t>(RTSP_CHANNEL)];
+}
+
+// 입력 해상도
+static constexpr int INPUT_HEIGHT = 560;
+static constexpr int INPUT_WIDTH = 1008;

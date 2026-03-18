@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crow-cctv-ip-config
+  namespace: default
+data:
+  # Worker Pod does not connect to the CCTV backend directly.
+  # It should call the master-side relay Service instead.
+  CCTV_BACKEND_HOST: "cctv-relay-service"
+  CCTV_BACKEND_PORT: "19090"
