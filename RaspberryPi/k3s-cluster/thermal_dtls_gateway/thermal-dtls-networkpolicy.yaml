@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thermal-dtls-gateway-ingress
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: thermal-dtls-gateway
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: nginx-gateway
+    ports:
+    - protocol: UDP
+      port: 5005

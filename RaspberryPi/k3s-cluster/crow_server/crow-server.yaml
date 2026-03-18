@@ -26,6 +26,9 @@ spec:
         
         ports:
         - containerPort: 8080
+        # Internal-only thermal UDP input.
+        # The external hardware now connects to nginx -> thermal-dtls-gateway,
+        # and only decrypted thermal UDP reaches crow-server on this port.
         - containerPort: 5005
           protocol: UDP
         
@@ -83,6 +86,8 @@ spec:
             configMapKeyRef:
               name: crow-cctv-ip-config
               key: CCTV_BACKEND_PORT
+        # ThermalProxy keeps listening on the same internal UDP port.
+        # The DTLS gateway forwards decrypted thermal payloads here.
         - name: THERMAL_UDP_BIND_HOST
           value: "0.0.0.0"
         - name: THERMAL_UDP_PORT
@@ -131,6 +136,7 @@ spec:
       protocol: TCP
       port: 8080
       targetPort: 8080
+    # Internal-only thermal UDP service for the DTLS gateway -> crow-server hop.
     - name: thermal-udp
       protocol: UDP
       port: 5005
