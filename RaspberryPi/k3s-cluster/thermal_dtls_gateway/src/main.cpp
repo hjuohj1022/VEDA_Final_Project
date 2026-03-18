@@ -564,6 +564,10 @@ private:
 
 int main()
 {
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
+    std::cout << "[DTLS] Gateway process starting" << std::endl;
+
     try {
         DtlsGateway gateway;
         g_gateway = &gateway;
