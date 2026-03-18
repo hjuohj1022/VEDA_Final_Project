@@ -52,9 +52,11 @@
 
 ### 3-2. 모터 제어(임시 UI)
 - 헤더 검색창 오른쪽 `Motor` 버튼으로 임시 모터 제어 다이얼로그 오픈
-- 다이얼로그에서 `motor(1~3)`, `direction(left/right)`, `angle(0~180)` 입력/선택 후 제어
+- 다이얼로그에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
 - 지원 동작
-  - `Press` / `Release` / `Stop` / `Set` / `Center All` / `Stop All`
+  - `Hold` / `Stop` / `Set` / `Center All` / `Stop All`
+  - `Hold` 버튼: 누르는 동안 `press`, 손을 떼면 자동 `release`
+  - `Stop` 버튼: 선택한 `Target` 모터 즉시 정지
 - 현재 위치는 기능 검증용이며, 추후 Camera Controls 패널로 통합 예정
 - 관련 구현:
   - `src/ui/qml/common/Header.qml`
