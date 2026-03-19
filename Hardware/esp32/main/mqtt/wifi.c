@@ -51,7 +51,7 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
         {
             s_wifi_connected = false;
             (void)printf("WiFi disconnected\n");
-            udpStreamReset();
+            udpStreamRequestReset();
             (void)esp_wifi_connect();
         }
         else

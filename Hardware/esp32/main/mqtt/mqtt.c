@@ -33,7 +33,8 @@ static int64_t                  s_next_health_publish_us = 0;
 #define MQTT_FRAME_IDLE_DELAY_MS         10U
 #define UDP_FAST_FRAME_IDLE_DELAY_MS     1U
 #define UDP_FAST_FRAME_YIELD_TICKS       1U
-#define UDP_FAST_CHUNK_YIELD_INTERVAL    4U
+#define UDP_FAST_CHUNK_YIELD_INTERVAL    0U
+#define UDP_CONGESTED_CHUNK_YIELD_INTERVAL 4U
 #define MQTT_HEALTH_TASK_POLL_MS         250U
 #define MQTT_HEALTH_PERIOD_US            (60000000LL)
 #define FRAME_PIXEL_COUNT                (FRAME_BYTES / 2U)
@@ -403,10 +404,16 @@ void mqttFrameTask(void *arg)
         const bool use_mqtt = frameStreamUseMqtt();
         const bool use_udp = frameStreamUseUdp();
         const bool use_udp_fast8 = frameStreamUseUdpFast8();
-        const bool drop_stale_frames = !use_udp_fast8;
+        const bool udp_congested = use_udp && udpStreamIsCongested();
+        const uint16_t udp_chunk_yield_interval = udp_congested
+                                                  ? UDP_CONGESTED_CHUNK_YIELD_INTERVAL
+                                                  : UDP_FAST_CHUNK_YIELD_INTERVAL;
+        const size_t chunk_payload_size = use_udp ? (size_t)UDP_CHUNK_PAYLOAD_SIZE
+                                                  : (size_t)CHUNK_PAYLOAD_SIZE;
+        const bool drop_stale_frames = use_udp_fast8;
         const size_t frame_payload_bytes = use_udp_fast8 ? FRAME_PIXEL_COUNT : FRAME_BYTES;
         const uint16_t total_chunks =
-            (uint16_t)((frame_payload_bytes + CHUNK_PAYLOAD_SIZE - 1U) / CHUNK_PAYLOAD_SIZE);
+            (uint16_t)((frame_payload_bytes + chunk_payload_size - 1U) / chunk_payload_size);
         const bool verbose_frame_log = use_mqtt;
         const TickType_t idle_delay_ticks = delayTicksAtLeast1(use_udp_fast8
                                                                ? UDP_FAST_FRAME_IDLE_DELAY_MS
@@ -457,10 +464,10 @@ void mqttFrameTask(void *arg)
                 break;
             }
 
-            const size_t offset = (size_t)i * (size_t)CHUNK_PAYLOAD_SIZE;
+            const size_t offset = (size_t)i * chunk_payload_size;
             const size_t bytes_remaining = frame_payload_bytes - offset;
-            const size_t data_size = (bytes_remaining > (size_t)CHUNK_PAYLOAD_SIZE)
-                                   ? (size_t)CHUNK_PAYLOAD_SIZE
+            const size_t data_size = (bytes_remaining > chunk_payload_size)
+                                   ? chunk_payload_size
                                    : bytes_remaining;
 
             msg[0] = (uint8_t)((frame_id >> 8) & 0xFFU);
@@ -510,15 +517,17 @@ void mqttFrameTask(void *arg)
             }
 
             if (use_udp) {
+                const bool dtls_connected_once = udpStreamHasConnectedOnce();
                 const int udp_sent = udpStreamSend(msg, CHUNK_HEADER_SIZE + data_size);
-                if (udp_sent < 0) {
+                if ((udp_sent < 0) && dtls_connected_once) {
                     (void)printf("UDP send failed: frame=%u chunk=%u len=%u\n",
                                  (unsigned int)frame_id,
                                  (unsigned int)i,
                                  (unsigned int)(CHUNK_HEADER_SIZE + data_size));
                 }
                 if (use_udp_fast8 &&
-                    ((((uint16_t)(i + 1U)) % UDP_FAST_CHUNK_YIELD_INTERVAL) == 0U)) {
+                    (udp_chunk_yield_interval > 0U) &&
+                    ((((uint16_t)(i + 1U)) % udp_chunk_yield_interval) == 0U)) {
                     vTaskDelay(UDP_FAST_FRAME_YIELD_TICKS);
                 }
             }
