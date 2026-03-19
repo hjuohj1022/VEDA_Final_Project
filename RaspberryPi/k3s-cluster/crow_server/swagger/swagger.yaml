@@ -11,7 +11,13 @@ paths:
   /register:
     post:
       summary: 사용자 회원가입
-      description: ID와 비밀번호를 받아 새 사용자를 등록합니다.
+      description: |
+        ID와 비밀번호를 받아 신규 사용자를 등록합니다.
+        비밀번호 규칙:
+        - 8자 이상 16자 이하
+        - 숫자 1개 이상 포함
+        - 특수문자 1개 이상 포함
+        - 공백 사용 불가
       requestBody:
         required: true
         content:
@@ -26,22 +32,22 @@ paths:
                   type: string
                 password:
                   type: string
+                  description: 8~16자, 숫자 1개 이상, 특수문자 1개 이상, 공백 불가
       responses:
         '201':
           description: 회원가입 성공
         '400':
-          description: JSON 형식 오류 또는 필수 파라미터 누락
+          description: JSON 형식 오류, 필수 값 누락, 또는 비밀번호 규칙 위반
         '409':
           description: 이미 존재하는 ID
           content:
             text/plain:
-              example: 'Registration Failed: ID already exists'
+              example: '이미 사용 중인 아이디입니다.'
         '500':
           description: 데이터베이스 오류로 회원가입 실패
           content:
             text/plain:
-              example: 'Registration Failed: DB error'
-
+              example: '회원가입 처리 중 데이터베이스 오류가 발생했습니다.'
   /login:
     post:
       summary: 사용자 로그인 및 JWT 발급
