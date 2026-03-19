@@ -7,6 +7,7 @@
 #include "../include/MqttManager.h"
 #include "../include/MotorManager.h"
 #include "../include/ThermalProxy.h"
+#include "../include/AuthRecoveryRoutes.h"
 #include <jwt-cpp/jwt.h> 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -1479,6 +1480,9 @@ int main()
         return crow::response(500, "회원가입 처리 중 데이터베이스 오류가 발생했습니다.");
     });
 
+    // 이메일 인증/비밀번호 재설정 라우트 등록
+    registerAuthRecoveryRoutes(app);
+
     // ==========================================
     // TOTP 2FA 설정/검증 API
     // ==========================================
@@ -2173,4 +2177,3 @@ int main()
     shutdownThermalProxy();
     shutdownCctvProxyWorker();
 }
-

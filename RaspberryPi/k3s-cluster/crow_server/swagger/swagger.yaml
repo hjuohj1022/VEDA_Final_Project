@@ -120,6 +120,123 @@ paths:
             text/plain:
               example: 'Login Failed: Check ID or Password'
 
+  /auth/email/verify/request:
+    post:
+      summary: Request email verification token
+      description: |
+        Registers or confirms a user's email and issues a verification token.
+        This endpoint stores the email in users.email and sets is_email_verified to 0.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - email
+              properties:
+                id:
+                  type: string
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Verification token issued
+        '400':
+          description: Invalid input
+        '404':
+          description: User not found
+        '409':
+          description: Email conflict
+        '500':
+          description: Server error
+
+  /auth/email/verify/confirm:
+    post:
+      summary: Confirm email verification token
+      description: |
+        Consumes a valid token from email_verification_tokens and marks
+        users.is_email_verified = 1.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Email verified
+        '400':
+          description: Invalid or expired token
+        '500':
+          description: Server error
+
+  /auth/password/forgot:
+    post:
+      summary: Issue password reset token
+      description: |
+        Checks id+email match and, when matched, issues a reset token in
+        password_reset_tokens table.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - email
+              properties:
+                id:
+                  type: string
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Request accepted
+        '400':
+          description: Invalid input
+        '500':
+          description: Server error
+
+  /auth/password/reset:
+    post:
+      summary: Reset password using token
+      description: |
+        Verifies reset token and updates user password.
+        New password must satisfy policy:
+        - length 8 to 16
+        - at least 1 number
+        - at least 1 special character
+        - no spaces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - new_password
+              properties:
+                token:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        '200':
+          description: Password reset success
+        '400':
+          description: Invalid input or token
+        '500':
+          description: Server error
+
   /2fa/setup/init:
     post:
       summary: Start TOTP 2FA setup
