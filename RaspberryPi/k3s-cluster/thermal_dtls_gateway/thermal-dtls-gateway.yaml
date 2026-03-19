@@ -25,6 +25,8 @@ spec:
           value: "0.0.0.0"
         - name: DTLS_BIND_PORT
           value: "5005"
+        - name: DTLS_USE_COOKIE_EXCHANGE
+          value: "false"
         - name: CROW_FORWARD_HOST
           value: "crow-server-service"
         - name: CROW_FORWARD_PORT

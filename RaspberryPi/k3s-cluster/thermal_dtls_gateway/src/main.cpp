@@ -89,6 +89,31 @@ int envIntOrDefault(const char* name, int fallback)
     }
 }
 
+bool envBoolOrDefault(const char* name, bool fallback)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return fallback;
+    }
+
+    std::string trimmed = trimCopy(value);
+    for (char& ch : trimmed) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+
+    if (trimmed.empty()) {
+        return fallback;
+    }
+    if (trimmed == "1" || trimmed == "true" || trimmed == "yes" || trimmed == "on") {
+        return true;
+    }
+    if (trimmed == "0" || trimmed == "false" || trimmed == "no" || trimmed == "off") {
+        return false;
+    }
+
+    throw std::runtime_error(std::string("Invalid boolean environment variable: ") + name);
+}
+
 std::vector<unsigned char> parseHex(const std::string& hex)
 {
     std::string filtered;
@@ -251,6 +276,7 @@ public:
         , bindPort_(envIntOrDefault("DTLS_BIND_PORT", kDefaultDtlsPort))
         , forwardHost_(envOrDefault("CROW_FORWARD_HOST", "crow-server-service"))
         , forwardPort_(envIntOrDefault("CROW_FORWARD_PORT", kDefaultForwardPort))
+        , useCookieExchange_(envBoolOrDefault("DTLS_USE_COOKIE_EXCHANGE", false))
         , pskIdentity_(requireEnv("DTLS_PSK_IDENTITY"))
         , pskKey_(parseHex(requireEnv("DTLS_PSK_KEY_HEX")))
     {
@@ -258,13 +284,15 @@ public:
             throw std::runtime_error("DTLS_PSK_KEY_HEX must decode to at least 16 bytes");
         }
 
-        const char* cookieEnv = std::getenv("DTLS_COOKIE_SECRET_HEX");
-        if (cookieEnv != nullptr && !trimCopy(cookieEnv).empty()) {
-            cookieSecret_ = parseHex(cookieEnv);
-        } else {
-            cookieSecret_.resize(32);
-            if (RAND_bytes(cookieSecret_.data(), static_cast<int>(cookieSecret_.size())) != 1) {
-                throw std::runtime_error("Failed to generate cookie secret");
+        if (useCookieExchange_) {
+            const char* cookieEnv = std::getenv("DTLS_COOKIE_SECRET_HEX");
+            if (cookieEnv != nullptr && !trimCopy(cookieEnv).empty()) {
+                cookieSecret_ = parseHex(cookieEnv);
+            } else {
+                cookieSecret_.resize(32);
+                if (RAND_bytes(cookieSecret_.data(), static_cast<int>(cookieSecret_.size())) != 1) {
+                    throw std::runtime_error("Failed to generate cookie secret");
+                }
             }
         }
     }
@@ -295,8 +323,10 @@ public:
         SSL_CTX_set_min_proto_version(ctx_, DTLS1_2_VERSION);
         SSL_CTX_set_read_ahead(ctx_, 1);
         SSL_CTX_set_psk_server_callback(ctx_, &DtlsGateway::pskServerCallback);
-        SSL_CTX_set_cookie_generate_cb(ctx_, &DtlsGateway::generateCookie);
-        SSL_CTX_set_cookie_verify_cb(ctx_, &DtlsGateway::verifyCookie);
+        if (useCookieExchange_) {
+            SSL_CTX_set_cookie_generate_cb(ctx_, &DtlsGateway::generateCookie);
+            SSL_CTX_set_cookie_verify_cb(ctx_, &DtlsGateway::verifyCookie);
+        }
         if (SSL_CTX_use_psk_identity_hint(ctx_, pskIdentity_.c_str()) != 1) {
             throw std::runtime_error("Failed to configure DTLS PSK identity hint");
         }
@@ -310,72 +340,85 @@ public:
 
         std::cout << "[DTLS] Listening on " << bindHost_ << ":" << bindPort_ << '\n';
         std::cout << "[DTLS] Forwarding decrypted thermal UDP to " << forwardHost_ << ":" << forwardPort_ << '\n';
+        if (useCookieExchange_) {
+            std::cout << "[DTLS] Using DTLS cookie exchange via DTLSv1_listen\n";
+        } else {
+            std::cout << "[DTLS] Cookie exchange disabled for proxy-friendly DTLS handshakes\n";
+        }
     }
 
     void run()
     {
         while (true) {
-            BIO_ADDR* peer = BIO_ADDR_new();
-            if (peer == nullptr) {
-                throw std::runtime_error("BIO_ADDR_new failed");
-            }
-
-            SSL* listenSsl = SSL_new(ctx_);
-            if (listenSsl == nullptr) {
-                BIO_ADDR_free(peer);
-                throw std::runtime_error("SSL_new failed for listen session");
-            }
-
-            BIO* listenBio = BIO_new_dgram(listenFd_, BIO_NOCLOSE);
-            if (listenBio == nullptr) {
-                SSL_free(listenSsl);
-                BIO_ADDR_free(peer);
-                throw std::runtime_error("BIO_new_dgram failed for listen socket");
-            }
-
-            SSL_set_bio(listenSsl, listenBio, listenBio);
-
-            const int listenRc = DTLSv1_listen(listenSsl, peer);
-            if (listenRc <= 0) {
-                printOpenSslErrors("[DTLS] DTLSv1_listen failed");
-                SSL_free(listenSsl);
-                BIO_ADDR_free(peer);
-                continue;
-            }
-
             sockaddr_storage peerSock{};
             socklen_t peerLen = 0;
-            if (!bioAddrToSockaddr(peer, peerSock, peerLen)) {
-                std::cerr << "[DTLS] Failed to convert peer address\n";
-                SSL_free(listenSsl);
-                BIO_ADDR_free(peer);
+            BIO_ADDR* peer = nullptr;
+
+            SSL* sessionSsl = SSL_new(ctx_);
+            if (sessionSsl == nullptr) {
+                throw std::runtime_error("SSL_new failed for DTLS session");
+            }
+
+            BIO* sessionBio = BIO_new_dgram(listenFd_, BIO_NOCLOSE);
+            if (sessionBio == nullptr) {
+                SSL_free(sessionSsl);
+                throw std::runtime_error("BIO_new_dgram failed for DTLS session");
+            }
+
+            SSL_set_bio(sessionSsl, sessionBio, sessionBio);
+
+            if (useCookieExchange_) {
+                peer = BIO_ADDR_new();
+                if (peer == nullptr) {
+                    SSL_free(sessionSsl);
+                    throw std::runtime_error("BIO_ADDR_new failed");
+                }
+
+                ERR_clear_error();
+                const int listenRc = DTLSv1_listen(sessionSsl, peer);
+                if (listenRc <= 0) {
+                    printOpenSslErrors("[DTLS] DTLSv1_listen failed");
+                    SSL_free(sessionSsl);
+                    BIO_ADDR_free(peer);
+                    continue;
+                }
+
+                if (!bioAddrToSockaddr(peer, peerSock, peerLen)) {
+                    std::cerr << "[DTLS] Failed to convert peer address\n";
+                    SSL_free(sessionSsl);
+                    BIO_ADDR_free(peer);
+                    continue;
+                }
+            } else if (!waitForPeerDatagram(peerSock, peerLen)) {
+                SSL_free(sessionSsl);
                 continue;
             }
 
             if (::connect(listenFd_, reinterpret_cast<sockaddr*>(&peerSock), peerLen) != 0) {
                 std::cerr << "[DTLS] Failed to connect UDP socket to peer: " << std::strerror(errno) << '\n';
-                SSL_free(listenSsl);
+                SSL_free(sessionSsl);
                 BIO_ADDR_free(peer);
                 disconnectUdpSocket(listenFd_);
                 continue;
             }
 
-            BIO_ctrl(listenBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
+            BIO_ctrl(sessionBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
             configureSocketTimeout(listenFd_, kHandshakeTimeoutSeconds);
 
             std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
 
-            const int acceptRc = SSL_accept(listenSsl);
+            ERR_clear_error();
+            const int acceptRc = SSL_accept(sessionSsl);
             if (acceptRc <= 0) {
-                const int sslError = SSL_get_error(listenSsl, acceptRc);
-                if (BIO_dgram_recv_timedout(listenBio) == 1 || BIO_dgram_send_timedout(listenBio) == 1) {
+                const int sslError = SSL_get_error(sessionSsl, acceptRc);
+                if (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1) {
                     std::cerr << "[DTLS] SSL_accept timed out for peer " << sockaddrToString(peerSock) << '\n';
                 } else {
                     std::cerr << "[DTLS] SSL_accept failed with sslError=" << sslError
                               << " errno=" << errno << " (" << std::strerror(errno) << ")\n";
                     printOpenSslErrors("[DTLS] SSL_accept failed");
                 }
-                SSL_free(listenSsl);
+                SSL_free(sessionSsl);
                 BIO_ADDR_free(peer);
                 disconnectUdpSocket(listenFd_);
                 configureSocketTimeout(listenFd_, 0);
@@ -387,14 +430,15 @@ public:
 
             std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
             for (;;) {
-                const int bytesRead = SSL_read(listenSsl, buffer.data(), static_cast<int>(buffer.size()));
+                ERR_clear_error();
+                const int bytesRead = SSL_read(sessionSsl, buffer.data(), static_cast<int>(buffer.size()));
                 if (bytesRead <= 0) {
-                    const int sslError = SSL_get_error(listenSsl, bytesRead);
+                    const int sslError = SSL_get_error(sessionSsl, bytesRead);
                     if (sslError == SSL_ERROR_ZERO_RETURN) {
                         std::cout << "[DTLS] Peer closed session\n";
                     } else if (sslError == SSL_ERROR_WANT_READ || sslError == SSL_ERROR_WANT_WRITE) {
                         continue;
-                    } else if (BIO_dgram_recv_timedout(listenBio) == 1 || BIO_dgram_send_timedout(listenBio) == 1) {
+                    } else if (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1) {
                         std::cout << "[DTLS] DTLS session timed out for peer " << sockaddrToString(peerSock) << '\n';
                     } else {
                         printOpenSslErrors("[DTLS] SSL_read failed");
@@ -407,8 +451,8 @@ public:
                 }
             }
 
-            SSL_shutdown(listenSsl);
-            SSL_free(listenSsl);
+            SSL_shutdown(sessionSsl);
+            SSL_free(sessionSsl);
             BIO_ADDR_free(peer);
             disconnectUdpSocket(listenFd_);
             configureSocketTimeout(listenFd_, 0);
@@ -486,6 +530,31 @@ private:
         }
 
         return CRYPTO_memcmp(cookie, expected, expectedLen) == 0 ? 1 : 0;
+    }
+
+    bool waitForPeerDatagram(sockaddr_storage& out, socklen_t& outLen)
+    {
+        std::array<unsigned char, 1> probe{};
+
+        for (;;) {
+            outLen = sizeof(out);
+            const ssize_t peeked = ::recvfrom(listenFd_,
+                                              probe.data(),
+                                              probe.size(),
+                                              MSG_PEEK,
+                                              reinterpret_cast<sockaddr*>(&out),
+                                              &outLen);
+            if (peeked >= 0) {
+                return true;
+            }
+
+            if (errno == EINTR) {
+                continue;
+            }
+
+            std::cerr << "[DTLS] Failed to peek UDP peer: " << std::strerror(errno) << '\n';
+            return false;
+        }
     }
 
     bool cookieMaterial(SSL* ssl, std::vector<unsigned char>& out)
@@ -566,6 +635,7 @@ private:
     int bindPort_ = kDefaultDtlsPort;
     std::string forwardHost_;
     int forwardPort_ = kDefaultForwardPort;
+    bool useCookieExchange_ = false;
     std::string pskIdentity_;
     std::vector<unsigned char> pskKey_;
     std::vector<unsigned char> cookieSecret_;
