@@ -1,3 +1,0 @@
-MQTT_BROKER = "your-broker-host"
-MQTT_PORT = 8883
-MQTT_TLS_INSECURE = True
