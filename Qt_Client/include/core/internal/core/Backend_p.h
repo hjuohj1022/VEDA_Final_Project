@@ -14,6 +14,17 @@
 #include <QUdpSocket>
 #include <QWebSocket>
 
+struct ThermalAssemblyBuffer
+{
+    int frameId = -1;
+    int totalChunksExpected = 0;
+    qint64 frameStartedMs = 0;
+    quint16 headerMin = 0;
+    quint16 headerMax = 0;
+    bool hasFrameId = false;
+    QMap<int, QByteArray> chunks;
+};
+
 struct BackendPrivate
 {
     // Core common state
@@ -143,6 +154,8 @@ struct BackendPrivate
     qint64 m_thermalTotalBytes = 0;
     double m_thermalDisplayFps = 0.0;
     QMap<int, QByteArray> m_thermalFrameChunks;
+    QMap<int, ThermalAssemblyBuffer> m_thermalAssemblyBuffers;
+    int m_thermalLegacyFrameSequence = 0;
     quint16 m_thermalHeaderMin = 0;
     quint16 m_thermalHeaderMax = 0;
     int m_displayContrast = 50;

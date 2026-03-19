@@ -31,6 +31,7 @@ constexpr int kThermalHeaderBytes = 10;
 constexpr int kThermalHeaderWithRangeBytes = 8;
 constexpr int kThermalHeaderLegacyBytes = 4;
 constexpr int kThermalChunkLimit = 100;
+constexpr int kMaxInflightThermalFrames = 4;
 constexpr qint64 kThermalFrameTimeoutMs = 1500;
 
 enum class ThermalFrameEncoding {
@@ -78,7 +79,7 @@ static QString thermalWsPath(const BackendPrivate *state)
                                  QStringLiteral("/thermal/stream"));
 }
 
-static void resetThermalAssemblyState(BackendPrivate *state)
+static void clearThermalCurrentAssemblyState(BackendPrivate *state)
 {
     if (!state) {
         return;
@@ -90,6 +91,17 @@ static void resetThermalAssemblyState(BackendPrivate *state)
     state->m_thermalHeaderMin = 0;
     state->m_thermalHeaderMax = 0;
     state->m_thermalFrameChunks.clear();
+}
+
+static void resetThermalAssemblyState(BackendPrivate *state)
+{
+    if (!state) {
+        return;
+    }
+
+    clearThermalCurrentAssemblyState(state);
+    state->m_thermalAssemblyBuffers.clear();
+    state->m_thermalLegacyFrameSequence = 0;
     state->m_thermalLastFrameId = -1;
     state->m_thermalLastDisplayMs = 0;
     state->m_thermalChunkCount = 0;
@@ -362,6 +374,119 @@ static bool parseThermalChunkHeader(const QByteArray &message, ThermalChunkHeade
     return false;
 }
 
+static ThermalAssemblyBuffer makeThermalAssemblyBuffer(const ThermalChunkHeader &header, int frameKey, qint64 nowMs)
+{
+    ThermalAssemblyBuffer buffer;
+    buffer.frameId = header.hasFrameId ? header.frameId : frameKey;
+    buffer.totalChunksExpected = static_cast<int>(header.total);
+    buffer.frameStartedMs = nowMs;
+    buffer.headerMin = header.minVal;
+    buffer.headerMax = header.maxVal;
+    buffer.hasFrameId = header.hasFrameId;
+    return buffer;
+}
+
+static void logIncompleteThermalFrameDrop(const ThermalAssemblyBuffer &frame)
+{
+    qWarning() << "[THERMAL] drop incomplete frame id=" << frame.frameId
+               << "chunks=" << frame.chunks.size()
+               << "/" << frame.totalChunksExpected;
+}
+
+static void syncThermalCurrentAssemblyState(BackendPrivate *state)
+{
+    if (!state || state->m_thermalAssemblyBuffers.isEmpty()) {
+        clearThermalCurrentAssemblyState(state);
+        return;
+    }
+
+    const ThermalAssemblyBuffer *latest = nullptr;
+    for (auto it = state->m_thermalAssemblyBuffers.cbegin(); it != state->m_thermalAssemblyBuffers.cend(); ++it) {
+        const ThermalAssemblyBuffer &candidate = it.value();
+        if (latest == nullptr
+            || candidate.frameStartedMs > latest->frameStartedMs
+            || (candidate.frameStartedMs == latest->frameStartedMs && candidate.frameId > latest->frameId)) {
+            latest = &candidate;
+        }
+    }
+
+    if (latest == nullptr) {
+        clearThermalCurrentAssemblyState(state);
+        return;
+    }
+
+    state->m_thermalCurrentFrameId = latest->frameId;
+    state->m_thermalTotalChunksExpected = latest->totalChunksExpected;
+    state->m_thermalFrameStartedMs = latest->frameStartedMs;
+    state->m_thermalHeaderMin = latest->headerMin;
+    state->m_thermalHeaderMax = latest->headerMax;
+    state->m_thermalFrameChunks.clear();
+}
+
+static void pruneExpiredThermalAssemblyBuffers(BackendPrivate *state, qint64 nowMs)
+{
+    if (!state) {
+        return;
+    }
+
+    QList<int> expiredKeys;
+    for (auto it = state->m_thermalAssemblyBuffers.cbegin(); it != state->m_thermalAssemblyBuffers.cend(); ++it) {
+        const ThermalAssemblyBuffer &frame = it.value();
+        if (frame.frameStartedMs > 0 && (nowMs - frame.frameStartedMs) > kThermalFrameTimeoutMs) {
+            qWarning() << "[THERMAL] frame timeout id=" << frame.frameId
+                       << "chunks=" << frame.chunks.size()
+                       << "/" << frame.totalChunksExpected;
+            expiredKeys.push_back(it.key());
+        }
+    }
+
+    for (int key : expiredKeys) {
+        state->m_thermalAssemblyBuffers.remove(key);
+    }
+}
+
+static void trimThermalAssemblyBuffers(BackendPrivate *state)
+{
+    if (!state) {
+        return;
+    }
+
+    while (state->m_thermalAssemblyBuffers.size() > kMaxInflightThermalFrames) {
+        auto oldestIt = state->m_thermalAssemblyBuffers.begin();
+        for (auto it = state->m_thermalAssemblyBuffers.begin(); it != state->m_thermalAssemblyBuffers.end(); ++it) {
+            if (it.value().frameStartedMs < oldestIt.value().frameStartedMs) {
+                oldestIt = it;
+            }
+        }
+
+        logIncompleteThermalFrameDrop(oldestIt.value());
+        state->m_thermalAssemblyBuffers.erase(oldestIt);
+    }
+}
+
+static int resolveThermalFrameKey(BackendPrivate *state, const ThermalChunkHeader &header)
+{
+    if (!state) {
+        return header.hasFrameId ? header.frameId : -1;
+    }
+
+    if (header.hasFrameId) {
+        return header.frameId;
+    }
+
+    const int currentKey = state->m_thermalCurrentFrameId;
+    if (currentKey != -1 && state->m_thermalAssemblyBuffers.contains(currentKey)) {
+        const ThermalAssemblyBuffer &current = state->m_thermalAssemblyBuffers[currentKey];
+        if (current.totalChunksExpected == static_cast<int>(header.total)
+            && (header.idx != 0 || current.chunks.isEmpty())) {
+            return currentKey;
+        }
+    }
+
+    state->m_thermalLegacyFrameSequence -= 1;
+    return state->m_thermalLegacyFrameSequence;
+}
+
 static QRgb jetColor(unsigned char value)
 {
     const int v = static_cast<int>(value);
@@ -624,85 +749,61 @@ void BackendThermalService::handleThermalChunkMessage(Backend *backend, BackendP
     }
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    if (state->m_thermalCurrentFrameId >= 0 && state->m_thermalFrameStartedMs > 0
-        && (nowMs - state->m_thermalFrameStartedMs) > kThermalFrameTimeoutMs) {
-        qWarning() << "[THERMAL] frame timeout id=" << state->m_thermalCurrentFrameId;
-        state->m_thermalCurrentFrameId = -1;
-        state->m_thermalTotalChunksExpected = 0;
-        state->m_thermalFrameStartedMs = 0;
-        state->m_thermalHeaderMin = 0;
-        state->m_thermalHeaderMax = 0;
-        state->m_thermalFrameChunks.clear();
-    }
+    pruneExpiredThermalAssemblyBuffers(state, nowMs);
 
-    bool shouldStartNewFrame = false;
-    if (header.hasFrameId) {
-        shouldStartNewFrame = (state->m_thermalCurrentFrameId < 0 || state->m_thermalCurrentFrameId != header.frameId);
-    } else {
-        shouldStartNewFrame = (state->m_thermalTotalChunksExpected != static_cast<int>(header.total))
-                           || (header.idx == 0 && !state->m_thermalFrameChunks.isEmpty());
-    }
-
-    if (shouldStartNewFrame) {
-        if (state->m_thermalCurrentFrameId >= 0
-            && !state->m_thermalFrameChunks.isEmpty()
-            && state->m_thermalFrameChunks.size() != state->m_thermalTotalChunksExpected) {
-            qWarning() << "[THERMAL] drop incomplete frame id=" << state->m_thermalCurrentFrameId
-                       << "chunks=" << state->m_thermalFrameChunks.size()
-                       << "/" << state->m_thermalTotalChunksExpected;
+    const int frameKey = resolveThermalFrameKey(state, header);
+    auto frameIt = state->m_thermalAssemblyBuffers.find(frameKey);
+    if (frameIt == state->m_thermalAssemblyBuffers.end()) {
+        frameIt = state->m_thermalAssemblyBuffers.insert(frameKey, makeThermalAssemblyBuffer(header, frameKey, nowMs));
+    } else if (frameIt.value().totalChunksExpected != static_cast<int>(header.total)) {
+        if (!frameIt.value().chunks.isEmpty()) {
+            logIncompleteThermalFrameDrop(frameIt.value());
         }
-
-        state->m_thermalCurrentFrameId = -1;
-        state->m_thermalTotalChunksExpected = 0;
-        state->m_thermalFrameStartedMs = 0;
-        state->m_thermalHeaderMin = 0;
-        state->m_thermalHeaderMax = 0;
-        state->m_thermalFrameChunks.clear();
-        state->m_thermalCurrentFrameId = header.hasFrameId ? header.frameId : 0;
-        state->m_thermalTotalChunksExpected = static_cast<int>(header.total);
-        state->m_thermalFrameStartedMs = nowMs;
+        frameIt.value() = makeThermalAssemblyBuffer(header, frameKey, nowMs);
     }
 
-    if (state->m_thermalCurrentFrameId < 0) {
-        state->m_thermalCurrentFrameId = header.hasFrameId ? header.frameId : 0;
-    }
-    if (state->m_thermalTotalChunksExpected <= 0) {
-        state->m_thermalTotalChunksExpected = static_cast<int>(header.total);
-        state->m_thermalFrameStartedMs = nowMs;
-    }
-
+    ThermalAssemblyBuffer &frame = frameIt.value();
+    frame.headerMin = header.minVal;
+    frame.headerMax = header.maxVal;
     const QByteArray payload = message.mid(header.headerBytes);
     if (debugThermal && header.idx == 0) {
-        qInfo() << "[THERMAL] frame begin id=" << state->m_thermalCurrentFrameId
+        qInfo() << "[THERMAL] frame begin id=" << frame.frameId
                 << "total=" << header.total
                 << "payload=" << payload.size()
                 << "headerMinMax=" << header.minVal << header.maxVal;
     }
 
-    state->m_thermalHeaderMin = header.minVal;
-    state->m_thermalHeaderMax = header.maxVal;
-    state->m_thermalFrameChunks[static_cast<int>(header.idx)] = payload;
+    frame.chunks[static_cast<int>(header.idx)] = payload;
+    state->m_thermalCurrentFrameId = frame.frameId;
+    state->m_thermalTotalChunksExpected = frame.totalChunksExpected;
+    state->m_thermalFrameStartedMs = frame.frameStartedMs;
+    state->m_thermalHeaderMin = frame.headerMin;
+    state->m_thermalHeaderMax = frame.headerMax;
 
-    if (state->m_thermalFrameChunks.size() == state->m_thermalTotalChunksExpected) {
-        const int frameId = state->m_thermalCurrentFrameId;
+    if (frame.chunks.size() == frame.totalChunksExpected) {
+        const int frameId = frame.frameId;
+        const QMap<int, QByteArray> chunks = frame.chunks;
+        const int totalChunks = frame.totalChunksExpected;
+        const quint16 minVal = frame.headerMin;
+        const quint16 maxVal = frame.headerMax;
         if (debugThermal) {
             qInfo() << "[THERMAL] frame chunks complete id=" << frameId
-                    << "chunks=" << state->m_thermalTotalChunksExpected;
+                    << "chunks=" << totalChunks;
         }
+        state->m_thermalAssemblyBuffers.remove(frameKey);
+        syncThermalCurrentAssemblyState(state);
         BackendThermalService::processThermalFrame(backend,
                                                    state,
-                                                   state->m_thermalFrameChunks,
-                                                   state->m_thermalTotalChunksExpected,
-                                                   state->m_thermalHeaderMin,
-                                                   state->m_thermalHeaderMax,
+                                                   chunks,
+                                                   totalChunks,
+                                                   minVal,
+                                                   maxVal,
                                                    frameId);
-        state->m_thermalCurrentFrameId = -1;
-        state->m_thermalTotalChunksExpected = 0;
-        state->m_thermalFrameStartedMs = 0;
-        state->m_thermalHeaderMin = 0;
-        state->m_thermalHeaderMax = 0;
-        state->m_thermalFrameChunks.clear();
+        return;
     }
+
+    trimThermalAssemblyBuffers(state);
+    syncThermalCurrentAssemblyState(state);
 }
 
 void BackendThermalService::processThermalFrame(Backend *backend,
