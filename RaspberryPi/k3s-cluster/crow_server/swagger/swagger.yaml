@@ -1621,7 +1621,7 @@ paths:
   /laser/control/on:
     post:
       summary: 레이저 켜기
-      description: 'laser/control' 토픽으로 'laser on'을 발행하고 응답을 기다립니다.
+      description: laser/control 토픽으로 'laser on'을 발행하고 응답을 기다립니다.
       responses:
         '200':
           description: 레이저 응답 수신 성공
@@ -1633,7 +1633,7 @@ paths:
   /laser/control/off:
     post:
       summary: 레이저 끄기
-      description: 'laser/control' 토픽으로 'laser off'를 발행하고 응답을 기다립니다.
+      description: laser/control 토픽으로 'laser off'를 발행하고 응답을 기다립니다.
       responses:
         '200':
           description: 레이저 응답 수신 성공
