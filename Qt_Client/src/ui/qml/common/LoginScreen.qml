@@ -554,22 +554,13 @@ Item {
                     color: "black"
                 }
 
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    fillMode: Image.PreserveAspectFit
-                    retainWhileLoading: true
-                    smooth: false
-                    cache: false
-                    source: backend.thermalFrameDataUrl
-                }
-
                 Rectangle {
+                    id: thermalStatusBar
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    height: 30
-                    color: "transparent"
+                    height: 34
+                    color: theme ? theme.bgComponent : "#111827"
 
                     Rectangle {
                         anchors.top: parent.top
@@ -590,6 +581,19 @@ Item {
                         color: theme ? theme.textSecondary : "#a1a1aa"
                         font.pixelSize: 12
                     }
+                }
+
+                Image {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: thermalStatusBar.top
+                    anchors.margins: 8
+                    fillMode: Image.PreserveAspectFit
+                    retainWhileLoading: true
+                    smooth: false
+                    cache: false
+                    source: backend.thermalFrameDataUrl
                 }
             }
         }
