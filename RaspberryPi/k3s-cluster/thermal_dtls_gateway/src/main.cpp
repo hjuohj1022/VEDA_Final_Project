@@ -334,7 +334,6 @@ public:
             }
 
             SSL_set_bio(listenSsl, listenBio, listenBio);
-            SSL_set_options(listenSsl, SSL_OP_COOKIE_EXCHANGE);
 
             const int listenRc = DTLSv1_listen(listenSsl, peer);
             if (listenRc <= 0) {
