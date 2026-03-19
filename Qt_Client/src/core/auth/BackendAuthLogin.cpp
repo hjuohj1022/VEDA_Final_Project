@@ -1,4 +1,4 @@
-#include "Backend.h"
+﻿#include "Backend.h"
 #include "internal/auth/BackendAuthRequestService.h"
 #include "internal/core/Backend_p.h"
 
@@ -35,6 +35,12 @@ void Backend::disableTwoFactor(QString otp)
 void Backend::deleteAccount(QString password, QString otp)
 {
     BackendAuthRequestService::deleteAccount(this, d_ptr.get(), password, otp);
+}
+
+void Backend::changePassword(QString currentPassword, QString newPassword)
+{
+    // 로그인 사용자 비밀번호 변경 요청 위임
+    BackendAuthRequestService::changePassword(this, d_ptr.get(), currentPassword, newPassword);
 }
 
 void Backend::cancelTwoFactorLogin()

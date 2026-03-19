@@ -541,6 +541,9 @@ ApplicationWindow {
             onRequestAccountDelete: {
                 accountDeleteDialog.openDialog()
             }
+            onRequestPasswordChange: {
+                changePasswordDialog.openDialog()
+            }
             onRequestHome: {
                 window.showClientSystemSpecs()
             }
@@ -950,6 +953,7 @@ ApplicationWindow {
                 closeRtspSettingsPopup()
                 twoFactorDialog.close()
                 accountDeleteDialog.close()
+                changePasswordDialog.close()
             }
             stackLayout.currentIndex = backend.isLoggedIn
                                      ? (inlineMainViewVisible ? 3 : 0)
@@ -972,12 +976,18 @@ ApplicationWindow {
             accountActionDialog.text = "계정이 삭제되었습니다.\n로그인 화면으로 이동합니다."
             accountActionDialog.open()
         }
+        function onPasswordChangeCompleted() {
+            accountActionDialog.title = "비밀번호 변경"
+            accountActionDialog.text = "비밀번호가 성공적으로 변경되었습니다."
+            accountActionDialog.open()
+        }
         function onSessionExpired() {
             inlineMainViewVisible = false
             inlineMainCameraIndex = -1
             closeRtspSettingsPopup()
             twoFactorDialog.close()
             accountDeleteDialog.close()
+            changePasswordDialog.close()
             stackLayout.currentIndex = 1
         }
         function onRtspProbeFinished(success, error) {
@@ -1198,6 +1208,12 @@ ApplicationWindow {
 
     AccountDeleteDialog {
         id: accountDeleteDialog
+        theme: window.appTheme
+        backendObject: backend
+    }
+
+    ChangePasswordDialog {
+        id: changePasswordDialog
         theme: window.appTheme
         backendObject: backend
     }

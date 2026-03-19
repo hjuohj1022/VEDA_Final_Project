@@ -15,6 +15,8 @@ public:
     static void confirmTwoFactorSetup(Backend *backend, BackendPrivate *state, QString otp);
     static void disableTwoFactor(Backend *backend, BackendPrivate *state, QString otp);
     static void deleteAccount(Backend *backend, BackendPrivate *state, QString password, QString otp);
+    // 로그인 계정 비밀번호 변경 요청 처리
+    static void changePassword(Backend *backend, BackendPrivate *state, QString currentPassword, QString newPassword);
     static void registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw);
 };
 

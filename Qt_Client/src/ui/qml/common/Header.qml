@@ -21,6 +21,7 @@ Rectangle {
     signal requestTwoFactorSetup()
     signal requestTwoFactorDisable()
     signal requestAccountDelete()
+    signal requestPasswordChange()
     signal requestHome()
     signal requestRtspSettings()
     signal requestMotorControl()
@@ -560,13 +561,48 @@ Rectangle {
                         Layout.fillWidth: true
                         spacing: 5
 
-                        Text {
-                            text: displayUserName()
-                            color: theme ? theme.textPrimary : "white"
-                            font.bold: true
-                            font.pixelSize: 15
-                            elide: Text.ElideRight
+                        RowLayout {
                             width: parent.width
+                            spacing: 6
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: displayUserName()
+                                color: theme ? theme.textPrimary : "white"
+                                font.bold: true
+                                font.pixelSize: 15
+                                elide: Text.ElideRight
+                            }
+
+                            Rectangle {
+                                Layout.preferredWidth: 72
+                                Layout.preferredHeight: 20
+                                radius: 10
+                                color: passwordChangeMouse.containsMouse
+                                       ? (theme ? theme.bgSecondary : "#0f172a")
+                                       : "transparent"
+                                border.color: theme ? theme.border : "#374151"
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "비밀번호 변경"
+                                    color: theme ? theme.textSecondary : "#cbd5e1"
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    id: passwordChangeMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        accountMenu.close()
+                                        root.requestPasswordChange()
+                                    }
+                                }
+                            }
                         }
 
                         Text {

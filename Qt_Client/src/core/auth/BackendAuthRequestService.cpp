@@ -1,4 +1,4 @@
-#include "internal/auth/BackendAuthRequestService.h"
+﻿#include "internal/auth/BackendAuthRequestService.h"
 
 #include "Backend.h"
 #include "internal/auth/BackendAuthSessionService.h"
@@ -111,6 +111,28 @@ bool isExpiredTwoFactorChallenge(int statusCode, const QString &bodyText)
            || bodyText.contains("user not found", Qt::CaseInsensitive);
 }
 
+QString validatePasswordComplexityForClient(const QString &password)
+{
+    // 비밀번호 변경/회원가입 공통 복잡도 규칙 검증
+    if (password.length() < 8) {
+        return "비밀번호는 8자 이상이어야 합니다.";
+    }
+    if (password.length() > 16) {
+        return "비밀번호는 16자 이하여야 합니다.";
+    }
+    if (password.contains(QRegularExpression("\\s"))) {
+        return "비밀번호에는 공백을 사용할 수 없습니다.";
+    }
+    if (!password.contains(QRegularExpression("\\d"))) {
+        return "비밀번호에는 숫자가 1개 이상 포함되어야 합니다.";
+    }
+    if (!password.contains(QRegularExpression("[^A-Za-z0-9\\s]"))) {
+        return "비밀번호에는 특수문자가 1개 이상 포함되어야 합니다.";
+    }
+
+    return QString();
+}
+
 } // namespace
 
 void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, QString id, QString pw)
@@ -220,9 +242,9 @@ void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, Q
                 if (netError == QNetworkReply::OperationCanceledError) {
                     emit backend->loginFailed("로그인 요청이 취소되었습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.");
                 } else if (isSslFailure(netError)) {
-                    emit backend->loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN) 또는 API_URL(HTTP/HTTPS)을 확인해 주세요.");
+                    emit backend->loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN)와 API_URL(HTTP/HTTPS)을 확인해 주세요.");
                 } else if (isServerUnavailable(statusCode, netError)) {
-                    emit backend->loginFailed("서버와 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
+                    emit backend->loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
                 } else if (isAuthFailure) {
                     if (!state->m_loginLocked) {
                         state->m_loginFailedAttempts++;
@@ -340,9 +362,9 @@ void BackendAuthRequestService::verifyTwoFactorOtp(Backend *backend, BackendPriv
             } else if (netError == QNetworkReply::OperationCanceledError) {
                 emit backend->loginFailed("OTP 인증 요청이 취소되었습니다. 다시 시도해 주세요.");
             } else if (isSslFailure(netError)) {
-                emit backend->loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN) 또는 API_URL(HTTP/HTTPS)을 확인해 주세요.");
+                emit backend->loginFailed("서버 SSL 인증서 검증에 실패했습니다. 인증서(CN/SAN)와 API_URL(HTTP/HTTPS)을 확인해 주세요.");
             } else if (isServerUnavailable(statusCode, netError)) {
-                emit backend->loginFailed("서버와 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
+                emit backend->loginFailed("서버에 연결할 수 없습니다. 서버 상태를 확인해 주세요.");
             } else if (statusCode == 401 && isExpiredTwoFactorChallenge(statusCode, bodyText)) {
                 clearPendingTwoFactorState(backend, state, true);
                 emit backend->loginFailed("OTP 세션이 만료되었거나 유효하지 않습니다. 다시 로그인해 주세요.");
@@ -630,7 +652,7 @@ void BackendAuthRequestService::deleteAccount(Backend *backend, BackendPrivate *
             BackendAuthSessionService::logout(backend, state);
             emit backend->accountDeleteCompleted();
         } else if (netError == QNetworkReply::OperationCanceledError && !state->m_isLoggedIn) {
-            // A local logout can abort the in-flight request; no extra UI error is needed.
+            // 로그아웃으로 중단된 경우 추가 에러 미표시
         } else if (isSslFailure(netError)) {
             emit backend->accountDeleteFailed("Server SSL validation failed");
         } else if (isServerUnavailable(statusCode, netError)) {
@@ -645,6 +667,78 @@ void BackendAuthRequestService::deleteAccount(Backend *backend, BackendPrivate *
             state->m_accountDeleteReply = nullptr;
         }
         state->m_accountDeleteInProgress = false;
+        reply->deleteLater();
+    });
+}
+
+void BackendAuthRequestService::changePassword(Backend *backend, BackendPrivate *state, QString currentPassword, QString newPassword)
+{
+    // 로그인 상태 비밀번호 변경 요청 처리
+    if (!state->m_isLoggedIn || state->m_authToken.trimmed().isEmpty()) {
+        emit backend->passwordChangeFailed("로그인 후 이용해 주세요.");
+        return;
+    }
+    if (state->m_passwordChangeInProgress) {
+        emit backend->passwordChangeFailed("비밀번호 변경 요청이 이미 처리 중입니다.");
+        return;
+    }
+    if (currentPassword.isEmpty()) {
+        emit backend->passwordChangeFailed("현재 비밀번호를 입력해 주세요.");
+        return;
+    }
+    if (newPassword.isEmpty()) {
+        emit backend->passwordChangeFailed("새 비밀번호를 입력해 주세요.");
+        return;
+    }
+    if (currentPassword == newPassword) {
+        emit backend->passwordChangeFailed("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        return;
+    }
+
+    // 클라이언트 측 비밀번호 복잡도 사전 검증
+    const QString complexityError = validatePasswordComplexityForClient(newPassword);
+    if (!complexityError.isEmpty()) {
+        emit backend->passwordChangeFailed(complexityError);
+        return;
+    }
+
+    QNetworkRequest request = BackendCoreApiService::makeApiJsonRequest(
+        backend, state, "/account/password/change", QMap<QString, QString>{});
+    BackendCoreApiService::applyAuthIfNeeded(backend, state, request);
+
+    QJsonObject json;
+    json["current_password"] = currentPassword;
+    json["new_password"] = newPassword;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_passwordChangeReply = reply;
+    state->m_passwordChangeInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "ACCOUNT_PASSWORD_CHANGE");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            emit backend->passwordChangeCompleted();
+        } else if (netError == QNetworkReply::OperationCanceledError && !state->m_isLoggedIn) {
+            // 로그아웃으로 중단된 경우 추가 에러 미표시
+        } else if (isSslFailure(netError)) {
+            emit backend->passwordChangeFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->passwordChangeFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->passwordChangeFailed(bodyText.isEmpty()
+                                                   ? "비밀번호 변경에 실패했습니다."
+                                                   : bodyText);
+        }
+
+        if (state->m_passwordChangeReply == reply) {
+            state->m_passwordChangeReply = nullptr;
+        }
+        state->m_passwordChangeInProgress = false;
         reply->deleteLater();
     });
 }
@@ -736,3 +830,6 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
         reply->deleteLater();
     });
 }
+
+
+

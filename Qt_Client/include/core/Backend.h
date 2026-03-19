@@ -1,4 +1,4 @@
-#ifndef BACKEND_H
+﻿#ifndef BACKEND_H
 #define BACKEND_H
 
 #include <QObject>
@@ -120,6 +120,8 @@ public:
     Q_INVOKABLE void confirmTwoFactorSetup(QString otp);
     Q_INVOKABLE void disableTwoFactor(QString otp);
     Q_INVOKABLE void deleteAccount(QString password, QString otp = QString());
+    // 로그인 계정 비밀번호 변경 요청
+    Q_INVOKABLE void changePassword(QString currentPassword, QString newPassword);
     Q_INVOKABLE void registerUser(QString id, QString pw);
     Q_INVOKABLE void skipLoginTemporarily();
     Q_INVOKABLE void logout();
@@ -221,6 +223,8 @@ signals:
     void twoFactorDisableFailed(QString error);
     void accountDeleteCompleted();
     void accountDeleteFailed(QString error);
+    void passwordChangeCompleted();
+    void passwordChangeFailed(QString error);
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();
@@ -391,3 +395,5 @@ private:
 };
 
 #endif // BACKEND_H
+
+
