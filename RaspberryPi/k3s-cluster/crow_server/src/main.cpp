@@ -49,6 +49,8 @@ bool verifyTokenStage(const std::string& token,
 constexpr char kDatabaseName[] = "veda_db";
 constexpr size_t kMaxUserIdLength = 64;
 constexpr size_t kMaxPasswordLength = 128;
+constexpr size_t kPasswordPolicyMinLength = 8;
+constexpr size_t kPasswordPolicyMaxLength = 16;
 constexpr size_t kStoredPasswordBufferBytes = 256;
 constexpr int kPasswordHashIterations = 120000;
 constexpr size_t kPasswordSaltBytes = 16;
@@ -109,15 +111,58 @@ enum class RegisterUserStatus {
 std::optional<std::string> validateCredentials(const std::string& user_id,
                                                const std::string& password) {
     if (user_id.empty() || password.empty()) {
-        return "ID and password are required";
+        return "아이디와 비밀번호를 입력해 주세요.";
     }
     if (user_id.size() > kMaxUserIdLength) {
-        return "ID is too long";
+        return "아이디 길이가 너무 깁니다.";
     }
     if (password.size() > kMaxPasswordLength) {
-        return "Password is too long";
+        return "비밀번호 길이가 너무 깁니다.";
     }
     return std::nullopt;
+}
+
+// 회원가입 비밀번호 복잡도 규칙 검증 함수
+std::optional<std::string> validatePasswordComplexity(const std::string& password) {
+    if (password.size() < kPasswordPolicyMinLength) {
+        return "비밀번호는 8자 이상이어야 합니다.";
+    }
+    if (password.size() > kPasswordPolicyMaxLength) {
+        return "비밀번호는 16자 이하여야 합니다.";
+    }
+
+    bool has_digit = false;
+    bool has_special = false;
+
+    for (unsigned char ch : password) {
+        if (std::isspace(ch)) {
+            return "비밀번호에는 공백을 사용할 수 없습니다.";
+        }
+        if (std::isdigit(ch)) {
+            has_digit = true;
+        }
+        if (!std::isalnum(ch) && !std::isspace(ch)) {
+            has_special = true;
+        }
+    }
+
+    if (!has_digit) {
+        return "비밀번호에는 숫자가 1개 이상 포함되어야 합니다.";
+    }
+    if (!has_special) {
+        return "비밀번호에는 특수문자가 1개 이상 포함되어야 합니다.";
+    }
+
+    return std::nullopt;
+}
+
+// 회원가입 입력값 종합 검증 함수
+std::optional<std::string> validateRegistrationCredentials(const std::string& user_id,
+                                                           const std::string& password) {
+    if (const auto basic_error = validateCredentials(user_id, password)) {
+        return basic_error;
+    }
+    return validatePasswordComplexity(password);
 }
 
 MysqlConnectionPtr openDatabaseConnection() {
@@ -1284,7 +1329,7 @@ bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputP
 
 RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
     // 신규 계정의 prepared statement + PBKDF2 해시 형태 저장.
-    if (validateCredentials(inputId, inputPw)) {
+    if (validateRegistrationCredentials(inputId, inputPw)) {
         return RegisterUserStatus::InvalidInput;
     }
 
@@ -1402,16 +1447,16 @@ int main()
     CROW_ROUTE(app, "/register").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
         auto x = crow::json::load(req.body);
-        if (!x) return crow::response(400, "Invalid JSON");
+        if (!x) return crow::response(400, "잘못된 JSON 형식입니다.");
 
         if (!x.has("id") || !x.has("password")) {
-            return crow::response(400, "Missing id or password");
+            return crow::response(400, "id 또는 password 값이 없습니다.");
         }
 
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
 
-        if (const auto credential_error = validateCredentials(id, pw)) {
+        if (const auto credential_error = validateRegistrationCredentials(id, pw)) {
             return crow::response(400, *credential_error);
         }
 
@@ -1424,14 +1469,14 @@ int main()
         }
 
         if (register_status == RegisterUserStatus::DuplicateId) {
-            return crow::response(409, "Registration Failed: ID already exists");
+            return crow::response(409, "이미 사용 중인 아이디입니다.");
         }
 
         if (register_status == RegisterUserStatus::InvalidInput) {
-            return crow::response(400, "Invalid id or password");
+            return crow::response(400, "아이디 또는 비밀번호 형식이 올바르지 않습니다.");
         }
 
-        return crow::response(500, "Registration Failed: DB error");
+        return crow::response(500, "회원가입 처리 중 데이터베이스 오류가 발생했습니다.");
     });
 
     // ==========================================
@@ -1733,10 +1778,10 @@ int main()
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
         auto x = crow::json::load(req.body);
-        if (!x) return crow::response(400, "Invalid JSON");
+        if (!x) return crow::response(400, "잘못된 JSON 형식입니다.");
 
         if (!x.has("id") || !x.has("password")) {
-            return crow::response(400, "Missing id or password");
+            return crow::response(400, "id 또는 password 값이 없습니다.");
         }
 
         std::string id = x["id"].s();
@@ -1753,16 +1798,16 @@ int main()
         // DB 확인 후 토큰 생성
         auto connection = openDatabaseConnection();
         if (!connection) {
-            return crow::response(500, "Database connection failed");
+            return crow::response(500, "데이터베이스 연결에 실패했습니다.");
         }
 
         if (!verifyUserPassword(connection.get(), id, pw)) {
-            return crow::response(401, "Login Failed: Check ID or Password");
+            return crow::response(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
         }
 
         UserTwoFactorInfo two_factor_info;
         if (!loadUserTwoFactorInfo(connection.get(), id, &two_factor_info) || !two_factor_info.found) {
-            return crow::response(500, "Failed to load 2FA state");
+            return crow::response(500, "2FA 상태 정보를 불러오지 못했습니다.");
         }
 
         crow::json::wvalue res;
