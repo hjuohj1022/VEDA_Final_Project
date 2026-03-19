@@ -28,6 +28,7 @@ struct MotorStatusSnapshot {
     std::string response_topic;
     int timeout_ms = 0;
     std::string last_command;
+    std::string last_command_topic;
     std::string last_response;
     bool last_response_is_error = false;
     std::uint64_t response_sequence = 0;
@@ -57,6 +58,7 @@ public:
 
     // MQTT publish 후 response topic 응답 또는 timeout까지 대기.
     MotorCommandResult sendCommand(const std::string& command);
+    MotorCommandResult sendCommandToTopic(const std::string& control_topic, const std::string& command);
     MotorCommandResult press(int motor, const std::string& direction);
     MotorCommandResult release(int motor);
     MotorCommandResult stop(int motor);
@@ -82,6 +84,7 @@ private:
 
     bool awaiting_response_ = false;
     std::string last_command_;
+    std::string last_command_topic_;
     std::string last_response_;
     bool last_response_is_error_ = false;
     std::uint64_t response_sequence_ = 0;
@@ -90,3 +93,5 @@ private:
 
 // MotorManager 기반 모터 제어/상태 REST 라우트 등록.
 void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr);
+// MotorManager 기반 레이저 on/off 테스트 REST 라우트 등록.
+void registerLaserRoutes(crow::SimpleApp& app, MotorManager& motor_mgr, const std::string& laser_control_topic);

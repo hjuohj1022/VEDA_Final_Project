@@ -1556,6 +1556,8 @@ int main()
         motor_timeout_ms
     );
     registerMotorRoutes(app, motor_mgr);
+    const char* laser_control_topic = std::getenv("LASER_CONTROL_TOPIC") ? std::getenv("LASER_CONTROL_TOPIC") : "laser/control";
+    registerLaserRoutes(app, motor_mgr, laser_control_topic);
 
     const char* esp_watchdog_client_id = std::getenv("ESP32_WATCHDOG_CLIENT_ID") ? std::getenv("ESP32_WATCHDOG_CLIENT_ID") : "crow_esp_watchdog_api";
     const char* esp_watchdog_control_topic = std::getenv("ESP32_SYSTEM_CONTROL_TOPIC") ? std::getenv("ESP32_SYSTEM_CONTROL_TOPIC") : "system/control";

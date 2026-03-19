@@ -60,7 +60,7 @@ metadata:
   name: nginx-service
   namespace: default
 spec:
-  # MetalLB를 통해 외부 IP(예: 192.168.55.200) 할당
+  # MetalLB를 통해 외부 IP(예: <LB_IP>) 할당
   type: LoadBalancer
   selector:
     app: nginx-gateway
