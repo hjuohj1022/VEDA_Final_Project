@@ -9,17 +9,22 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,9 +33,20 @@ namespace {
 constexpr int kDefaultDtlsPort = 5005;
 constexpr int kDefaultForwardPort = 5005;
 constexpr size_t kMaxThermalPacketBytes = 4096;
+constexpr size_t kThermalHeaderBytes = 10;
 constexpr int kMinPskBytes = 16;
 constexpr int kHandshakeTimeoutSeconds = 15;
 constexpr int kSessionIdleTimeoutSeconds = 30;
+constexpr int kDefaultUdpSocketBufferBytes = 2 * 1024 * 1024;
+constexpr int kDefaultStatsLogIntervalMs = 5000;
+constexpr int kDefaultFrameTrackTimeoutMs = 2000;
+constexpr int kDefaultMaxTrackedFrames = 8;
+
+long long currentTimeMs()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
 
 std::string trimCopy(const std::string& value)
 {
@@ -90,6 +106,11 @@ int envIntOrDefault(const char* name, int fallback)
     }
 }
 
+uint16_t readBe16(const unsigned char* p)
+{
+    return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
+}
+
 bool envBoolOrDefault(const char* name, bool fallback)
 {
     const char* value = std::getenv(name);
@@ -142,6 +163,34 @@ void printOpenSslErrors(const std::string& prefix)
 {
     std::cerr << prefix << '\n';
     ERR_print_errors_fp(stderr);
+}
+
+void configureSocketBuffers(int fd, int recvBytes, int sendBytes, const std::string& socketLabel)
+{
+    if (recvBytes > 0 && ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recvBytes, sizeof(recvBytes)) != 0) {
+        std::cerr << "[DTLS] Failed to set " << socketLabel << " SO_RCVBUF: " << std::strerror(errno) << '\n';
+    }
+    if (sendBytes > 0 && ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sendBytes, sizeof(sendBytes)) != 0) {
+        std::cerr << "[DTLS] Failed to set " << socketLabel << " SO_SNDBUF: " << std::strerror(errno) << '\n';
+    }
+}
+
+int querySocketBufferBytes(int fd, int optName)
+{
+    int value = 0;
+    socklen_t len = sizeof(value);
+    if (::getsockopt(fd, SOL_SOCKET, optName, &value, &len) != 0) {
+        return -1;
+    }
+    return value;
+}
+
+std::string socketBufferSummary(int fd)
+{
+    std::ostringstream oss;
+    oss << "recv=" << querySocketBufferBytes(fd, SO_RCVBUF)
+        << " send=" << querySocketBufferBytes(fd, SO_SNDBUF);
+    return oss.str();
 }
 
 int bindUdpSocket(const std::string& host, int port)
@@ -206,6 +255,160 @@ struct UdpTarget {
     sockaddr_storage addr{};
     socklen_t addrLen = 0;
 };
+
+struct ThermalPacketHeader {
+    uint16_t frameId = 0;
+    uint16_t chunkIndex = 0;
+    uint16_t totalChunks = 0;
+    uint16_t minValue = 0;
+    uint16_t maxValue = 0;
+};
+
+struct ThermalFrameTracker {
+    uint16_t totalChunks = 0;
+    long long firstSeenAtMs = 0;
+    long long lastSeenAtMs = 0;
+    std::set<uint16_t> uniqueChunks;
+};
+
+struct ThermalPathStats {
+    unsigned long long packets = 0;
+    unsigned long long bytes = 0;
+    unsigned long long invalidPackets = 0;
+    unsigned long long duplicateChunks = 0;
+    unsigned long long completedFrames = 0;
+    unsigned long long incompleteFrames = 0;
+    unsigned long long missingChunks = 0;
+    unsigned long long evictedFrames = 0;
+    uint16_t lastFrameId = 0;
+    uint16_t lastChunkIndex = 0;
+    uint16_t lastTotalChunks = 0;
+    size_t lastPacketBytes = 0;
+    long long lastPacketAtMs = 0;
+    size_t maxInFlightFrames = 0;
+    std::map<uint16_t, ThermalFrameTracker> inFlightFrames;
+};
+
+struct GatewayStats {
+    ThermalPathStats decrypted;
+    ThermalPathStats forwarded;
+    unsigned long long forwardFailures = 0;
+    unsigned long long forwardFailedBytes = 0;
+    long long lastLogAtMs = 0;
+};
+
+bool parseThermalPacketHeader(const unsigned char* data, size_t len, ThermalPacketHeader& out)
+{
+    if (data == nullptr || len < kThermalHeaderBytes) {
+        return false;
+    }
+
+    out.frameId = readBe16(data + 0);
+    out.chunkIndex = readBe16(data + 2);
+    out.totalChunks = readBe16(data + 4);
+    out.minValue = readBe16(data + 6);
+    out.maxValue = readBe16(data + 8);
+    return true;
+}
+
+void noteIncompleteFrame(ThermalPathStats& stats, const ThermalFrameTracker& tracker)
+{
+    stats.incompleteFrames += 1;
+    if (tracker.totalChunks > tracker.uniqueChunks.size()) {
+        stats.missingChunks += static_cast<unsigned long long>(tracker.totalChunks - tracker.uniqueChunks.size());
+    }
+}
+
+void pruneExpiredFrames(ThermalPathStats& stats, long long nowMs, int timeoutMs)
+{
+    if (timeoutMs <= 0) {
+        return;
+    }
+
+    for (auto it = stats.inFlightFrames.begin(); it != stats.inFlightFrames.end();) {
+        if ((nowMs - it->second.lastSeenAtMs) <= timeoutMs) {
+            ++it;
+            continue;
+        }
+
+        noteIncompleteFrame(stats, it->second);
+        it = stats.inFlightFrames.erase(it);
+    }
+}
+
+void trimTrackedFrames(ThermalPathStats& stats, int maxTrackedFrames)
+{
+    if (maxTrackedFrames <= 0) {
+        return;
+    }
+
+    while (static_cast<int>(stats.inFlightFrames.size()) > maxTrackedFrames) {
+        const auto oldest = std::min_element(stats.inFlightFrames.begin(),
+                                             stats.inFlightFrames.end(),
+                                             [](const auto& lhs, const auto& rhs) {
+                                                 return lhs.second.lastSeenAtMs < rhs.second.lastSeenAtMs;
+                                             });
+        if (oldest == stats.inFlightFrames.end()) {
+            return;
+        }
+
+        noteIncompleteFrame(stats, oldest->second);
+        stats.evictedFrames += 1;
+        stats.inFlightFrames.erase(oldest);
+    }
+}
+
+void updateThermalPathStats(ThermalPathStats& stats,
+                            const unsigned char* data,
+                            size_t len,
+                            long long nowMs,
+                            int frameTimeoutMs,
+                            int maxTrackedFrames)
+{
+    stats.packets += 1;
+    stats.bytes += static_cast<unsigned long long>(len);
+    stats.lastPacketBytes = len;
+    stats.lastPacketAtMs = nowMs;
+
+    ThermalPacketHeader header{};
+    if (!parseThermalPacketHeader(data, len, header)) {
+        stats.invalidPackets += 1;
+        return;
+    }
+
+    stats.lastFrameId = header.frameId;
+    stats.lastChunkIndex = header.chunkIndex;
+    stats.lastTotalChunks = header.totalChunks;
+
+    pruneExpiredFrames(stats, nowMs, frameTimeoutMs);
+
+    ThermalFrameTracker& tracker = stats.inFlightFrames[header.frameId];
+    if (tracker.firstSeenAtMs == 0) {
+        tracker.firstSeenAtMs = nowMs;
+        tracker.totalChunks = header.totalChunks;
+    }
+    tracker.lastSeenAtMs = nowMs;
+    if (header.totalChunks > tracker.totalChunks) {
+        tracker.totalChunks = header.totalChunks;
+    }
+
+    const uint16_t minimumChunks = static_cast<uint16_t>(header.chunkIndex + 1);
+    if (minimumChunks > tracker.totalChunks) {
+        tracker.totalChunks = minimumChunks;
+    }
+
+    if (!tracker.uniqueChunks.insert(header.chunkIndex).second) {
+        stats.duplicateChunks += 1;
+    }
+
+    if (tracker.totalChunks > 0 && tracker.uniqueChunks.size() >= tracker.totalChunks) {
+        stats.completedFrames += 1;
+        stats.inFlightFrames.erase(header.frameId);
+    }
+
+    trimTrackedFrames(stats, maxTrackedFrames);
+    stats.maxInFlightFrames = std::max(stats.maxInFlightFrames, stats.inFlightFrames.size());
+}
 
 UdpTarget resolveUdpTarget(const std::string& host, int port)
 {
@@ -280,6 +483,11 @@ public:
         , bindPort_(envIntOrDefault("DTLS_BIND_PORT", kDefaultDtlsPort))
         , forwardHost_(envOrDefault("CROW_FORWARD_HOST", "crow-server-service"))
         , forwardPort_(envIntOrDefault("CROW_FORWARD_PORT", kDefaultForwardPort))
+        , udpSocketRcvBufBytes_(envIntOrDefault("DTLS_UDP_RCVBUF_BYTES", kDefaultUdpSocketBufferBytes))
+        , udpSocketSndBufBytes_(envIntOrDefault("DTLS_UDP_SNDBUF_BYTES", kDefaultUdpSocketBufferBytes))
+        , statsLogIntervalMs_(envIntOrDefault("DTLS_STATS_LOG_INTERVAL_MS", kDefaultStatsLogIntervalMs))
+        , frameTrackTimeoutMs_(envIntOrDefault("DTLS_FRAME_TRACK_TIMEOUT_MS", kDefaultFrameTrackTimeoutMs))
+        , maxTrackedFrames_(envIntOrDefault("DTLS_MAX_TRACKED_FRAMES", kDefaultMaxTrackedFrames))
         , useCookieExchange_(envBoolOrDefault("DTLS_USE_COOKIE_EXCHANGE", false))
         , pskIdentity_(requireEnv("DTLS_PSK_IDENTITY"))
         , pskKey_(parseHex(requireEnv("DTLS_PSK_KEY_HEX")))
@@ -340,10 +548,14 @@ public:
         }
 
         listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+        configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
         forward_ = resolveUdpTarget(forwardHost_, forwardPort_);
+        configureSocketBuffers(forward_.fd, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "forward socket");
 
         std::cout << "[DTLS] Listening on " << bindHost_ << ":" << bindPort_ << '\n';
         std::cout << "[DTLS] Forwarding decrypted thermal UDP to " << forwardHost_ << ":" << forwardPort_ << '\n';
+        std::cout << "[DTLS] Listen socket buffers " << socketBufferSummary(listenFd_) << '\n';
+        std::cout << "[DTLS] Forward socket buffers " << socketBufferSummary(forward_.fd) << '\n';
         if (useCookieExchange_) {
             std::cout << "[DTLS] Using DTLS cookie exchange via DTLSv1_listen\n";
         } else {
@@ -405,6 +617,7 @@ public:
             bool workerMode = true;
             try {
                 listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+                configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
             } catch (const std::exception& ex) {
                 std::cerr << "[DTLS] Failed to open replacement listen socket: " << ex.what()
                           << ". Falling back to inline session handling.\n";
@@ -439,12 +652,14 @@ public:
                     }
                     runSessionWorker(sessionSsl, sessionFd, peerSock);
                     listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+                    configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
                 }
                 continue;
             }
 
             runSessionWorker(sessionSsl, sessionFd, peerSock);
             listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+            configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
         }
     }
 
@@ -681,13 +896,68 @@ private:
                                       0,
                                       reinterpret_cast<const sockaddr*>(&forward_.addr),
                                       forward_.addrLen);
-        return sent == static_cast<ssize_t>(len);
+        const bool success = sent == static_cast<ssize_t>(len);
+        recordForwardResult(data, len, success);
+        return success;
+    }
+
+    void recordForwardResult(const unsigned char* data, size_t len, bool success)
+    {
+        const long long nowMs = currentTimeMs();
+        std::lock_guard<std::mutex> lock(statsMutex_);
+
+        updateThermalPathStats(stats_.decrypted, data, len, nowMs, frameTrackTimeoutMs_, maxTrackedFrames_);
+        if (success) {
+            updateThermalPathStats(stats_.forwarded, data, len, nowMs, frameTrackTimeoutMs_, maxTrackedFrames_);
+        } else {
+            stats_.forwardFailures += 1;
+            stats_.forwardFailedBytes += static_cast<unsigned long long>(len);
+        }
+
+        maybeLogStatsLocked(nowMs);
+    }
+
+    void maybeLogStatsLocked(long long nowMs)
+    {
+        if (statsLogIntervalMs_ <= 0) {
+            return;
+        }
+        if (stats_.decrypted.packets == 0 && stats_.forwardFailures == 0) {
+            return;
+        }
+        if (stats_.lastLogAtMs != 0 && (nowMs - stats_.lastLogAtMs) < statsLogIntervalMs_) {
+            return;
+        }
+
+        stats_.lastLogAtMs = nowMs;
+        const ThermalPathStats& lastPath = stats_.forwarded.packets > 0 ? stats_.forwarded : stats_.decrypted;
+
+        std::cout << "[DTLS][STATS] dec_packets=" << stats_.decrypted.packets
+                  << " dec_bytes=" << stats_.decrypted.bytes
+                  << " dec_completed=" << stats_.decrypted.completedFrames
+                  << " dec_incomplete=" << stats_.decrypted.incompleteFrames
+                  << " dec_missing=" << stats_.decrypted.missingChunks
+                  << " fwd_packets=" << stats_.forwarded.packets
+                  << " fwd_bytes=" << stats_.forwarded.bytes
+                  << " fwd_fail=" << stats_.forwardFailures
+                  << " fwd_incomplete=" << stats_.forwarded.incompleteFrames
+                  << " fwd_missing=" << stats_.forwarded.missingChunks
+                  << " fwd_dup=" << stats_.forwarded.duplicateChunks
+                  << " inflight=" << stats_.forwarded.inFlightFrames.size()
+                  << " last_frame=" << lastPath.lastFrameId
+                  << " last_chunk=" << lastPath.lastChunkIndex << "/" << lastPath.lastTotalChunks
+                  << '\n';
     }
 
     std::string bindHost_;
     int bindPort_ = kDefaultDtlsPort;
     std::string forwardHost_;
     int forwardPort_ = kDefaultForwardPort;
+    int udpSocketRcvBufBytes_ = kDefaultUdpSocketBufferBytes;
+    int udpSocketSndBufBytes_ = kDefaultUdpSocketBufferBytes;
+    int statsLogIntervalMs_ = kDefaultStatsLogIntervalMs;
+    int frameTrackTimeoutMs_ = kDefaultFrameTrackTimeoutMs;
+    int maxTrackedFrames_ = kDefaultMaxTrackedFrames;
     bool useCookieExchange_ = false;
     std::string pskIdentity_;
     std::vector<unsigned char> pskKey_;
@@ -695,6 +965,8 @@ private:
     SSL_CTX* ctx_ = nullptr;
     int listenFd_ = -1;
     UdpTarget forward_;
+    std::mutex statsMutex_;
+    GatewayStats stats_;
 };
 } // namespace
 
