@@ -166,6 +166,9 @@ int bindUdpSocket(const std::string& host, int port)
 
         int reuse = 1;
         ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+#ifdef SO_REUSEPORT
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+#endif
 
         if (::bind(fd, ai->ai_addr, static_cast<socklen_t>(ai->ai_addrlen)) == 0) {
             break;
@@ -353,13 +356,14 @@ public:
             sockaddr_storage peerSock{};
             socklen_t peerLen = 0;
             BIO_ADDR* peer = nullptr;
+            const int sessionFd = listenFd_;
 
             SSL* sessionSsl = SSL_new(ctx_);
             if (sessionSsl == nullptr) {
                 throw std::runtime_error("SSL_new failed for DTLS session");
             }
 
-            BIO* sessionBio = BIO_new_dgram(listenFd_, BIO_NOCLOSE);
+            BIO* sessionBio = BIO_new_dgram(sessionFd, BIO_NOCLOSE);
             if (sessionBio == nullptr) {
                 SSL_free(sessionSsl);
                 throw std::runtime_error("BIO_new_dgram failed for DTLS session");
@@ -389,21 +393,38 @@ public:
                     BIO_ADDR_free(peer);
                     continue;
                 }
-            } else if (!waitForPeerDatagram(peerSock, peerLen)) {
+            } else if (!waitForPeerDatagram(sessionFd, peerSock, peerLen)) {
                 SSL_free(sessionSsl);
                 continue;
             }
 
-            if (::connect(listenFd_, reinterpret_cast<sockaddr*>(&peerSock), peerLen) != 0) {
+            int replacementListenFd = -1;
+            try {
+                replacementListenFd = bindUdpSocket(bindHost_, bindPort_);
+                listenFd_ = replacementListenFd;
+                replacementListenFd = -1;
+            } catch (const std::exception& ex) {
+                std::cerr << "[DTLS] Failed to open replacement listen socket: " << ex.what()
+                          << ". New peers may be refused until the current session ends.\n";
+            }
+
+            if (::connect(sessionFd, reinterpret_cast<sockaddr*>(&peerSock), peerLen) != 0) {
                 std::cerr << "[DTLS] Failed to connect UDP socket to peer: " << std::strerror(errno) << '\n';
                 SSL_free(sessionSsl);
                 BIO_ADDR_free(peer);
-                disconnectUdpSocket(listenFd_);
+                if (listenFd_ == sessionFd) {
+                    disconnectUdpSocket(sessionFd);
+                } else {
+                    ::close(sessionFd);
+                }
+                if (replacementListenFd >= 0) {
+                    ::close(replacementListenFd);
+                }
                 continue;
             }
 
             BIO_ctrl(sessionBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
-            configureSocketTimeout(listenFd_, kHandshakeTimeoutSeconds);
+            configureSocketTimeout(sessionFd, kHandshakeTimeoutSeconds);
 
             std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
 
@@ -420,13 +441,17 @@ public:
                 }
                 SSL_free(sessionSsl);
                 BIO_ADDR_free(peer);
-                disconnectUdpSocket(listenFd_);
-                configureSocketTimeout(listenFd_, 0);
+                if (listenFd_ == sessionFd) {
+                    disconnectUdpSocket(sessionFd);
+                    configureSocketTimeout(sessionFd, 0);
+                } else {
+                    ::close(sessionFd);
+                }
                 continue;
             }
 
             std::cout << "[DTLS] Handshake complete for peer " << sockaddrToString(peerSock) << '\n';
-            configureSocketTimeout(listenFd_, kSessionIdleTimeoutSeconds);
+            configureSocketTimeout(sessionFd, kSessionIdleTimeoutSeconds);
 
             std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
             for (;;) {
@@ -454,8 +479,12 @@ public:
             SSL_shutdown(sessionSsl);
             SSL_free(sessionSsl);
             BIO_ADDR_free(peer);
-            disconnectUdpSocket(listenFd_);
-            configureSocketTimeout(listenFd_, 0);
+            if (listenFd_ == sessionFd) {
+                disconnectUdpSocket(sessionFd);
+                configureSocketTimeout(sessionFd, 0);
+            } else {
+                ::close(sessionFd);
+            }
         }
     }
 
@@ -532,13 +561,13 @@ private:
         return CRYPTO_memcmp(cookie, expected, expectedLen) == 0 ? 1 : 0;
     }
 
-    bool waitForPeerDatagram(sockaddr_storage& out, socklen_t& outLen)
+    bool waitForPeerDatagram(int fd, sockaddr_storage& out, socklen_t& outLen)
     {
         std::array<unsigned char, 1> probe{};
 
         for (;;) {
             outLen = sizeof(out);
-            const ssize_t peeked = ::recvfrom(listenFd_,
+            const ssize_t peeked = ::recvfrom(fd,
                                               probe.data(),
                                               probe.size(),
                                               MSG_PEEK,
