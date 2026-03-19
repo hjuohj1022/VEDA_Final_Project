@@ -22,6 +22,33 @@ std::string trimLineEndings(std::string value) {
     return value;
 }
 
+std::string normalizeWhitespaceLower(std::string value) {
+    value = trimLineEndings(std::move(value));
+
+    std::string normalized;
+    normalized.reserve(value.size());
+
+    bool last_was_space = true;
+    for (unsigned char ch : value) {
+        if (std::isspace(ch)) {
+            if (!last_was_space) {
+                normalized.push_back(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+
+        normalized.push_back(static_cast<char>(std::tolower(ch)));
+        last_was_space = false;
+    }
+
+    if (!normalized.empty() && normalized.back() == ' ') {
+        normalized.pop_back();
+    }
+
+    return normalized;
+}
+
 bool isMotorIndexValid(int motor) {
     return (motor >= kMinMotorIndex) && (motor <= kMaxMotorIndex);
 }
@@ -32,6 +59,22 @@ bool isDirectionValid(const std::string& direction) {
 
 bool isMotorErrorResponse(const std::string& response) {
     return response.rfind("ERR", 0) == 0;
+}
+
+bool tryNormalizeLaserCommand(const std::string& raw_command, std::string& normalized_command) {
+    const std::string normalized = normalizeWhitespaceLower(raw_command);
+
+    if ((normalized == "on") || (normalized == "laser on")) {
+        normalized_command = "laser on";
+        return true;
+    }
+
+    if ((normalized == "off") || (normalized == "laser off")) {
+        normalized_command = "laser off";
+        return true;
+    }
+
+    return false;
 }
 
 int clampServoAngle(int angle) {
@@ -69,6 +112,22 @@ crow::response makeMotorCommandResponse(const MotorCommandResult& result) {
 
     body["status"] = "OK";
     return crow::response(200, body);
+}
+
+crow::json::wvalue makeStatusBody(const MotorStatusSnapshot& status) {
+    crow::json::wvalue body;
+    body["broker_connected"] = status.broker_connected;
+    body["awaiting_response"] = status.awaiting_response;
+    body["control_topic"] = status.control_topic;
+    body["response_topic"] = status.response_topic;
+    body["timeout_ms"] = status.timeout_ms;
+    body["last_command"] = status.last_command;
+    body["last_command_topic"] = status.last_command_topic;
+    body["last_response"] = status.last_response;
+    body["last_response_is_error"] = status.last_response_is_error;
+    body["response_sequence"] = static_cast<unsigned long long>(status.response_sequence);
+    body["last_response_age_ms"] = status.last_response_age_ms;
+    return body;
 }
 
 bool tryReadJsonInt(const crow::json::rvalue& value, const char* key, int& out) {
@@ -125,14 +184,22 @@ MotorManager::MotorManager(const std::string& broker_host,
 }
 
 MotorCommandResult MotorManager::sendCommand(const std::string& command) {
-    // 외부 노출 형태는 동기식 함수.
-    // 내부 처리 순서: publish -> response topic 수신 대기 -> 최신 응답 반환.
+    return sendCommandToTopic(control_topic_, command);
+}
+
+MotorCommandResult MotorManager::sendCommandToTopic(const std::string& control_topic, const std::string& command) {
     MotorCommandResult result;
     result.command = trimLineEndings(command);
     result.broker_connected = mqtt_->isConnected();
 
     if (result.command.empty()) {
         result.response = "Command is empty";
+        return result;
+    }
+
+    const std::string publish_topic = trimLineEndings(control_topic);
+    if (publish_topic.empty()) {
+        result.response = "Control topic is empty";
         return result;
     }
 
@@ -143,10 +210,11 @@ MotorCommandResult MotorManager::sendCommand(const std::string& command) {
         std::lock_guard<std::mutex> lock(state_mutex_);
         awaiting_response_ = true;
         last_command_ = result.command;
+        last_command_topic_ = publish_topic;
         start_sequence = response_sequence_;
     }
 
-    result.published = mqtt_->publishMessage(control_topic_, result.command);
+    result.published = mqtt_->publishMessage(publish_topic, result.command);
     result.broker_connected = mqtt_->isConnected();
 
     if (!result.published) {
@@ -166,7 +234,7 @@ MotorCommandResult MotorManager::sendCommand(const std::string& command) {
     if (!got_response) {
         awaiting_response_ = false;
         result.timed_out = true;
-        result.response = "Timed out waiting for motor response";
+        result.response = "Timed out waiting for device response";
         return result;
     }
 
@@ -218,6 +286,7 @@ MotorStatusSnapshot MotorManager::getStatus() const {
     std::lock_guard<std::mutex> lock(state_mutex_);
     snapshot.awaiting_response = awaiting_response_;
     snapshot.last_command = last_command_;
+    snapshot.last_command_topic = last_command_topic_;
     snapshot.last_response = last_response_;
     snapshot.last_response_is_error = last_response_is_error_;
     snapshot.response_sequence = response_sequence_;
@@ -429,17 +498,47 @@ void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr) {
     CROW_ROUTE(app, "/motor/status")
     ([&motor_mgr]() {
         const auto status = motor_mgr.getStatus();
-        crow::json::wvalue body;
-        body["broker_connected"] = status.broker_connected;
-        body["awaiting_response"] = status.awaiting_response;
-        body["control_topic"] = status.control_topic;
-        body["response_topic"] = status.response_topic;
-        body["timeout_ms"] = status.timeout_ms;
-        body["last_command"] = status.last_command;
-        body["last_response"] = status.last_response;
-        body["last_response_is_error"] = status.last_response_is_error;
-        body["response_sequence"] = static_cast<unsigned long long>(status.response_sequence);
-        body["last_response_age_ms"] = status.last_response_age_ms;
+        return crow::response(makeStatusBody(status));
+    });
+}
+
+void registerLaserRoutes(crow::SimpleApp& app, MotorManager& motor_mgr, const std::string& laser_control_topic) {
+    CROW_ROUTE(app, "/laser/control/command").methods(crow::HTTPMethod::POST)
+    ([&motor_mgr, laser_control_topic](const crow::request& req) {
+        const auto body = crow::json::load(req.body);
+        if (!body) {
+            return makeInvalidBodyResponse("Invalid JSON");
+        }
+
+        std::string command;
+        if (!tryReadJsonString(body, "command", command)) {
+            return makeInvalidBodyResponse("Field 'command' must be a string");
+        }
+
+        std::string normalized_command;
+        if (!tryNormalizeLaserCommand(command, normalized_command)) {
+            return makeInvalidBodyResponse("Command must be 'on', 'off', 'laser on', or 'laser off'");
+        }
+
+        return makeMotorCommandResponse(motor_mgr.sendCommandToTopic(laser_control_topic, normalized_command));
+    });
+
+    CROW_ROUTE(app, "/laser/control/on").methods(crow::HTTPMethod::POST)
+    ([&motor_mgr, laser_control_topic]() {
+        return makeMotorCommandResponse(motor_mgr.sendCommandToTopic(laser_control_topic, "laser on"));
+    });
+
+    CROW_ROUTE(app, "/laser/control/off").methods(crow::HTTPMethod::POST)
+    ([&motor_mgr, laser_control_topic]() {
+        return makeMotorCommandResponse(motor_mgr.sendCommandToTopic(laser_control_topic, "laser off"));
+    });
+
+    CROW_ROUTE(app, "/laser/status")
+    ([&motor_mgr, laser_control_topic]() {
+        const auto status = motor_mgr.getStatus();
+        auto body = makeStatusBody(status);
+        body["control_topic"] = laser_control_topic;
+        body["bridge_default_control_topic"] = status.control_topic;
         return crow::response(body);
     });
 }

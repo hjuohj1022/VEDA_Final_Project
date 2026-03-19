@@ -1586,6 +1586,70 @@ paths:
         '200':
           description: 현재 모터 브리지 상태
 
+  /laser/control/command:
+    post:
+      summary: 레이저 원시 on/off 명령 전송
+      description: |
+        'laser/control' 토픽으로 레이저 테스트 명령을 발행하고 다음 'motor/response' 응답을 기다립니다.
+        허용 명령:
+        - 'on'
+        - 'off'
+        - 'laser on'
+        - 'laser off'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+                  enum: [on, off, laser on, laser off]
+      responses:
+        '200':
+          description: 레이저 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 레이저 응답 대기 시간 초과
+
+  /laser/control/on:
+    post:
+      summary: 레이저 켜기
+      description: 'laser/control' 토픽으로 'laser on'을 발행하고 응답을 기다립니다.
+      responses:
+        '200':
+          description: 레이저 응답 수신 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 레이저 응답 대기 시간 초과
+
+  /laser/control/off:
+    post:
+      summary: 레이저 끄기
+      description: 'laser/control' 토픽으로 'laser off'를 발행하고 응답을 기다립니다.
+      responses:
+        '200':
+          description: 레이저 응답 수신 성공
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 레이저 응답 대기 시간 초과
+
+  /laser/status:
+    get:
+      summary: 레이저 MQTT 브리지 상태 조회
+      description: 레이저 제어용 토픽 설정과 최근 명령 및 응답 상태를 확인합니다.
+      responses:
+        '200':
+          description: 현재 레이저 브리지 상태
+
   /cctv/control/start:
     post:
       summary: CCTV 처리 시작
