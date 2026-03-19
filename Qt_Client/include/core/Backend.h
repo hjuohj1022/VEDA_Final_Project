@@ -134,6 +134,7 @@ public:
     Q_INVOKABLE void useEnvRtspCredentials();
     Q_INVOKABLE void probeRtspEndpoint(QString ip, QString port, int timeoutMs = 1200);
     Q_INVOKABLE QVariantMap getClientSystemInfo() const;
+    Q_INVOKABLE bool isCapsLockOn() const;
 
     // Playback
     Q_INVOKABLE QString buildRtspUrl(int cameraIndex, bool useSubStream) const;

@@ -196,3 +196,12 @@ QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, 
 
     return out;
 }
+
+bool BackendCoreSystemInfoService::isCapsLockOn()
+{
+#ifdef Q_OS_WIN
+    return (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+#else
+    return false;
+#endif
+}

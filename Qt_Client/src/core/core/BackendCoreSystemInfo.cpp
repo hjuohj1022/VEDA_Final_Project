@@ -6,3 +6,8 @@ QVariantMap Backend::getClientSystemInfo() const
 {
     return BackendCoreSystemInfoService::getClientSystemInfo(const_cast<Backend *>(this), d_ptr.get());
 }
+
+bool Backend::isCapsLockOn() const
+{
+    return BackendCoreSystemInfoService::isCapsLockOn();
+}

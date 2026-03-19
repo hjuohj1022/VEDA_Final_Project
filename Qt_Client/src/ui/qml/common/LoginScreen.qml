@@ -10,10 +10,18 @@ Item {
     property string adminUnlockCode: ""
     property bool signupMode: false
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
+    property bool passwordVisible: false
+    property bool confirmPasswordVisible: false
+    property bool capsLockOn: false
     
     property bool isLoggedIn: backend.isLoggedIn
     property bool twoFactorRequired: backend.twoFactorRequired
     signal requestReturnLiveView()
+
+    // Windows API 기반 Lock 상태 즉시 조회
+    function refreshKeyboardLockIndicators() {
+        capsLockOn = backend.isCapsLockOn()
+    }
     
     function triggerSignIn() {
         if (root.signupMode || backend.loginLocked) {
@@ -25,6 +33,16 @@ Item {
         }
         backend.login(idField.text, pwField.text)
     }
+
+    Timer {
+        id: keyboardLockTimer
+        interval: 150
+        repeat: true
+        running: !root.isLoggedIn
+        onTriggered: root.refreshKeyboardLockIndicators()
+    }
+
+    Component.onCompleted: refreshKeyboardLockIndicators()
     
     // 로그인 화면
     Rectangle {
@@ -83,7 +101,9 @@ Item {
                     placeholderText: "ID"
                     placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                     Layout.fillWidth: true
+                    Layout.preferredHeight: 40
                     height: 40
+                    rightPadding: 40
                     enabled: !backend.twoFactorRequired
                     opacity: backend.twoFactorRequired ? 0.65 : 1.0
                     color: theme ? theme.textPrimary : "white"
@@ -95,38 +115,130 @@ Item {
                     onAccepted: triggerSignIn()
                 }
                 
-                TextField {
-                    id: pwField
-                    placeholderText: "Password"
-                    placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
-                    echoMode: TextInput.Password
+                Item {
                     Layout.fillWidth: true
-                    height: 40
+                    Layout.preferredHeight: 40
                     enabled: !backend.twoFactorRequired
                     opacity: backend.twoFactorRequired ? 0.65 : 1.0
-                    color: theme ? theme.textPrimary : "white"
-                    background: Rectangle {
-                        color: theme ? theme.bgComponent : "#18181b"
-                        border.color: pwField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
-                        radius: 6
+
+                    TextField {
+                        id: pwField
+                        anchors.fill: parent
+                        rightPadding: 40
+                        placeholderText: "Password"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        echoMode: root.passwordVisible ? TextInput.Normal : TextInput.Password
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: pwField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onAccepted: triggerSignIn()
                     }
-                    onAccepted: triggerSignIn()
+
+                    ToolButton {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 32
+                        height: 32
+                        onClicked: root.passwordVisible = !root.passwordVisible
+                        contentItem: Item {
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\uE890"
+                                font.family: "Segoe MDL2 Assets"
+                                font.pixelSize: 16
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            Rectangle {
+                                visible: !root.passwordVisible
+                                anchors.centerIn: parent
+                                width: 2
+                                height: 18
+                                radius: 1
+                                rotation: -45
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                            }
+                        }
+                        background: Rectangle {
+                            color: "transparent"
+                            border.color: "transparent"
+                        }
+                    }
                 }
 
-                TextField {
-                    id: pwConfirmField
-                    placeholderText: "Confirm Password"
-                    placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
-                    echoMode: TextInput.Password
+                Item {
                     visible: root.signupMode
                     Layout.fillWidth: true
-                    height: root.signupMode ? 40 : 0
-                    color: theme ? theme.textPrimary : "white"
-                    background: Rectangle {
-                        color: theme ? theme.bgComponent : "#18181b"
-                        border.color: pwConfirmField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
-                        radius: 6
+                    Layout.preferredHeight: root.signupMode ? 40 : 0
+
+                    TextField {
+                        id: pwConfirmField
+                        anchors.fill: parent
+                        rightPadding: 40
+                        placeholderText: "Confirm Password"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        echoMode: root.confirmPasswordVisible ? TextInput.Normal : TextInput.Password
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: pwConfirmField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
                     }
+
+                    ToolButton {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 32
+                        height: 32
+                        onClicked: root.confirmPasswordVisible = !root.confirmPasswordVisible
+                        contentItem: Item {
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\uE890"
+                                font.family: "Segoe MDL2 Assets"
+                                font.pixelSize: 16
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            Rectangle {
+                                visible: !root.confirmPasswordVisible
+                                anchors.centerIn: parent
+                                width: 2
+                                height: 18
+                                radius: 1
+                                rotation: -45
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                            }
+                        }
+                        background: Rectangle {
+                            color: "transparent"
+                            border.color: "transparent"
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    visible: !backend.twoFactorRequired && root.capsLockOn
+
+                    Text {
+                        visible: root.capsLockOn
+                        text: "CAPS LOCK ON"
+                        color: "#f97316"
+                        font.bold: true
+                        font.pixelSize: 12
+                    }
+
+                    Item { Layout.fillWidth: true }
                 }
 
                 ColumnLayout {
@@ -227,6 +339,9 @@ Item {
                             idField.text = ""
                             pwField.text = ""
                             pwConfirmField.text = ""
+                            root.passwordVisible = false
+                            root.confirmPasswordVisible = false
+                            root.capsLockOn = false
                             return
                         }
                         if (idField.text.trim().length === 0 || pwField.text.length === 0 || pwConfirmField.text.length === 0) {
@@ -259,7 +374,8 @@ Item {
                     }
                     contentItem: Text {
                         text: parent.text
-                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        color: theme ? theme.textPrimary : "#f4f4f5"
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -270,6 +386,9 @@ Item {
                             pwField.text = ""
                             pwConfirmField.text = ""
                             otpField.text = ""
+                            root.passwordVisible = false
+                            root.confirmPasswordVisible = false
+                            root.capsLockOn = false
                             return
                         }
                         backend.cancelTwoFactorLogin()
@@ -291,7 +410,8 @@ Item {
                     }
                     contentItem: Text {
                         text: parent.text
-                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        color: theme ? theme.textPrimary : "#f4f4f5"
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -378,7 +498,8 @@ Item {
                     
                     contentItem: Text {
                         text: parent.text
-                        color: theme ? theme.textSecondary : "#a1a1aa"
+                        color: theme ? theme.textPrimary : "#e4e4e7"
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -391,6 +512,9 @@ Item {
                         idField.text = ""
                         pwField.text = ""
                         pwConfirmField.text = ""
+                        root.passwordVisible = false
+                        root.confirmPasswordVisible = false
+                        root.capsLockOn = false
                     }
                 }
             }
@@ -472,6 +596,9 @@ Item {
                 otpField.text = ""
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
+                root.passwordVisible = false
+                root.confirmPasswordVisible = false
+                root.capsLockOn = false
                 backend.stopThermalStream()
             }
         }

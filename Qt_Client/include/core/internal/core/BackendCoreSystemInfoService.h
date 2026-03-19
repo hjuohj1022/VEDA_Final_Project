@@ -10,6 +10,7 @@ class BackendCoreSystemInfoService
 {
 public:
     static QVariantMap getClientSystemInfo(Backend *backend, BackendPrivate *state);
+    static bool isCapsLockOn();
 };
 
 #endif // BACKEND_CORE_SYSTEM_INFO_SERVICE_H
