@@ -1,4 +1,4 @@
-#include "crow.h"
+﻿#include "crow.h"
 #include "../include/SunapiProxy.h"
 #include "../include/SunapiWsProxy.h"
 #include "../include/CctvManager.h"
@@ -1773,8 +1773,66 @@ int main()
     });
 
     // ==========================================
-    // 로그인 API (실제 JWT 발급)
+    // 로그인 계정 비밀번호 변경 API
     // ==========================================
+    CROW_ROUTE(app, "/account/password/change").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req){
+        // 로그인 완료(JWT full stage) 사용자만 비밀번호 변경 허용
+        const auto user_id = getAuthorizedUserId(req);
+        if (!user_id) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        auto x = crow::json::load(req.body);
+        if (!x || !x.has("current_password") || !x.has("new_password")) {
+            return crow::response(400, "current_password 또는 new_password 값이 없습니다.");
+        }
+
+        const std::string current_password = x["current_password"].s();
+        const std::string new_password = x["new_password"].s();
+        if (current_password.empty()) {
+            return crow::response(400, "현재 비밀번호를 입력해 주세요.");
+        }
+        if (new_password.empty()) {
+            return crow::response(400, "새 비밀번호를 입력해 주세요.");
+        }
+        if (current_password.size() > kMaxPasswordLength || new_password.size() > kMaxPasswordLength) {
+            return crow::response(400, "비밀번호 길이가 너무 깁니다.");
+        }
+        if (current_password == new_password) {
+            return crow::response(400, "새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        }
+
+        // 신규 비밀번호는 회원가입과 동일한 복잡도 정책 적용
+        if (const auto complexity_error = validatePasswordComplexity(new_password)) {
+            return crow::response(400, *complexity_error);
+        }
+
+        auto connection = openDatabaseConnection();
+        if (!connection) {
+            return crow::response(500, "Database connection failed");
+        }
+
+        if (!verifyUserPassword(connection.get(), *user_id, current_password)) {
+            return crow::response(401, "현재 비밀번호가 올바르지 않습니다.");
+        }
+
+        const std::string new_password_hash = hashPassword(new_password);
+        if (new_password_hash.empty()) {
+            return crow::response(500, "비밀번호 해시 생성에 실패했습니다.");
+        }
+        if (!updateStoredPasswordHash(connection.get(), *user_id, new_password_hash)) {
+            return crow::response(500, "비밀번호 변경에 실패했습니다.");
+        }
+
+        std::cout << "[AUTH] Password changed user_id=" << *user_id << std::endl;
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["changed"] = true;
+        return crow::response(res);
+    });
+
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
         auto x = crow::json::load(req.body);
@@ -2115,3 +2173,4 @@ int main()
     shutdownThermalProxy();
     shutdownCctvProxyWorker();
 }
+
