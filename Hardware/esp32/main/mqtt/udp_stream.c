@@ -58,7 +58,7 @@ static const TickType_t UDP_SEND_RETRY_DELAY_TICKS = 1U;
 static const int UDP_SEND_RETRY_COUNT = 6;
 static const TickType_t UDP_SEND_ENOMEM_BASE_DELAY_TICKS = pdMS_TO_TICKS(8U);
 static const TickType_t UDP_SEND_POST_HANDSHAKE_DELAY_TICKS = pdMS_TO_TICKS(20U);
-static const int64_t DTLS_TX_CONGESTION_HOLD_US = 200000LL;
+static const int64_t DTLS_TX_CONGESTION_HOLD_US = 500000LL;
 static const uint32_t DTLS_HANDSHAKE_MIN_MS = 1000U;
 static const uint32_t DTLS_HANDSHAKE_MAX_MS = 8000U;
 static const uint32_t DTLS_READ_TIMEOUT_MS = 1000U;
@@ -601,6 +601,7 @@ int udpStreamSend(const void *payload, size_t len)
 
         if ((ret == MBEDTLS_ERR_NET_SEND_FAILED) && (errno == ENOMEM)) {
             if (attempt + 1 >= UDP_SEND_RETRY_COUNT) {
+                s_dtls_tx_congested_until_us = esp_timer_get_time() + DTLS_TX_CONGESTION_HOLD_US;
                 dtlsLogError("mbedtls_ssl_write() failed after ENOMEM retries", ret);
                 dtlsUnlock();
                 return -1;

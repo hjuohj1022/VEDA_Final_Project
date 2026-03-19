@@ -524,6 +524,9 @@ void mqttFrameTask(void *arg)
                                  (unsigned int)frame_id,
                                  (unsigned int)i,
                                  (unsigned int)(CHUNK_HEADER_SIZE + data_size));
+                    send_ok = false;
+                    failed_chunk = (int)i;
+                    break;
                 }
                 if (use_udp_fast8 &&
                     (udp_chunk_yield_interval > 0U) &&
