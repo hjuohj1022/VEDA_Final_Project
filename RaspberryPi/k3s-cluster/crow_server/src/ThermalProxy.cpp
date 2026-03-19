@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -137,6 +138,27 @@ int envIntOrDefault(const char* key, int fallback)
     } catch (const std::exception&) {
         return fallback;
     }
+}
+
+bool envBoolOrDefault(const char* key, bool fallback)
+{
+    const char* value = std::getenv(key);
+    if (!value || !*value) {
+        return fallback;
+    }
+
+    std::string normalized(value);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on") {
+        return true;
+    }
+    if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off") {
+        return false;
+    }
+    return fallback;
 }
 
 uint16_t readBe16(const unsigned char* p)
@@ -302,6 +324,7 @@ void maybeLogThermalStatsLocked(long long nowMs, int statsLogIntervalMs)
 
 void updatePacketStats(const std::string& payload,
                        const std::string& senderText,
+                       bool enableFrameStats,
                        int frameTimeoutMs,
                        int maxTrackedFrames,
                        int statsLogIntervalMs)
@@ -313,16 +336,13 @@ void updatePacketStats(const std::string& payload,
     g_thermal.stats.bytes_received += static_cast<unsigned long long>(payload.size());
     g_thermal.stats.last_packet_bytes = payload.size();
     g_thermal.stats.last_packet_at_ms = nowMs;
-    g_thermal.stats.last_sender = senderText;
-
-    pruneExpiredFramesLocked(nowMs, frameTimeoutMs);
-    g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
-    g_thermal.stats.max_in_flight_frames = std::max(g_thermal.stats.max_in_flight_frames, g_thermal.stats.in_flight_frames);
 
     ThermalPacketHeader header{};
     if (!parseThermalPacketHeader(payload, header)) {
         g_thermal.stats.invalid_packets += 1;
-        maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+        if (enableFrameStats) {
+            maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+        }
         return;
     }
 
@@ -331,6 +351,15 @@ void updatePacketStats(const std::string& payload,
     g_thermal.stats.last_total_chunks = header.totalChunks;
     g_thermal.stats.last_min_val = header.minValue;
     g_thermal.stats.last_max_val = header.maxValue;
+    if (!enableFrameStats) {
+        return;
+    }
+
+    g_thermal.stats.last_sender = senderText;
+
+    pruneExpiredFramesLocked(nowMs, frameTimeoutMs);
+    g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
+    g_thermal.stats.max_in_flight_frames = std::max(g_thermal.stats.max_in_flight_frames, g_thermal.stats.in_flight_frames);
 
     ThermalFrameTracker& tracker = g_thermal.in_flight_frames[header.frameId];
     if (tracker.firstSeenAtMs == 0) {
@@ -445,6 +474,7 @@ void thermalReceiverLoop()
 {
     const std::string bind_host = envOrDefault("THERMAL_UDP_BIND_HOST", "0.0.0.0");
     const uint16_t bind_port = envPortOrDefault("THERMAL_UDP_PORT", kDefaultThermalUdpPort);
+    const bool enable_frame_stats = envBoolOrDefault("THERMAL_ENABLE_FRAME_STATS", false);
     const int receive_buffer_bytes = envIntOrDefault("THERMAL_UDP_RCVBUF_BYTES", kDefaultUdpSocketBufferBytes);
     const int frame_timeout_ms = envIntOrDefault("THERMAL_FRAME_TRACK_TIMEOUT_MS", kDefaultFrameTrackTimeoutMs);
     const int max_tracked_frames = envIntOrDefault("THERMAL_MAX_TRACKED_FRAMES", kDefaultMaxTrackedFrames);
@@ -502,9 +532,13 @@ void thermalReceiverLoop()
         g_thermal.stats.udp_socket_rcvbuf_bytes = querySocketBufferBytes(fd, SO_RCVBUF);
     }
     setReceiverState(true, true, bind_host, bind_port);
-    std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port
-              << " recvbuf=" << querySocketBufferBytes(fd, SO_RCVBUF)
-              << std::endl;
+    if (enable_frame_stats) {
+        std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port
+                  << " recvbuf=" << querySocketBufferBytes(fd, SO_RCVBUF)
+                  << std::endl;
+    } else {
+        std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port << std::endl;
+    }
 
     std::vector<char> buffer(kMaxUdpPacketBytes);
     while (true) {
@@ -539,8 +573,10 @@ void thermalReceiverLoop()
         }
 
         const std::string payload(buffer.data(), static_cast<size_t>(received));
+        const std::string sender_text = enable_frame_stats ? senderToString(sender) : std::string();
         updatePacketStats(payload,
-                          senderToString(sender),
+                          sender_text,
+                          enable_frame_stats,
                           frame_timeout_ms,
                           max_tracked_frames,
                           stats_log_interval_ms);

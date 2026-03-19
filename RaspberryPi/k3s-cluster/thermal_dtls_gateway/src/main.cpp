@@ -483,6 +483,7 @@ public:
         , bindPort_(envIntOrDefault("DTLS_BIND_PORT", kDefaultDtlsPort))
         , forwardHost_(envOrDefault("CROW_FORWARD_HOST", "crow-server-service"))
         , forwardPort_(envIntOrDefault("CROW_FORWARD_PORT", kDefaultForwardPort))
+        , enableFrameStats_(envBoolOrDefault("DTLS_ENABLE_FRAME_STATS", false))
         , udpSocketRcvBufBytes_(envIntOrDefault("DTLS_UDP_RCVBUF_BYTES", kDefaultUdpSocketBufferBytes))
         , udpSocketSndBufBytes_(envIntOrDefault("DTLS_UDP_SNDBUF_BYTES", kDefaultUdpSocketBufferBytes))
         , statsLogIntervalMs_(envIntOrDefault("DTLS_STATS_LOG_INTERVAL_MS", kDefaultStatsLogIntervalMs))
@@ -554,8 +555,10 @@ public:
 
         std::cout << "[DTLS] Listening on " << bindHost_ << ":" << bindPort_ << '\n';
         std::cout << "[DTLS] Forwarding decrypted thermal UDP to " << forwardHost_ << ":" << forwardPort_ << '\n';
-        std::cout << "[DTLS] Listen socket buffers " << socketBufferSummary(listenFd_) << '\n';
-        std::cout << "[DTLS] Forward socket buffers " << socketBufferSummary(forward_.fd) << '\n';
+        if (enableFrameStats_) {
+            std::cout << "[DTLS] Listen socket buffers " << socketBufferSummary(listenFd_) << '\n';
+            std::cout << "[DTLS] Forward socket buffers " << socketBufferSummary(forward_.fd) << '\n';
+        }
         if (useCookieExchange_) {
             std::cout << "[DTLS] Using DTLS cookie exchange via DTLSv1_listen\n";
         } else {
@@ -903,6 +906,10 @@ private:
 
     void recordForwardResult(const unsigned char* data, size_t len, bool success)
     {
+        if (!enableFrameStats_) {
+            return;
+        }
+
         const long long nowMs = currentTimeMs();
         std::lock_guard<std::mutex> lock(statsMutex_);
 
@@ -953,6 +960,7 @@ private:
     int bindPort_ = kDefaultDtlsPort;
     std::string forwardHost_;
     int forwardPort_ = kDefaultForwardPort;
+    bool enableFrameStats_ = false;
     int udpSocketRcvBufBytes_ = kDefaultUdpSocketBufferBytes;
     int udpSocketSndBufBytes_ = kDefaultUdpSocketBufferBytes;
     int statsLogIntervalMs_ = kDefaultStatsLogIntervalMs;
