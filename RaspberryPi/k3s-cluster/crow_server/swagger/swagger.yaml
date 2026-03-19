@@ -1,10 +1,10 @@
-openapi: 3.0.0
+﻿openapi: 3.0.0
 info:
   title: Crow Server API (VEDA Project)
   description: CCTV 녹화, SUNAPI 연동, 모터 제어, ESP32 상태 확인을 제공하는 서버 API
   version: 1.0.0
 servers:
-  - url: https://192.168.55.200/
+  - url: https://<LB_IP>/
     description: 개발 서버
 
 paths:
@@ -13,7 +13,11 @@ paths:
       summary: 사용자 회원가입
       description: |
         ID, 이메일, 비밀번호를 받아 신규 사용자를 등록합니다.
-        가입 후 이메일 인증을 완료해야 로그인할 수 있습니다.
+        가입 전에 동일한 id+email 조합으로 이메일 인증을 먼저 완료해야 합니다.
+        /register는 signup_email_verifications 테이블의 verified 상태를 검사하고,
+        검증이 통과한 경우에만 users에 계정을 생성합니다.
+        가입 성공 시 users.is_email_verified = 1로 저장되며,
+        사용된 pending 인증 레코드는 consumed 처리됩니다.
         비밀번호 규칙:
         - 8자 이상 16자 이하
         - 숫자 1개 이상 포함
@@ -43,6 +47,11 @@ paths:
           description: 회원가입 성공
         '400':
           description: JSON 형식 오류, 필수 값 누락, 또는 비밀번호 규칙 위반
+        '403':
+          description: 가입 전 이메일 인증 미완료 또는 verified 상태 불일치
+          content:
+            text/plain:
+              example: '이메일 인증이 완료되지 않았습니다. 이메일 인증 후 다시 시도해 주세요.'
         '409':
           description: 이미 존재하는 ID 또는 이메일
           content:
@@ -129,10 +138,13 @@ paths:
 
   /auth/email/verify/request:
     post:
-      summary: Request email verification token
+      summary: 회원가입 전 이메일 인증 코드 발급
       description: |
-        Registers or confirms a user's email and issues a verification token.
-        This endpoint stores the email in users.email and sets is_email_verified to 0.
+        users 선등록 없이 signup_email_verifications 테이블에 pending 인증 정보를 저장하고
+        이메일 인증 코드를 발급합니다.
+        이 단계에서는 users 테이블을 수정하지 않습니다.
+        이후 /auth/email/verify/confirm에서 verified 상태로 바꾼 뒤,
+        /register가 같은 id+email 조합의 인증 완료 여부를 검사합니다.
       requestBody:
         required: true
         content:
@@ -149,22 +161,22 @@ paths:
                   type: string
       responses:
         '200':
-          description: Verification token issued
+          description: pending 이메일 인증 코드 발급 성공
         '400':
-          description: Invalid input
-        '404':
-          description: User not found
+          description: 입력값 오류
         '409':
-          description: Email conflict
+          description: 이미 사용 중인 ID 또는 이메일
         '500':
-          description: Server error
+          description: 서버 내부 오류
 
   /auth/email/verify/confirm:
     post:
-      summary: Confirm email verification token
+      summary: 회원가입 전 이메일 인증 코드 확인
       description: |
-        Consumes a valid token from email_verification_tokens and marks
-        users.is_email_verified = 1.
+        signup_email_verifications 테이블의 유효한 pending 인증 레코드를
+        verified 상태로 변경합니다.
+        이 단계에서는 users 테이블을 수정하지 않으며,
+        실제 계정 생성과 users.is_email_verified = 1 저장은 /register에서 처리합니다.
       requestBody:
         required: true
         content:
@@ -178,11 +190,11 @@ paths:
                   type: string
       responses:
         '200':
-          description: Email verified
+          description: 이메일 인증 완료
         '400':
-          description: Invalid or expired token
+          description: 유효하지 않거나 만료된 인증 코드
         '500':
-          description: Server error
+          description: 서버 내부 오류
 
   /auth/password/forgot:
     post:

@@ -1,4 +1,4 @@
-#include "../include/AuthRecoveryRoutes.h"
+﻿#include "../include/AuthRecoveryRoutes.h"
 
 #include <mysql/mysql.h>
 #include <openssl/crypto.h>
@@ -60,6 +60,13 @@ struct UserEmailInfo {
     bool found = false;
     std::string email;
     bool is_email_verified = false;
+};
+
+struct SignupEmailVerificationRecord {
+    bool found = false;
+    unsigned long long id = 0;
+    std::string user_id;
+    std::string email;
 };
 
 // DB 연결 생성 함수
@@ -141,7 +148,7 @@ std::string sha256Hex(const std::string& text) {
     return bytesToHex(digest, digest_len);
 }
 
-// 인증 토큰 원문 생성 함수
+// 인증 토큰 랜덤 생성 함수
 std::string generateRandomTokenHex(size_t bytes) {
     if (bytes == 0) {
         return {};
@@ -249,7 +256,7 @@ std::optional<std::string> validatePasswordComplexity(const std::string& passwor
     return std::nullopt;
 }
 
-// 사용자 이메일/인증상태 조회 함수
+// 사용자 이메일 인증 상태 조회 함수
 bool loadUserEmailInfo(MYSQL* connection, const std::string& user_id, UserEmailInfo* out) {
     if (!connection || !out) {
         return false;
@@ -330,6 +337,471 @@ bool loadUserEmailInfo(MYSQL* connection, const std::string& user_id, UserEmailI
     return true;
 }
 
+// 회원가입 아이디 중복 여부 조회 함수
+bool isUserIdAlreadyRegistered(MYSQL* connection,
+                               const std::string& user_id,
+                               bool* out_exists) {
+    if (!connection || !out_exists) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT 1 FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind isUserIdAlreadyRegistered param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute isUserIdAlreadyRegistered: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    signed char exists_value = 0;
+    MysqlBindFlag exists_is_null = 0;
+    MysqlBindFlag exists_bind_error = 0;
+    MYSQL_BIND result_bind[1] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_TINY;
+    result_bind[0].buffer = &exists_value;
+    result_bind[0].is_null = &exists_is_null;
+    result_bind[0].error = &exists_bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind isUserIdAlreadyRegistered result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to store isUserIdAlreadyRegistered result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        *out_exists = false;
+        return true;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED || exists_bind_error) {
+        std::cerr << "[AUTH][DB] Failed to fetch isUserIdAlreadyRegistered result" << std::endl;
+        return false;
+    }
+
+    *out_exists = !exists_is_null && exists_value != 0;
+    return true;
+}
+
+// 회원가입 이메일 중복 여부 조회 함수
+bool isEmailAlreadyRegistered(MYSQL* connection,
+                              const std::string& email,
+                              bool* out_exists) {
+    if (!connection || !out_exists) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT 1 FROM users WHERE email = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long email_length = static_cast<unsigned long>(email.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(email.c_str());
+    param_bind[0].buffer_length = email_length;
+    param_bind[0].length = &email_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind isEmailAlreadyRegistered param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute isEmailAlreadyRegistered: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    signed char exists_value = 0;
+    MysqlBindFlag exists_is_null = 0;
+    MysqlBindFlag exists_bind_error = 0;
+    MYSQL_BIND result_bind[1] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_TINY;
+    result_bind[0].buffer = &exists_value;
+    result_bind[0].is_null = &exists_is_null;
+    result_bind[0].error = &exists_bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind isEmailAlreadyRegistered result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to store isEmailAlreadyRegistered result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        *out_exists = false;
+        return true;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED || exists_bind_error) {
+        std::cerr << "[AUTH][DB] Failed to fetch isEmailAlreadyRegistered result" << std::endl;
+        return false;
+    }
+
+    *out_exists = !exists_is_null && exists_value != 0;
+    return true;
+}
+
+// 회원가입 전 이메일 인증 토큰 저장 함수
+bool insertSignupEmailVerificationToken(MYSQL* connection,
+                                        const std::string& user_id,
+                                        const std::string& email,
+                                        const std::string& token_hash,
+                                        long long expires_at,
+                                        const std::string& request_ip,
+                                        const std::string& user_agent) {
+    if (!connection) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "INSERT INTO signup_email_verifications "
+        "(user_id, email, token_hash, expires_at, request_ip, user_agent) "
+        "VALUES (?, ?, ?, FROM_UNIXTIME(?), ?, ?)");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[6] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    unsigned long email_length = static_cast<unsigned long>(email.size());
+    unsigned long token_hash_length = static_cast<unsigned long>(token_hash.size());
+    long long expires_at_value = expires_at;
+
+    unsigned long request_ip_length = static_cast<unsigned long>(request_ip.size());
+    MysqlBindFlag request_ip_is_null = request_ip.empty() ? 1 : 0;
+    unsigned long user_agent_length = static_cast<unsigned long>(user_agent.size());
+    MysqlBindFlag user_agent_is_null = user_agent.empty() ? 1 : 0;
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(email.c_str());
+    param_bind[1].buffer_length = email_length;
+    param_bind[1].length = &email_length;
+
+    param_bind[2].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[2].buffer = const_cast<char*>(token_hash.c_str());
+    param_bind[2].buffer_length = token_hash_length;
+    param_bind[2].length = &token_hash_length;
+
+    param_bind[3].buffer_type = MYSQL_TYPE_LONGLONG;
+    param_bind[3].buffer = &expires_at_value;
+
+    param_bind[4].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[4].buffer = request_ip_is_null ? nullptr : const_cast<char*>(request_ip.c_str());
+    param_bind[4].buffer_length = request_ip_length;
+    param_bind[4].length = &request_ip_length;
+    param_bind[4].is_null = &request_ip_is_null;
+
+    param_bind[5].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[5].buffer = user_agent_is_null ? nullptr : const_cast<char*>(user_agent.c_str());
+    param_bind[5].buffer_length = user_agent_length;
+    param_bind[5].length = &user_agent_length;
+    param_bind[5].is_null = &user_agent_is_null;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind insertSignupEmailVerificationToken params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute insertSignupEmailVerificationToken: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+// 토큰으로 유효한 회원가입 이메일 인증 레코드 조회 함수
+bool loadActiveSignupEmailVerificationByToken(MYSQL* connection,
+                                              const std::string& token_hash,
+                                              SignupEmailVerificationRecord* out) {
+    if (!connection || !out) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT id, user_id, email "
+        "FROM signup_email_verifications "
+        "WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > NOW() "
+        "ORDER BY id DESC LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long token_hash_length = static_cast<unsigned long>(token_hash.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(token_hash.c_str());
+    param_bind[0].buffer_length = token_hash_length;
+    param_bind[0].length = &token_hash_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind loadActiveSignupEmailVerificationByToken param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute loadActiveSignupEmailVerificationByToken: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    long long record_id = 0;
+    MysqlBindFlag record_id_is_null = 0;
+    MysqlBindFlag record_id_bind_error = 0;
+    std::array<char, kUserIdBufferBytes> user_id_buffer{};
+    unsigned long user_id_length = 0;
+    MysqlBindFlag user_id_is_null = 0;
+    MysqlBindFlag user_id_bind_error = 0;
+    std::array<char, kEmailBufferBytes> email_buffer{};
+    unsigned long email_length = 0;
+    MysqlBindFlag email_is_null = 0;
+    MysqlBindFlag email_bind_error = 0;
+
+    MYSQL_BIND result_bind[3] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    result_bind[0].buffer = &record_id;
+    result_bind[0].is_null = &record_id_is_null;
+    result_bind[0].error = &record_id_bind_error;
+
+    result_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[1].buffer = user_id_buffer.data();
+    result_bind[1].buffer_length = static_cast<unsigned long>(user_id_buffer.size());
+    result_bind[1].length = &user_id_length;
+    result_bind[1].is_null = &user_id_is_null;
+    result_bind[1].error = &user_id_bind_error;
+
+    result_bind[2].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[2].buffer = email_buffer.data();
+    result_bind[2].buffer_length = static_cast<unsigned long>(email_buffer.size());
+    result_bind[2].length = &email_length;
+    result_bind[2].is_null = &email_is_null;
+    result_bind[2].error = &email_bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind loadActiveSignupEmailVerificationByToken result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to store loadActiveSignupEmailVerificationByToken result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        out->found = false;
+        return true;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED ||
+        record_id_bind_error || user_id_bind_error || email_bind_error) {
+        std::cerr << "[AUTH][DB] Failed to fetch loadActiveSignupEmailVerificationByToken result" << std::endl;
+        return false;
+    }
+
+    out->found = true;
+    out->id = record_id_is_null ? 0 : static_cast<unsigned long long>(record_id);
+    out->user_id = user_id_is_null ? std::string{} : std::string(user_id_buffer.data(), user_id_length);
+    out->email = email_is_null ? std::string{} : std::string(email_buffer.data(), email_length);
+    return true;
+}
+
+// 회원가입 이메일 인증 완료 처리 함수
+bool markSignupEmailVerificationConfirmed(MYSQL* connection, unsigned long long record_id) {
+    if (!connection) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "UPDATE signup_email_verifications "
+        "SET verified_at = NOW() "
+        "WHERE id = ? AND consumed_at IS NULL");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    long long record_id_value = static_cast<long long>(record_id);
+    param_bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    param_bind[0].buffer = &record_id_value;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind markSignupEmailVerificationConfirmed param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute markSignupEmailVerificationConfirmed: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return mysql_stmt_affected_rows(statement.get()) > 0;
+}
+
+// 회원가입 시 사용할 이메일 인증 완료 상태 조회 함수
+bool hasVerifiedSignupEmailVerification(MYSQL* connection,
+                                        const std::string& user_id,
+                                        const std::string& email,
+                                        bool* out_verified) {
+    if (!connection || !out_verified) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT 1 FROM signup_email_verifications "
+        "WHERE user_id = ? AND email = ? "
+        "AND verified_at IS NOT NULL AND consumed_at IS NULL AND expires_at > NOW() "
+        "ORDER BY id DESC LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    unsigned long email_length = static_cast<unsigned long>(email.size());
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(email.c_str());
+    param_bind[1].buffer_length = email_length;
+    param_bind[1].length = &email_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind hasVerifiedSignupEmailVerification params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute hasVerifiedSignupEmailVerification: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    signed char verified_value = 0;
+    MysqlBindFlag verified_is_null = 0;
+    MysqlBindFlag verified_bind_error = 0;
+    MYSQL_BIND result_bind[1] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_TINY;
+    result_bind[0].buffer = &verified_value;
+    result_bind[0].is_null = &verified_is_null;
+    result_bind[0].error = &verified_bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind hasVerifiedSignupEmailVerification result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to store hasVerifiedSignupEmailVerification result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        *out_verified = false;
+        return true;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED || verified_bind_error) {
+        std::cerr << "[AUTH][DB] Failed to fetch hasVerifiedSignupEmailVerification result" << std::endl;
+        return false;
+    }
+
+    *out_verified = !verified_is_null && verified_value != 0;
+    return true;
+}
+
+// 회원가입 완료 후 인증 레코드 사용 처리 함수
+bool consumeVerifiedSignupEmailVerification(MYSQL* connection,
+                                            const std::string& user_id,
+                                            const std::string& email) {
+    if (!connection) {
+        return false;
+    }
+
+    auto statement = prepareStatement(
+        connection,
+        "UPDATE signup_email_verifications "
+        "SET consumed_at = NOW() "
+        "WHERE user_id = ? AND email = ? "
+        "AND verified_at IS NOT NULL AND consumed_at IS NULL");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[2] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    unsigned long email_length = static_cast<unsigned long>(email.size());
+
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    param_bind[1].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[1].buffer = const_cast<char*>(email.c_str());
+    param_bind[1].buffer_length = email_length;
+    param_bind[1].length = &email_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind consumeVerifiedSignupEmailVerification params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute consumeVerifiedSignupEmailVerification: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return mysql_stmt_affected_rows(statement.get()) > 0;
+}
+
 // 동일 이메일의 타 사용자 존재 여부 조회 함수
 bool isEmailUsedByAnotherUser(MYSQL* connection,
                               const std::string& user_id,
@@ -405,7 +877,7 @@ bool isEmailUsedByAnotherUser(MYSQL* connection,
     return true;
 }
 
-// 사용자 이메일/인증상태 갱신 함수
+// 사용자 이메일 인증 상태 갱신 함수
 bool updateUserEmailState(MYSQL* connection,
                           const std::string& user_id,
                           const std::string& email,
@@ -747,28 +1219,20 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
             return crow::response(500, "데이터베이스 연결에 실패했습니다.");
         }
 
-        UserEmailInfo user_info;
-        if (!loadUserEmailInfo(connection.get(), user_id, &user_info)) {
-            return crow::response(500, "사용자 조회 중 오류가 발생했습니다.");
+        bool id_exists = false;
+        if (!isUserIdAlreadyRegistered(connection.get(), user_id, &id_exists)) {
+            return crow::response(500, "아이디 중복 확인 중 오류가 발생했습니다.");
         }
-        if (!user_info.found) {
-            return crow::response(404, "존재하지 않는 사용자입니다.");
-        }
-
-        if (!user_info.email.empty() && user_info.email != email) {
-            return crow::response(409, "이미 다른 이메일이 등록된 계정입니다.");
+        if (id_exists) {
+            return crow::response(409, "이미 사용 중인 아이디입니다.");
         }
 
-        bool email_used = false;
-        if (!isEmailUsedByAnotherUser(connection.get(), user_id, email, &email_used)) {
+        bool email_exists = false;
+        if (!isEmailAlreadyRegistered(connection.get(), email, &email_exists)) {
             return crow::response(500, "이메일 중복 확인 중 오류가 발생했습니다.");
         }
-        if (email_used) {
+        if (email_exists) {
             return crow::response(409, "이미 사용 중인 이메일입니다.");
-        }
-
-        if (!updateUserEmailState(connection.get(), user_id, email, false)) {
-            return crow::response(500, "이메일 저장에 실패했습니다.");
         }
 
         const std::string token = generateRandomTokenHex(kAuthTokenRandomBytes);
@@ -781,13 +1245,13 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
             static_cast<long long>(std::time(nullptr)) + kEmailVerifyTokenTtlSeconds;
         const std::string request_ip = resolveRequestIp(req);
         const std::string user_agent = req.get_header_value("User-Agent");
-        if (!insertRecoveryToken(connection.get(),
-                                 "email_verification_tokens",
-                                 user_id,
-                                 token_hash,
-                                 expires_at,
-                                 request_ip,
-                                 user_agent)) {
+        if (!insertSignupEmailVerificationToken(connection.get(),
+                                                user_id,
+                                                email,
+                                                token_hash,
+                                                expires_at,
+                                                request_ip,
+                                                user_agent)) {
             return crow::response(500, "인증 토큰 저장에 실패했습니다.");
         }
 
@@ -797,7 +1261,7 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
 
         crow::json::wvalue res;
         res["status"] = "pending";
-        res["message"] = "이메일 인증 토큰이 발급되었습니다.";
+        res["message"] = "이메일 인증 코드가 발급되었습니다.";
         res["expires_in"] = kEmailVerifyTokenTtlSeconds;
         if (shouldExposeDebugToken()) {
             res["debug_token"] = token;
@@ -827,21 +1291,23 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
             return crow::response(500, "데이터베이스 연결에 실패했습니다.");
         }
 
-        std::string user_id;
-        if (!loadActiveTokenUserId(connection.get(), "email_verification_tokens", token_hash, &user_id)) {
+        SignupEmailVerificationRecord verification_record;
+        if (!loadActiveSignupEmailVerificationByToken(connection.get(), token_hash, &verification_record)) {
+            return crow::response(500, "인증 토큰 조회 중 오류가 발생했습니다.");
+        }
+        if (!verification_record.found) {
             return crow::response(400, "유효하지 않거나 만료된 인증 토큰입니다.");
         }
 
-        if (!markUserEmailVerified(connection.get(), user_id)) {
+        if (!markSignupEmailVerificationConfirmed(connection.get(), verification_record.id)) {
             return crow::response(500, "이메일 인증 처리에 실패했습니다.");
-        }
-        if (!markTokenUsed(connection.get(), "email_verification_tokens", token_hash)) {
-            return crow::response(500, "인증 토큰 상태 갱신에 실패했습니다.");
         }
 
         crow::json::wvalue res;
         res["status"] = "success";
         res["verified"] = true;
+        res["id"] = verification_record.user_id;
+        res["email"] = verification_record.email;
         return crow::response(200, res);
     });
 
@@ -967,3 +1433,56 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
         return crow::response(200, res);
     });
 }
+
+// 회원가입 전 이메일 인증 완료 여부 확인 함수
+bool checkSignupEmailVerified(const std::string& user_id,
+                              const std::string& email,
+                              std::string* error_message) {
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        if (error_message) {
+            *error_message = "데이터베이스 연결에 실패했습니다.";
+        }
+        return false;
+    }
+
+    bool is_verified = false;
+    if (!hasVerifiedSignupEmailVerification(connection.get(), user_id, email, &is_verified)) {
+        if (error_message) {
+            *error_message = "이메일 인증 상태를 확인하지 못했습니다.";
+        }
+        return false;
+    }
+    if (!is_verified) {
+        if (error_message) {
+            *error_message = "이메일 인증이 완료되지 않았습니다. 이메일 인증 후 다시 시도해 주세요.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+// 회원가입 완료 시 이메일 인증 토큰 사용 처리 함수
+bool consumeSignupEmailVerification(const std::string& user_id,
+                                    const std::string& email,
+                                    std::string* error_message) {
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        if (error_message) {
+            *error_message = "데이터베이스 연결에 실패했습니다.";
+        }
+        return false;
+    }
+
+    if (!consumeVerifiedSignupEmailVerification(connection.get(), user_id, email)) {
+        if (error_message) {
+            *error_message = "이메일 인증 사용 처리에 실패했습니다.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+
