@@ -1462,7 +1462,7 @@ RegisterUserStatus registerUserToDBSecure(const std::string& inputId,
 
     auto statement = prepareStatement(
         connection.get(),
-        "INSERT INTO users (id, email, is_email_verified, password) VALUES (?, ?, 0, ?)");
+        "INSERT INTO users (id, email, is_email_verified, password) VALUES (?, ?, 1, ?)");
     if (!statement) {
         return RegisterUserStatus::DbError;
     }
@@ -1595,12 +1595,28 @@ int main()
             return crow::response(400, *email_error);
         }
 
+        // 가입 전 이메일 인증 완료 여부 검증
+        std::string verify_error_message;
+        if (!checkSignupEmailVerified(id, email, &verify_error_message)) {
+            const std::string response_message = verify_error_message.empty()
+                ? "이메일 인증이 완료되지 않았습니다. 이메일 인증 후 다시 시도해 주세요."
+                : verify_error_message;
+            return crow::response(403, response_message);
+        }
+
         const RegisterUserStatus register_status = registerUserToDBSecure(id, pw, email);
         if (register_status == RegisterUserStatus::Success) {
+            // 가입 성공 후 인증 상태를 소모 처리
+            std::string consume_error_message;
+            if (!consumeSignupEmailVerification(id, email, &consume_error_message)) {
+                std::cerr << "[AUTH][REGISTER] consumeSignupEmailVerification failed: "
+                          << consume_error_message << std::endl;
+            }
+
             crow::json::wvalue res;
             res["status"] = "success";
-            res["message"] = "회원가입이 완료되었습니다. 이메일 인증 후 로그인해 주세요.";
-            res["requires_email_verification"] = true;
+            res["message"] = "회원가입이 완료되었습니다. 로그인해 주세요.";
+            res["requires_email_verification"] = false;
             return crow::response(201, res);
         }
 
