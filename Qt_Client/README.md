@@ -133,6 +133,14 @@
   - `src/ui/qml/dialogs/AccountDeleteDialog.qml`
   - `src/core/auth/BackendAuthRequestService.cpp`
 
+### 6-2. 로그인 인터페이스 개선
+- 비밀번호/비밀번호 확인 입력칸 우측에 표시/숨김 토글(눈 아이콘) 추가
+  - 숨김 상태는 슬래시 오버레이(가리기 표시)로 시각화
+- ID/Password 입력 필드 크기/정렬을 동일 기준으로 맞춤
+- 입력 중 `CAPS LOCK ON` 상태를 실시간 표시
+  - Windows API 기반 실제 키보드 상태 조회 사용
+- `Clear`, `Back to Sign In` 버튼 텍스트 대비를 높여 가독성 개선
+
 ### 7. 클라이언트 사양(System Specs) 팝업
 - 헤더 좌측 홈 아이콘 클릭 시 클라이언트 사양 다이얼로그 표시
 - 홈 아이콘 툴팁 문구: `클라이언트 사양`
