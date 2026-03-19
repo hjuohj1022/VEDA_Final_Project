@@ -12,7 +12,8 @@ paths:
     post:
       summary: 사용자 회원가입
       description: |
-        ID와 비밀번호를 받아 신규 사용자를 등록합니다.
+        ID, 이메일, 비밀번호를 받아 신규 사용자를 등록합니다.
+        가입 후 이메일 인증을 완료해야 로그인할 수 있습니다.
         비밀번호 규칙:
         - 8자 이상 16자 이하
         - 숫자 1개 이상 포함
@@ -27,9 +28,13 @@ paths:
               required:
                 - id
                 - password
+                - email
               properties:
                 id:
                   type: string
+                email:
+                  type: string
+                  description: 인증에 사용할 이메일 주소
                 password:
                   type: string
                   description: 8~16자, 숫자 1개 이상, 특수문자 1개 이상, 공백 불가
@@ -39,7 +44,7 @@ paths:
         '400':
           description: JSON 형식 오류, 필수 값 누락, 또는 비밀번호 규칙 위반
         '409':
-          description: 이미 존재하는 ID
+          description: 이미 존재하는 ID 또는 이메일
           content:
             text/plain:
               example: '이미 사용 중인 아이디입니다.'
@@ -116,6 +121,8 @@ paths:
                     expires_in: 300
         '401':
           description: 인증 실패
+        '403':
+          description: 이메일 인증 미완료 계정 로그인 차단
           content:
             text/plain:
               example: 'Login Failed: Check ID or Password'

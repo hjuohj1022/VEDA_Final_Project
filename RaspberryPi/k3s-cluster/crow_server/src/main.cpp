@@ -105,8 +105,15 @@ struct UserTwoFactorInfo {
 enum class RegisterUserStatus {
     Success,
     DuplicateId,
+    DuplicateEmail,
     InvalidInput,
     DbError,
+};
+
+struct UserEmailVerificationState {
+    bool found = false;
+    bool has_email = false;
+    bool is_email_verified = false;
 };
 
 std::optional<std::string> validateCredentials(const std::string& user_id,
@@ -164,6 +171,25 @@ std::optional<std::string> validateRegistrationCredentials(const std::string& us
         return basic_error;
     }
     return validatePasswordComplexity(password);
+}
+
+// 회원가입 이메일 형식 검증 함수
+std::optional<std::string> validateRegistrationEmail(const std::string& email) {
+    if (email.empty()) {
+        return "email 값을 입력해 주세요.";
+    }
+    if (std::any_of(email.begin(), email.end(), [](unsigned char ch) { return std::isspace(ch) != 0; })) {
+        return "이메일에는 공백을 사용할 수 없습니다.";
+    }
+    const size_t at_pos = email.find('@');
+    if (at_pos == std::string::npos || at_pos == 0 || at_pos + 1 >= email.size()) {
+        return "이메일 형식이 올바르지 않습니다.";
+    }
+    const size_t dot_pos = email.find('.', at_pos + 1);
+    if (dot_pos == std::string::npos || dot_pos + 1 >= email.size()) {
+        return "이메일 형식이 올바르지 않습니다.";
+    }
+    return std::nullopt;
 }
 
 MysqlConnectionPtr openDatabaseConnection() {
@@ -1016,6 +1042,91 @@ bool verifyUserPassword(MYSQL* connection,
     return true;
 }
 
+// 로그인 시 이메일 인증 상태 조회 함수
+bool loadUserEmailVerificationState(MYSQL* connection,
+                                    const std::string& user_id,
+                                    UserEmailVerificationState* out) {
+    if (!connection || !out) {
+        return false;
+    }
+
+    *out = {};
+
+    auto statement = prepareStatement(
+        connection,
+        "SELECT IFNULL(email, ''), is_email_verified FROM users WHERE id = ? LIMIT 1");
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long user_id_length = static_cast<unsigned long>(user_id.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(user_id.c_str());
+    param_bind[0].buffer_length = user_id_length;
+    param_bind[0].length = &user_id_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind email verify lookup param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to execute email verify lookup: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    std::array<char, 320> email_buffer{};
+    unsigned long email_length = 0;
+    MysqlBindFlag email_is_null = 0;
+    MysqlBindFlag email_bind_error = 0;
+    signed char verified_value = 0;
+    MysqlBindFlag verified_is_null = 0;
+    MysqlBindFlag verified_bind_error = 0;
+
+    MYSQL_BIND result_bind[2] = {};
+    result_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[0].buffer = email_buffer.data();
+    result_bind[0].buffer_length = static_cast<unsigned long>(email_buffer.size());
+    result_bind[0].length = &email_length;
+    result_bind[0].is_null = &email_is_null;
+    result_bind[0].error = &email_bind_error;
+
+    result_bind[1].buffer_type = MYSQL_TYPE_TINY;
+    result_bind[1].buffer = &verified_value;
+    result_bind[1].is_null = &verified_is_null;
+    result_bind[1].error = &verified_bind_error;
+
+    if (mysql_stmt_bind_result(statement.get(), result_bind) != 0) {
+        std::cerr << "[DB Error] Failed to bind email verify lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_store_result(statement.get()) != 0) {
+        std::cerr << "[DB Error] Failed to store email verify lookup result: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    const int fetch_result = mysql_stmt_fetch(statement.get());
+    if (fetch_result == MYSQL_NO_DATA) {
+        return true;
+    }
+    if (fetch_result == 1 || fetch_result == MYSQL_DATA_TRUNCATED || email_bind_error || verified_bind_error) {
+        std::cerr << "[DB Error] Failed to fetch email verify lookup result" << std::endl;
+        return false;
+    }
+
+    out->found = true;
+    const std::string email_value = email_is_null ? std::string{} : std::string(email_buffer.data(), email_length);
+    out->has_email = !email_value.empty();
+    out->is_email_verified = !verified_is_null && verified_value != 0;
+    return true;
+}
+
 // A signed JWT is not enough on its own once account deletion is supported.
 // Protected APIs should also confirm that the user row still exists, otherwise
 // an old token issued before deletion could continue to work until expiry.
@@ -1328,9 +1439,14 @@ bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputP
     return verifyUserPassword(connection.get(), inputId, inputPw);
 }
 
-RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std::string& inputPw) {
+RegisterUserStatus registerUserToDBSecure(const std::string& inputId,
+                                          const std::string& inputPw,
+                                          const std::string& inputEmail) {
     // 신규 계정의 prepared statement + PBKDF2 해시 형태 저장.
     if (validateRegistrationCredentials(inputId, inputPw)) {
+        return RegisterUserStatus::InvalidInput;
+    }
+    if (validateRegistrationEmail(inputEmail)) {
         return RegisterUserStatus::InvalidInput;
     }
 
@@ -1344,13 +1460,16 @@ RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std:
         return RegisterUserStatus::DbError;
     }
 
-    auto statement = prepareStatement(connection.get(), "INSERT INTO users (id, password) VALUES (?, ?)");
+    auto statement = prepareStatement(
+        connection.get(),
+        "INSERT INTO users (id, email, is_email_verified, password) VALUES (?, ?, 0, ?)");
     if (!statement) {
         return RegisterUserStatus::DbError;
     }
 
-    MYSQL_BIND param_bind[2] = {};
+    MYSQL_BIND param_bind[3] = {};
     unsigned long user_id_length = static_cast<unsigned long>(inputId.size());
+    unsigned long email_length = static_cast<unsigned long>(inputEmail.size());
     unsigned long password_hash_length = static_cast<unsigned long>(password_hash.size());
 
     param_bind[0].buffer_type = MYSQL_TYPE_STRING;
@@ -1359,9 +1478,14 @@ RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std:
     param_bind[0].length = &user_id_length;
 
     param_bind[1].buffer_type = MYSQL_TYPE_STRING;
-    param_bind[1].buffer = const_cast<char*>(password_hash.c_str());
-    param_bind[1].buffer_length = password_hash_length;
-    param_bind[1].length = &password_hash_length;
+    param_bind[1].buffer = const_cast<char*>(inputEmail.c_str());
+    param_bind[1].buffer_length = email_length;
+    param_bind[1].length = &email_length;
+
+    param_bind[2].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[2].buffer = const_cast<char*>(password_hash.c_str());
+    param_bind[2].buffer_length = password_hash_length;
+    param_bind[2].length = &password_hash_length;
 
     if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
         std::cerr << "[DB Error] Failed to bind register params: "
@@ -1374,6 +1498,10 @@ RegisterUserStatus registerUserToDBSecure(const std::string& inputId, const std:
         std::cerr << "[DB Error] Failed to register user (" << error_code << "): "
                   << mysql_stmt_error(statement.get()) << std::endl;
         if (error_code == kMysqlErrDuplicateEntry) {
+            const std::string db_error = mysql_stmt_error(statement.get());
+            if (db_error.find("uq_users_email") != std::string::npos) {
+                return RegisterUserStatus::DuplicateEmail;
+            }
             return RegisterUserStatus::DuplicateId;
         }
         return RegisterUserStatus::DbError;
@@ -1450,27 +1578,36 @@ int main()
         auto x = crow::json::load(req.body);
         if (!x) return crow::response(400, "잘못된 JSON 형식입니다.");
 
-        if (!x.has("id") || !x.has("password")) {
-            return crow::response(400, "id 또는 password 값이 없습니다.");
+        if (!x.has("id") || !x.has("password") || !x.has("email")) {
+            return crow::response(400, "id, password 또는 email 값이 없습니다.");
         }
 
         std::string id = x["id"].s();
         std::string pw = x["password"].s();
+        std::string email = x["email"].s();
 
         if (const auto credential_error = validateRegistrationCredentials(id, pw)) {
             return crow::response(400, *credential_error);
         }
+        if (const auto email_error = validateRegistrationEmail(email)) {
+            return crow::response(400, *email_error);
+        }
 
-        const RegisterUserStatus register_status = registerUserToDBSecure(id, pw);
+        const RegisterUserStatus register_status = registerUserToDBSecure(id, pw, email);
         if (register_status == RegisterUserStatus::Success) {
             crow::json::wvalue res;
             res["status"] = "success";
-            res["message"] = "User registered successfully";
+            res["message"] = "회원가입이 완료되었습니다. 이메일 인증 후 로그인해 주세요.";
+            res["requires_email_verification"] = true;
             return crow::response(201, res);
         }
 
         if (register_status == RegisterUserStatus::DuplicateId) {
             return crow::response(409, "이미 사용 중인 아이디입니다.");
+        }
+
+        if (register_status == RegisterUserStatus::DuplicateEmail) {
+            return crow::response(409, "이미 사용 중인 이메일입니다.");
         }
 
         if (register_status == RegisterUserStatus::InvalidInput) {
@@ -1865,6 +2002,18 @@ int main()
 
         if (!verifyUserPassword(connection.get(), id, pw)) {
             return crow::response(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
+        }
+
+        UserEmailVerificationState email_state;
+        // 이메일이 등록된 계정은 인증 완료 전 로그인 차단, 이메일 미등록(레거시) 계정은 허용
+        if (!loadUserEmailVerificationState(connection.get(), id, &email_state)) {
+            return crow::response(500, "이메일 인증 상태를 불러오지 못했습니다.");
+        }
+        if (!email_state.found) {
+            return crow::response(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
+        }
+        if (email_state.has_email && !email_state.is_email_verified) {
+            return crow::response(403, "이메일 인증이 완료되지 않았습니다. 이메일 인증 후 로그인해 주세요.");
         }
 
         UserTwoFactorInfo two_factor_info;
