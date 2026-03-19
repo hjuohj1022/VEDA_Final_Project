@@ -21,6 +21,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -398,59 +399,80 @@ public:
                 continue;
             }
 
-            int replacementListenFd = -1;
+            BIO_ADDR_free(peer);
+            peer = nullptr;
+
+            bool workerMode = true;
             try {
-                replacementListenFd = bindUdpSocket(bindHost_, bindPort_);
-                listenFd_ = replacementListenFd;
-                replacementListenFd = -1;
+                listenFd_ = bindUdpSocket(bindHost_, bindPort_);
             } catch (const std::exception& ex) {
                 std::cerr << "[DTLS] Failed to open replacement listen socket: " << ex.what()
-                          << ". New peers may be refused until the current session ends.\n";
+                          << ". Falling back to inline session handling.\n";
+                workerMode = false;
             }
 
             if (::connect(sessionFd, reinterpret_cast<sockaddr*>(&peerSock), peerLen) != 0) {
                 std::cerr << "[DTLS] Failed to connect UDP socket to peer: " << std::strerror(errno) << '\n';
                 SSL_free(sessionSsl);
-                BIO_ADDR_free(peer);
-                if (listenFd_ == sessionFd) {
+                if (!workerMode) {
                     disconnectUdpSocket(sessionFd);
                 } else {
                     ::close(sessionFd);
                 }
-                if (replacementListenFd >= 0) {
-                    ::close(replacementListenFd);
+                continue;
+            }
+
+            BIO_ctrl(SSL_get_rbio(sessionSsl), BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
+            configureSocketTimeout(sessionFd, kHandshakeTimeoutSeconds);
+
+            std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
+
+            if (workerMode) {
+                try {
+                    std::thread(&DtlsGateway::runSessionWorker, this, sessionSsl, sessionFd, peerSock).detach();
+                } catch (const std::exception& ex) {
+                    std::cerr << "[DTLS] Failed to start session worker: " << ex.what()
+                              << ". Falling back to inline session handling.\n";
+                    if (listenFd_ != sessionFd) {
+                        ::close(listenFd_);
+                        listenFd_ = sessionFd;
+                    }
+                    runSessionWorker(sessionSsl, sessionFd, peerSock);
+                    listenFd_ = bindUdpSocket(bindHost_, bindPort_);
                 }
                 continue;
             }
 
-            BIO_ctrl(sessionBio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &peerSock);
-            configureSocketTimeout(sessionFd, kHandshakeTimeoutSeconds);
+            runSessionWorker(sessionSsl, sessionFd, peerSock);
+            listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+        }
+    }
 
-            std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
+private:
+    void runSessionWorker(SSL* sessionSsl, int sessionFd, sockaddr_storage peerSock)
+    {
+        try {
+            const std::string peerText = sockaddrToString(peerSock);
+            BIO* sessionBio = SSL_get_rbio(sessionSsl);
 
             ERR_clear_error();
             const int acceptRc = SSL_accept(sessionSsl);
             if (acceptRc <= 0) {
                 const int sslError = SSL_get_error(sessionSsl, acceptRc);
-                if (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1) {
-                    std::cerr << "[DTLS] SSL_accept timed out for peer " << sockaddrToString(peerSock) << '\n';
+                if (sessionBio != nullptr
+                    && (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1)) {
+                    std::cerr << "[DTLS] SSL_accept timed out for peer " << peerText << '\n';
                 } else {
                     std::cerr << "[DTLS] SSL_accept failed with sslError=" << sslError
                               << " errno=" << errno << " (" << std::strerror(errno) << ")\n";
                     printOpenSslErrors("[DTLS] SSL_accept failed");
                 }
                 SSL_free(sessionSsl);
-                BIO_ADDR_free(peer);
-                if (listenFd_ == sessionFd) {
-                    disconnectUdpSocket(sessionFd);
-                    configureSocketTimeout(sessionFd, 0);
-                } else {
-                    ::close(sessionFd);
-                }
-                continue;
+                ::close(sessionFd);
+                return;
             }
 
-            std::cout << "[DTLS] Handshake complete for peer " << sockaddrToString(peerSock) << '\n';
+            std::cout << "[DTLS] Handshake complete for peer " << peerText << '\n';
             configureSocketTimeout(sessionFd, kSessionIdleTimeoutSeconds);
 
             std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
@@ -463,8 +485,9 @@ public:
                         std::cout << "[DTLS] Peer closed session\n";
                     } else if (sslError == SSL_ERROR_WANT_READ || sslError == SSL_ERROR_WANT_WRITE) {
                         continue;
-                    } else if (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1) {
-                        std::cout << "[DTLS] DTLS session timed out for peer " << sockaddrToString(peerSock) << '\n';
+                    } else if (sessionBio != nullptr
+                               && (BIO_dgram_recv_timedout(sessionBio) == 1 || BIO_dgram_send_timedout(sessionBio) == 1)) {
+                        std::cout << "[DTLS] DTLS session timed out for peer " << peerText << '\n';
                     } else {
                         printOpenSslErrors("[DTLS] SSL_read failed");
                     }
@@ -478,17 +501,18 @@ public:
 
             SSL_shutdown(sessionSsl);
             SSL_free(sessionSsl);
-            BIO_ADDR_free(peer);
-            if (listenFd_ == sessionFd) {
-                disconnectUdpSocket(sessionFd);
-                configureSocketTimeout(sessionFd, 0);
-            } else {
+            ::close(sessionFd);
+        } catch (const std::exception& ex) {
+            std::cerr << "[DTLS] Session worker fatal error: " << ex.what() << '\n';
+            if (sessionSsl != nullptr) {
+                SSL_free(sessionSsl);
+            }
+            if (sessionFd >= 0) {
                 ::close(sessionFd);
             }
         }
     }
 
-private:
     static unsigned int pskServerCallback(SSL*, const char* identity, unsigned char* psk, unsigned int maxPskLen)
     {
         if (g_gateway == nullptr || identity == nullptr) {
