@@ -1,5 +1,6 @@
 #include "../include/ThermalProxy.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
@@ -8,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -30,22 +32,51 @@ constexpr int kThermalHeight = 120;
 constexpr int kThermalFrameBytes = kThermalWidth * kThermalHeight * 2;
 constexpr size_t kMaxUdpPacketBytes = 64 * 1024;
 constexpr int kReceiveTimeoutUs = 250000;
+constexpr int kDefaultUdpSocketBufferBytes = 2 * 1024 * 1024;
+constexpr int kDefaultStatsLogIntervalMs = 5000;
+constexpr int kDefaultFrameTrackTimeoutMs = 2000;
+constexpr int kDefaultMaxTrackedFrames = 8;
+
+struct ThermalPacketHeader {
+    uint16_t frameId = 0;
+    uint16_t chunkIndex = 0;
+    uint16_t totalChunks = 0;
+    uint16_t minValue = 0;
+    uint16_t maxValue = 0;
+};
+
+struct ThermalFrameTracker {
+    uint16_t totalChunks = 0;
+    long long firstSeenAtMs = 0;
+    long long lastSeenAtMs = 0;
+    std::set<uint16_t> uniqueChunks;
+};
 
 struct ThermalProxyStats {
     bool udp_bound = false;
     bool receiver_running = false;
     std::string udp_bind_host = "0.0.0.0";
     uint16_t udp_port = kDefaultThermalUdpPort;
+    int udp_socket_rcvbuf_bytes = 0;
     int ws_clients = 0;
     uint16_t last_frame_id = 0;
     uint16_t last_chunk_index = 0;
     uint16_t last_total_chunks = 0;
     uint16_t last_min_val = 0;
     uint16_t last_max_val = 0;
+    std::string last_sender;
     size_t last_packet_bytes = 0;
     long long last_packet_at_ms = 0;
     unsigned long long packets_received = 0;
     unsigned long long bytes_received = 0;
+    unsigned long long invalid_packets = 0;
+    unsigned long long duplicate_chunks = 0;
+    unsigned long long completed_frames = 0;
+    unsigned long long incomplete_frames = 0;
+    unsigned long long missing_chunks = 0;
+    unsigned long long evicted_frames = 0;
+    size_t in_flight_frames = 0;
+    size_t max_in_flight_frames = 0;
     std::string last_error;
 };
 
@@ -58,6 +89,8 @@ struct ThermalProxyState {
     std::atomic<bool> receiver_running{false};
     std::atomic<bool> receiver_thread_started{false};
     ThermalProxyStats stats;
+    std::map<uint16_t, ThermalFrameTracker> in_flight_frames;
+    long long last_stats_log_at_ms = 0;
 };
 
 ThermalProxyState g_thermal;
@@ -92,9 +125,69 @@ uint16_t envPortOrDefault(const char* key, uint16_t fallback)
     }
 }
 
+int envIntOrDefault(const char* key, int fallback)
+{
+    const char* value = std::getenv(key);
+    if (!value || !*value) {
+        return fallback;
+    }
+
+    try {
+        return std::stoi(value);
+    } catch (const std::exception&) {
+        return fallback;
+    }
+}
+
 uint16_t readBe16(const unsigned char* p)
 {
     return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
+}
+
+bool parseThermalPacketHeader(const std::string& payload, ThermalPacketHeader& out)
+{
+    if (payload.size() < kThermalHeaderBytes) {
+        return false;
+    }
+
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(payload.data());
+    out.frameId = readBe16(p + 0);
+    out.chunkIndex = readBe16(p + 2);
+    out.totalChunks = readBe16(p + 4);
+    out.minValue = readBe16(p + 6);
+    out.maxValue = readBe16(p + 8);
+    return true;
+}
+
+std::string senderToString(const sockaddr_in& sender)
+{
+    char host[INET_ADDRSTRLEN] = {0};
+    if (::inet_ntop(AF_INET, &sender.sin_addr, host, sizeof(host)) == nullptr) {
+        return "unknown";
+    }
+
+    return std::string(host) + ":" + std::to_string(ntohs(sender.sin_port));
+}
+
+void configureReceiveBuffer(int fd, int bytes)
+{
+    if (bytes <= 0) {
+        return;
+    }
+
+    if (::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes)) != 0) {
+        std::cerr << "[THERMAL] setsockopt(SO_RCVBUF) failed: " << std::strerror(errno) << std::endl;
+    }
+}
+
+int querySocketBufferBytes(int fd, int optName)
+{
+    int value = 0;
+    socklen_t value_len = sizeof(value);
+    if (::getsockopt(fd, SOL_SOCKET, optName, &value, &value_len) != 0) {
+        return -1;
+    }
+    return value;
 }
 
 std::string extractBearerToken(const crow::request& req)
@@ -129,22 +222,172 @@ void setReceiverState(bool running, bool bound, const std::string& bind_host, ui
     g_thermal.receiver_running.store(running);
 }
 
-void updatePacketStats(const std::string& payload)
+void noteIncompleteFrameLocked(uint16_t frameId, const ThermalFrameTracker& tracker, const char* reason)
+{
+    g_thermal.stats.incomplete_frames += 1;
+    if (tracker.totalChunks > tracker.uniqueChunks.size()) {
+        g_thermal.stats.missing_chunks += static_cast<unsigned long long>(tracker.totalChunks - tracker.uniqueChunks.size());
+    }
+    if (std::strcmp(reason, "drop incomplete frame") == 0) {
+        g_thermal.stats.evicted_frames += 1;
+    }
+
+    std::cout << "[THERMAL] " << reason
+              << " id= " << frameId
+              << " chunks= " << tracker.uniqueChunks.size() << " / " << tracker.totalChunks
+              << std::endl;
+}
+
+void pruneExpiredFramesLocked(long long nowMs, int timeoutMs)
+{
+    if (timeoutMs <= 0) {
+        return;
+    }
+
+    for (auto it = g_thermal.in_flight_frames.begin(); it != g_thermal.in_flight_frames.end();) {
+        if ((nowMs - it->second.lastSeenAtMs) <= timeoutMs) {
+            ++it;
+            continue;
+        }
+
+        noteIncompleteFrameLocked(it->first, it->second, "frame timeout");
+        it = g_thermal.in_flight_frames.erase(it);
+    }
+}
+
+void trimTrackedFramesLocked(int maxTrackedFrames)
+{
+    if (maxTrackedFrames <= 0) {
+        return;
+    }
+
+    while (static_cast<int>(g_thermal.in_flight_frames.size()) > maxTrackedFrames) {
+        const auto oldest = std::min_element(g_thermal.in_flight_frames.begin(),
+                                             g_thermal.in_flight_frames.end(),
+                                             [](const auto& lhs, const auto& rhs) {
+                                                 return lhs.second.lastSeenAtMs < rhs.second.lastSeenAtMs;
+                                             });
+        if (oldest == g_thermal.in_flight_frames.end()) {
+            return;
+        }
+
+        noteIncompleteFrameLocked(oldest->first, oldest->second, "drop incomplete frame");
+        g_thermal.in_flight_frames.erase(oldest);
+    }
+}
+
+void maybeLogThermalStatsLocked(long long nowMs, int statsLogIntervalMs)
+{
+    if (statsLogIntervalMs <= 0 || g_thermal.stats.packets_received == 0) {
+        return;
+    }
+    if (g_thermal.last_stats_log_at_ms != 0 && (nowMs - g_thermal.last_stats_log_at_ms) < statsLogIntervalMs) {
+        return;
+    }
+
+    g_thermal.last_stats_log_at_ms = nowMs;
+    std::cout << "[THERMAL][STATS] packets=" << g_thermal.stats.packets_received
+              << " bytes=" << g_thermal.stats.bytes_received
+              << " completed=" << g_thermal.stats.completed_frames
+              << " incomplete=" << g_thermal.stats.incomplete_frames
+              << " missing=" << g_thermal.stats.missing_chunks
+              << " duplicate=" << g_thermal.stats.duplicate_chunks
+              << " invalid=" << g_thermal.stats.invalid_packets
+              << " inflight=" << g_thermal.stats.in_flight_frames
+              << " last_frame=" << g_thermal.stats.last_frame_id
+              << " last_chunk=" << g_thermal.stats.last_chunk_index << "/" << g_thermal.stats.last_total_chunks
+              << " last_sender=" << g_thermal.stats.last_sender
+              << std::endl;
+}
+
+void updatePacketStats(const std::string& payload,
+                       const std::string& senderText,
+                       int frameTimeoutMs,
+                       int maxTrackedFrames,
+                       int statsLogIntervalMs)
 {
     std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+    const long long nowMs = currentTimeMs();
+
     g_thermal.stats.packets_received += 1;
     g_thermal.stats.bytes_received += static_cast<unsigned long long>(payload.size());
     g_thermal.stats.last_packet_bytes = payload.size();
-    g_thermal.stats.last_packet_at_ms = currentTimeMs();
+    g_thermal.stats.last_packet_at_ms = nowMs;
+    g_thermal.stats.last_sender = senderText;
 
-    if (payload.size() >= kThermalHeaderBytes) {
-        const unsigned char* p = reinterpret_cast<const unsigned char*>(payload.data());
-        g_thermal.stats.last_frame_id = readBe16(p + 0);
-        g_thermal.stats.last_chunk_index = readBe16(p + 2);
-        g_thermal.stats.last_total_chunks = readBe16(p + 4);
-        g_thermal.stats.last_min_val = readBe16(p + 6);
-        g_thermal.stats.last_max_val = readBe16(p + 8);
+    pruneExpiredFramesLocked(nowMs, frameTimeoutMs);
+    g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
+    g_thermal.stats.max_in_flight_frames = std::max(g_thermal.stats.max_in_flight_frames, g_thermal.stats.in_flight_frames);
+
+    ThermalPacketHeader header{};
+    if (!parseThermalPacketHeader(payload, header)) {
+        g_thermal.stats.invalid_packets += 1;
+        maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+        return;
     }
+
+    g_thermal.stats.last_frame_id = header.frameId;
+    g_thermal.stats.last_chunk_index = header.chunkIndex;
+    g_thermal.stats.last_total_chunks = header.totalChunks;
+    g_thermal.stats.last_min_val = header.minValue;
+    g_thermal.stats.last_max_val = header.maxValue;
+
+    ThermalFrameTracker& tracker = g_thermal.in_flight_frames[header.frameId];
+    if (tracker.firstSeenAtMs == 0) {
+        tracker.firstSeenAtMs = nowMs;
+        tracker.totalChunks = header.totalChunks;
+    }
+    tracker.lastSeenAtMs = nowMs;
+    if (header.totalChunks > tracker.totalChunks) {
+        tracker.totalChunks = header.totalChunks;
+    }
+
+    const uint16_t minimumChunks = static_cast<uint16_t>(header.chunkIndex + 1);
+    if (minimumChunks > tracker.totalChunks) {
+        tracker.totalChunks = minimumChunks;
+    }
+
+    if (!tracker.uniqueChunks.insert(header.chunkIndex).second) {
+        g_thermal.stats.duplicate_chunks += 1;
+    }
+
+    if (tracker.totalChunks > 0 && tracker.uniqueChunks.size() >= tracker.totalChunks) {
+        g_thermal.stats.completed_frames += 1;
+        g_thermal.in_flight_frames.erase(header.frameId);
+    }
+
+    trimTrackedFramesLocked(maxTrackedFrames);
+    g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
+    g_thermal.stats.max_in_flight_frames = std::max(g_thermal.stats.max_in_flight_frames, g_thermal.stats.in_flight_frames);
+
+    maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+}
+
+void clearThermalFrameTrackers()
+{
+    std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+    g_thermal.in_flight_frames.clear();
+    g_thermal.last_stats_log_at_ms = 0;
+    g_thermal.stats.in_flight_frames = 0;
+
+    g_thermal.stats.last_frame_id = 0;
+    g_thermal.stats.last_chunk_index = 0;
+    g_thermal.stats.last_total_chunks = 0;
+    g_thermal.stats.last_min_val = 0;
+    g_thermal.stats.last_max_val = 0;
+    g_thermal.stats.last_sender.clear();
+    g_thermal.stats.last_packet_bytes = 0;
+    g_thermal.stats.last_packet_at_ms = 0;
+    g_thermal.stats.packets_received = 0;
+    g_thermal.stats.bytes_received = 0;
+    g_thermal.stats.invalid_packets = 0;
+    g_thermal.stats.duplicate_chunks = 0;
+    g_thermal.stats.completed_frames = 0;
+    g_thermal.stats.incomplete_frames = 0;
+    g_thermal.stats.missing_chunks = 0;
+    g_thermal.stats.evicted_frames = 0;
+    g_thermal.stats.max_in_flight_frames = 0;
+    g_thermal.stats.udp_socket_rcvbuf_bytes = 0;
 }
 
 void broadcastThermalChunk(const std::string& payload)
@@ -169,16 +412,26 @@ crow::json::wvalue makeThermalStatusJson()
     response["receiver_running"] = g_thermal.stats.receiver_running;
     response["udp_bind_host"] = g_thermal.stats.udp_bind_host;
     response["udp_port"] = g_thermal.stats.udp_port;
+    response["udp_socket_rcvbuf_bytes"] = g_thermal.stats.udp_socket_rcvbuf_bytes;
     response["ws_clients"] = g_thermal.stats.ws_clients;
     response["last_frame_id"] = static_cast<int>(g_thermal.stats.last_frame_id);
     response["last_chunk_index"] = static_cast<int>(g_thermal.stats.last_chunk_index);
     response["last_total_chunks"] = static_cast<int>(g_thermal.stats.last_total_chunks);
     response["last_min_val"] = static_cast<int>(g_thermal.stats.last_min_val);
     response["last_max_val"] = static_cast<int>(g_thermal.stats.last_max_val);
+    response["last_sender"] = g_thermal.stats.last_sender;
     response["last_packet_bytes"] = static_cast<int>(g_thermal.stats.last_packet_bytes);
     response["last_packet_at_ms"] = g_thermal.stats.last_packet_at_ms;
     response["packets_received"] = static_cast<uint64_t>(g_thermal.stats.packets_received);
     response["bytes_received"] = static_cast<uint64_t>(g_thermal.stats.bytes_received);
+    response["invalid_packets"] = static_cast<uint64_t>(g_thermal.stats.invalid_packets);
+    response["duplicate_chunks"] = static_cast<uint64_t>(g_thermal.stats.duplicate_chunks);
+    response["completed_frames"] = static_cast<uint64_t>(g_thermal.stats.completed_frames);
+    response["incomplete_frames"] = static_cast<uint64_t>(g_thermal.stats.incomplete_frames);
+    response["missing_chunks"] = static_cast<uint64_t>(g_thermal.stats.missing_chunks);
+    response["evicted_frames"] = static_cast<uint64_t>(g_thermal.stats.evicted_frames);
+    response["in_flight_frames"] = static_cast<int>(g_thermal.stats.in_flight_frames);
+    response["max_in_flight_frames"] = static_cast<int>(g_thermal.stats.max_in_flight_frames);
     response["last_error"] = g_thermal.stats.last_error;
     response["format"]["width"] = kThermalWidth;
     response["format"]["height"] = kThermalHeight;
@@ -192,6 +445,10 @@ void thermalReceiverLoop()
 {
     const std::string bind_host = envOrDefault("THERMAL_UDP_BIND_HOST", "0.0.0.0");
     const uint16_t bind_port = envPortOrDefault("THERMAL_UDP_PORT", kDefaultThermalUdpPort);
+    const int receive_buffer_bytes = envIntOrDefault("THERMAL_UDP_RCVBUF_BYTES", kDefaultUdpSocketBufferBytes);
+    const int frame_timeout_ms = envIntOrDefault("THERMAL_FRAME_TRACK_TIMEOUT_MS", kDefaultFrameTrackTimeoutMs);
+    const int max_tracked_frames = envIntOrDefault("THERMAL_MAX_TRACKED_FRAMES", kDefaultMaxTrackedFrames);
+    const int stats_log_interval_ms = envIntOrDefault("THERMAL_STATS_LOG_INTERVAL_MS", kDefaultStatsLogIntervalMs);
 
     int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
@@ -206,6 +463,7 @@ void thermalReceiverLoop()
     if (::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
         std::cerr << "[THERMAL] setsockopt(SO_REUSEADDR) failed: " << std::strerror(errno) << std::endl;
     }
+    configureReceiveBuffer(fd, receive_buffer_bytes);
 
     timeval timeout {};
     timeout.tv_sec = 0;
@@ -238,8 +496,15 @@ void thermalReceiverLoop()
         return;
     }
 
+    clearThermalFrameTrackers();
+    {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        g_thermal.stats.udp_socket_rcvbuf_bytes = querySocketBufferBytes(fd, SO_RCVBUF);
+    }
     setReceiverState(true, true, bind_host, bind_port);
-    std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port << std::endl;
+    std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port
+              << " recvbuf=" << querySocketBufferBytes(fd, SO_RCVBUF)
+              << std::endl;
 
     std::vector<char> buffer(kMaxUdpPacketBytes);
     while (true) {
@@ -274,7 +539,11 @@ void thermalReceiverLoop()
         }
 
         const std::string payload(buffer.data(), static_cast<size_t>(received));
-        updatePacketStats(payload);
+        updatePacketStats(payload,
+                          senderToString(sender),
+                          frame_timeout_ms,
+                          max_tracked_frames,
+                          stats_log_interval_ms);
         broadcastThermalChunk(payload);
     }
 
