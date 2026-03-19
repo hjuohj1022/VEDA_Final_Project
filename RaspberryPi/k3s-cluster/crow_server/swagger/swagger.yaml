@@ -454,6 +454,68 @@ paths:
             text/plain:
               example: Failed to delete user
 
+  /account/password/change:
+    post:
+      summary: Change current account password
+      description: |
+        로그인 이후(유효한 Bearer JWT) 현재 비밀번호를 검증한 뒤 새 비밀번호로 변경합니다.
+        새 비밀번호는 회원가입과 동일한 복잡도 규칙을 만족해야 합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - current_password
+                - new_password
+              properties:
+                current_password:
+                  type: string
+                  description: 현재 비밀번호
+                  example: oldpw!234
+                new_password:
+                  type: string
+                  description: 새 비밀번호(8~16자, 숫자 1개+, 특수문자 1개+, 공백 금지)
+                  example: newpw!234
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              example:
+                status: success
+                changed: true
+        '400':
+          description: Missing field or invalid new password policy
+          content:
+            text/plain:
+              examples:
+                missingField:
+                  summary: 요청 필드 누락
+                  value: current_password 또는 new_password 값이 없습니다.
+                samePassword:
+                  summary: 현재 비밀번호와 동일한 새 비밀번호
+                  value: 새 비밀번호는 현재 비밀번호와 달라야 합니다.
+        '401':
+          description: Unauthorized or current password mismatch
+          content:
+            text/plain:
+              examples:
+                unauthorized:
+                  summary: JWT 누락 또는 만료
+                  value: Unauthorized
+                invalidCurrent:
+                  summary: 현재 비밀번호 불일치
+                  value: 현재 비밀번호가 올바르지 않습니다.
+        '500':
+          description: DB update or hashing failure
+          content:
+            text/plain:
+              example: 비밀번호 변경에 실패했습니다.
+
   /recordings:
     get:
       summary: MP4 녹화 파일 목록 조회
