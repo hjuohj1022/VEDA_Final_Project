@@ -1,472 +1,175 @@
-# K3s Cluster Architecture
+### 컴포넌트 명칭
 
-`RaspberryPi/k3s-cluster`는 Raspberry Pi 4 여러 대를 K3s 클러스터로 묶고, CCTV 관제에 필요한 백엔드 서비스를 역할별로 분산 배치하기 위한 매니페스트와 구성 파일을 모아둔 디렉터리입니다. 이 문서는 각 컴포넌트가 어떤 역할을 맡고, 어떤 경로로 트래픽이 흐르며, 어떤 순서로 배포되는지를 상세히 설명합니다.
+Raspberry Pi K3s Cluster는 VEDA 시스템의 백엔드 서비스를 Raspberry Pi 기반 K3s 환경에 배포하기 위한 통합 운영 문서입니다. 이 디렉터리는 외부 진입점인 Nginx Gateway부터 Crow Server, MediaMTX, Mosquitto, MariaDB, Thermal DTLS Gateway, MetalLB, 인증서 자산까지 서비스별 배포 파일과 운영 절차를 함께 관리합니다.
 
-열화상 스트리밍 경로도 이 디렉터리 구조 안에 포함되었습니다. 현재 열화상은 `Hardware UDP ingress -> nginx UDP gateway -> crow-server ThermalProxy -> WSS -> Qt Client` 구조로 동작합니다. 열화상 프로토콜 관점의 자세한 설명은 `THERMAL_STREAMING_NETWORK_PROTOCOL.md`를 함께 참고하면 됩니다.
+**주요 환경 및 버전**
+- 운영 환경: Raspberry Pi 4 기반 K3s 클러스터
+- 배포 방식: Kubernetes Manifest, Docker 이미지 기반 배포
+- 외부 진입 포트: `443/TCP`, `8555/TCP`, `8883/TCP`, `5005/UDP`
 
-## Overview
-| Component | Role | Main Files |
-|---|---|---|
-| Nginx Gateway | 외부 진입점, TLS/mTLS 종료, HTTP/WSS/UDP 게이트웨이 | `nginx/nginx.conf`, `nginx/nginx-deployment.yaml` |
-| Crow Server | REST API, SUNAPI 프록시, MQTT 연동, CCTV 백엔드 제어, 열화상 UDP-WSS 브리지 | `crow_server/crow-server.yaml` |
-| MediaMTX | RTSP/RTSPS/HLS/WebRTC 스트리밍 및 녹화 | `mediamtx/mediamtx.yaml`, `mediamtx/mediamtx.yml` |
-| Mosquitto | MQTT 브로커, mTLS 기반 장치 인증 | `mosquitto/mqtt.yaml`, `mosquitto/mosquitto.conf` |
-| MariaDB | 사용자 및 서비스 데이터 저장 | `mariadb/mariadb-deploy.yaml`, `mariadb/mariadb-init.yaml` |
-| MetalLB | 베어메탈 환경에서 LoadBalancer IP 제공 | `metallb/metallb-config.yaml` |
-| Security Assets | Root CA, 서버/클라이언트 인증서 생성 | `security/generate_certs.sh` |
+##### 1. 컴포넌트 구성 요소 및 역할 (Component Overview & Module Map)
 
-## Architecture Diagram
+###### 아키텍처 유형 (Architectural Pattern)
+
+- **적용 유형:** Edge K3s Multi-Service Platform
+- **설명:** 이 디렉터리는 단일 애플리케이션이 아니라 여러 컨테이너형 서비스를 조합해 CCTV 제어, 열화상 수집, MQTT 장치 제어, DB 저장, 외부 TLS 진입을 제공하는 클러스터 배포 단위입니다. 서비스별 README는 개별 운영 문서 역할을 하고, 본 README는 전체 배치 구조와 배포 순서를 연결하는 허브 문서 역할을 합니다.
+
+###### 주요 구성 (Major Components)
+
+| 구성 요소 | 역할 | 문서 |
+| --- | --- | --- |
+| Crow Server | REST API, WebSocket 스트림, MQTT 브리지, SUNAPI/CCTV/Thermal 통합 | `crow_server/README.md` |
+| Nginx Gateway | HTTPS, RTSPS, MQTTS, DTLS/UDP 외부 진입점 | `nginx/README.md` |
+| Thermal DTLS Gateway | DTLS PSK 종료 후 Crow Server로 UDP 전달 | `thermal_dtls_gateway/README.md` |
+| MediaMTX | CCTV RTSP 수집, HLS/RTSP 제공, 녹화 저장 | `mediamtx/README.md` |
+| Mosquitto | 내부 MQTT 브로커 | `mosquitto/README.md` |
+| MariaDB | 계정, 인증, 복구 정보 저장소 | `mariadb/README.md` |
+| MetalLB | `LoadBalancer` 외부 IP 할당 | `metallb/README.md` |
+| Security Assets | mTLS 인증서 생성 및 Secret 매핑 가이드 | `security/README.md` |
+
+###### 모듈 상세 (Module Detail)
+
+| 디렉터리 | 상세 책임 |
+| --- | --- |
+| `crow_server/` | Crow 기반 API 서버 코드, Swagger 문서, K8s 배포 정의 |
+| `nginx/` | 외부 포트 수신, mTLS 종료, HTTP/stream 프록시 |
+| `thermal_dtls_gateway/` | OpenSSL 기반 DTLS 서버, UDP 포워딩 바이너리 |
+| `mediamtx/` | 카메라 RTSP ingest, HLS/RTSP 서비스, 녹화 경로 정의 |
+| `mosquitto/` | MQTT 브로커 설정, TLS 인증서 마운트 |
+| `mariadb/` | DB 초기화 SQL, PVC, 시크릿 기반 계정 구성 |
+| `metallb/` | 외부 IP 풀과 L2 advertisement 정의 |
+| `security/` | Nginx/MQTT/RTSPS용 CA, 서버/클라이언트 인증서 생성 |
+
+##### 2. 시스템 아키텍처 및 특징 (Architecture & Features)
+
+###### Architecture Diagram
+
 ```text
-                            External Clients / Hardware
-                  +------------------------------------------------+
-                  | Qt Client / Thermal HW / Device / CCTV / Admin |
-                  +------------------------+-----------------------+
-                                           |
-              HTTPS/WSS(443), RTSPS(8555), MQTTS(8883), UDP(5005)
-                                           |
-                                   +-------v--------+
-                                   | Nginx Gateway  |
-                                   | TLS / mTLS     |
-                                   | HTTP/WSS/UDP   |
-                                   | LoadBalancer   |
-                                   +---+--------+--------+
-                                       |        |        |
-                         HTTP proxy ----+        |        +---- UDP stream proxy
-                                                |
-                                 TCP stream proxy
-                                       |
-              +------------------------+-------------------------------+
-              |                                                        |
-     +--------v---------+                                   +----------v-------+
-     | Crow Server      |                                   | MediaMTX / MQTT  |
-     | API / Proxy      |                                   | Stream / Broker  |
-     | ThermalProxy     |                                   +-----+--------+---+
-     +---+---------+----+                                         |        |
-         |         |                                              |        +--> Mosquitto
-         |         +--> MariaDB                                   |
-         |                                                        +--> Camera RTSP ingest
-         +--> CCTV Backend (depth / inference server)
-         |
-         +--> SUNAPI camera HTTP / WebSocket proxy
-         |
-         +--> Thermal UDP recvfrom() -> WSS binary broadcast
+External Client / Device
+        |
+        | 443 HTTPS/WSS, 8555 RTSPS, 8883 MQTTS, 5005 DTLS/UDP
+        v
+   [ Nginx Gateway / LoadBalancer ]
+        |
+        +--> crow-server-service:8080/TCP
+        +--> mediamtx-service:8554/TCP, 8888/TCP
+        +--> mqtt-service:1883/TCP
+        +--> thermal-dtls-gateway-service:5005/UDP
+                         |
+                         +--> crow-server-service:5005/UDP
 
-      K3s cluster schedules these workloads across Raspberry Pi master/worker nodes.
+Internal Backends
+  - mariadb-service:3306/TCP
+  - mqtt-service:1883/TCP
+  - mediamtx-service:8554/TCP, 8888/TCP
 ```
 
-## Cluster Topology
-이 디렉터리는 단일 장비 서버가 아니라 여러 Raspberry Pi 노드를 하나의 클러스터로 운영하는 전제를 가집니다.
+###### Features
 
-- Master Node
-  K3s control plane 역할을 수행합니다.
-- Worker Node
-  실제 애플리케이션 Pod를 실행합니다.
-- Node-pinned workloads
-  일부 서비스는 `nodeSelector`로 특정 노드에 고정됩니다.
+- **기능 1:** 외부 트래픽을 Nginx Gateway 한 곳으로 집중시켜 TLS/mTLS와 라우팅 정책을 일관되게 적용합니다.
+- **기능 2:** Crow Server가 계정, CCTV, 열화상, MQTT 제어를 단일 API 계층으로 통합합니다.
+- **기능 3:** MediaMTX가 RTSP ingest와 녹화 저장을 담당하고, Nginx가 이를 RTSPS/HLS로 외부에 노출합니다.
+- **기능 4:** Thermal DTLS Gateway가 DTLS PSK 기반 센서 통신을 복호화해 Crow Server로 전달합니다.
+- **기능 5:** Mosquitto가 모터, 레이저, ESP32 상태 제어를 위한 MQTT 허브 역할을 합니다.
+- **기능 6:** MetalLB와 Security 자산이 외부 접속성과 인증서 신뢰 체인을 지원합니다.
 
-현재 매니페스트 기준 예시:
-- `crow_server`는 `pi-worker1`에 고정
-- `mediamtx`는 `pi-worker1`에 고정
-- `mariadb`는 `pi-worker2`에 고정
+##### 3. 개발 환경 구축 및 의존성 (Requirements & Dependencies)
 
-이 구조는 기능별 책임을 분리해 CPU, 네트워크, 스토리지 부하를 한 장비에 몰지 않도록 하는 데 목적이 있습니다.
+###### Requirements
 
-## Service Responsibilities
-### Nginx Gateway
-`nginx`는 외부에서 들어오는 모든 주요 트래픽의 진입점입니다.
+- **클러스터:** K3s가 설치된 Raspberry Pi 노드
+- **도구:** `kubectl`, `docker` 또는 이미지 레지스트리 접근 권한, `openssl`
+- **사전 준비:** MetalLB 설치, 기본 `default` 네임스페이스 사용, 서비스별 Secret 준비
 
-- `443/tcp`
-  HTTPS 및 WebSocket 요청 수신
-- `5005/udp`
-  열화상 raw frame ingress 수신 및 내부 UDP 프록시
-- `8554/tcp`
-  내부 RTSP 프록시
-- `8555/tcp`
-  mTLS 기반 RTSPS 프록시
-- `8883/tcp`
-  mTLS 기반 MQTTS 프록시
+###### 경로 및 설정 (Path Configurations)
 
-`nginx/nginx.conf` 기준 주요 역할:
-- HTTP 80 포트를 443으로 리다이렉트
-- `/` 요청을 `crow-server-service:8080`으로 프록시
-- `/thermal/stream` WebSocket upgrade 요청을 Crow Server로 프록시
-- `/sunapi/` 및 `/sunapi/StreamingServer` 요청을 Crow Server로 프록시
-- `/hls/` 요청을 `mediamtx-service:8888`로 프록시
-- 외부 `5005/UDP`를 내부 `crow-server-service:5005/UDP`로 프록시
-- `8554` RTSP 트래픽을 MediaMTX로 포워딩
-- `8883` MQTTS 트래픽을 Mosquitto로 포워딩
+- **핵심 배포 파일**
+  - `metallb/metallb-config.yaml`
+  - `mariadb/mariadb-deploy.yaml`
+  - `mosquitto/mqtt.yaml`
+  - `mediamtx/mediamtx.yaml`
+  - `crow_server/crow-server.yaml`
+  - `thermal_dtls_gateway/thermal-dtls-gateway.yaml`
+  - `thermal_dtls_gateway/thermal-dtls-networkpolicy.yaml`
+  - `nginx/nginx-deployment.yaml`
+- **사전 생성 권장 Secret**
+  - `mariadb-secret`
+  - `mqtt-certs`
+  - `nginx-certs`
+  - `mtls-ca`
+  - `crow-sunapi-secret`
+  - `thermal-dtls-secret`
+  - `crow-certs`
+- **호스트 경로 주의사항**
+  - `/home/pi/cctv-recordings`는 MediaMTX와 Crow Server에서 함께 참조할 수 있어야 합니다.
 
-보안 관점에서 Nginx는 다음을 수행합니다.
-- 서버 인증서 적용
-- Root CA 기반 클라이언트 인증서 검증
-- `ssl_verify_client on`을 통한 mTLS 강제
-- 장치 식별 결과를 `X-Device-Verify`, `X-Device-ID` 헤더로 내부 서비스에 전달
+###### Dependency Setup
 
-### Crow Server
-`crow_server`는 애플리케이션 레벨 제어 서버입니다.
-
-주요 역할:
-- REST API 제공
-- SUNAPI HTTP 프록시
-- SUNAPI WebSocket 프록시
-- MQTT 브로커와 연동
-- CCTV 백엔드 서버와 연동
-- 열화상 제어 API 제공
-- 열화상 UDP 수신 및 WSS binary 브로드캐스트
-- DB 조회 및 사용자 데이터 처리
-
-`crow_server/crow-server.yaml` 기준 의존성:
-- DB: `mariadb-service`
-- SUNAPI 설정: `crow-sunapi-config`, `crow-sunapi-secret`
-- CCTV 백엔드 설정: `crow-cctv-ip-config`
-- 인증서: `crow-certs`
-- 녹화 디렉터리 공유: `/home/pi/cctv-recordings`
-
-즉, Crow Server는 클러스터 내부 서비스와 외부 CCTV/카메라 제어 계층을 연결하는 중앙 백엔드 역할을 맡습니다.
-이번 작업 기준으로는 `ThermalProxy`가 추가되어, 열화상에 대해서는 `POST /thermal/control/start`, `POST /thermal/control/stop`, `GET /thermal/status`, `WS /thermal/stream` 경로를 제공하고 UDP payload를 WSS로 중계합니다.
-
-### MediaMTX
-`mediamtx`는 스트리밍 허브입니다.
-
-주요 기능:
-- 카메라 RTSP 소스를 받아 내부 재배포
-- `main`, `sub` 스트림 분리
-- 녹화 파일 생성
-- HLS/WebRTC/RTSP/RTSPS 제공
-
-`mediamtx/mediamtx.yaml` 기준 특징:
-- 채널 `0~3`에 대해 `main`, `sub` 스트림 정의
-- `runOnInit`에서 FFmpeg로 카메라 스트림을 pull
-- `main` 스트림은 녹화 활성화
-- 녹화 파일은 `/recordings/%path_%Y-%m-%d_%H-%M-%S`
-- 인증서 적용 시 `8555` RTSPS 제공
-- Service 타입은 `LoadBalancer`
-
-외부 접근 경로:
-- Nginx 경유 HLS: `https://<LB_IP>/hls/...`
-- 직접 RTSP: `<LB_IP>:8554`
-- 직접 RTSPS: `<LB_IP>:8555`
-
-### Mosquitto
-`mosquitto`는 장치 이벤트와 서버 간 메시징을 담당합니다.
-
-설정 특징:
-- `1883`: 클러스터 내부 비암호화 MQTT
-- `8883`: 인증서 기반 MQTT over TLS
-- `require_certificate true`
-- `use_identity_as_username true`
-
-즉, 외부 장치가 MQTT에 접근할 때는 단순 계정/비밀번호가 아니라 클라이언트 인증서 자체를 식별자로 사용하는 구조입니다.
-
-### MariaDB
-`mariadb`는 영속 데이터 저장소입니다.
-
-`mariadb/mariadb-deploy.yaml` 기준:
-- `pi-worker2`에 고정 배치
-- `local-path` 스토리지를 사용하는 PVC 연결
-- 기본 DB 이름: `veda_db`
-- 기본 애플리케이션 사용자: `veda_user`
-- 초기 SQL은 `mariadb-init.yaml`에서 주입
-
-초기화 스크립트에는 현재 `users` 테이블 생성과 테스트 계정 삽입이 포함되어 있습니다.
-
-### MetalLB
-베어메탈 K3s 환경에서는 클라우드 LoadBalancer가 없으므로 `metallb`로 외부 IP를 제공합니다.
-
-`metallb/metallb-config.yaml` 기준:
-- IP 풀: `192.168.55.200-192.168.55.210`
-
-이 IP 대역에서 `nginx-service`, `mediamtx-service` 같은 `LoadBalancer` 타입 서비스가 외부 IP를 할당받습니다.
-
-## Traffic Flows
-### 1. API / WebSocket
-1. 외부 클라이언트가 `https://<LB_IP>/...`로 접속합니다.
-2. Nginx가 TLS/mTLS를 종료합니다.
-3. 요청을 `crow-server-service:8080`으로 프록시합니다.
-4. Crow Server가 DB, MQTT, CCTV 백엔드와 연동해 응답합니다.
-
-### 2. Thermal Streaming
-1. Qt 클라이언트가 `POST /thermal/control/start`를 호출합니다.
-2. Nginx가 HTTPS 요청을 `crow-server-service:8080`으로 프록시합니다.
-3. Crow Server의 `ThermalProxy`가 JWT를 검증하고 열화상 receiver 상태를 준비합니다.
-4. Qt 클라이언트가 `wss://<LB_IP>/thermal/stream`으로 연결합니다.
-5. Nginx가 `/thermal/stream` WebSocket upgrade를 Crow Server로 전달합니다.
-6. 하드웨어는 `nginx-service external IP:5005/UDP`로 열화상 chunk를 전송합니다.
-7. Nginx stream proxy가 내부 `crow-server-service:5005/UDP`로 전달합니다.
-8. Crow Server가 UDP datagram을 수신하고 그대로 WebSocket binary message로 브로드캐스트합니다.
-9. Qt 클라이언트가 frame 단위로 chunk를 재조립해 열화상 화면을 표시합니다.
-
-### 3. SUNAPI Proxy
-1. 클라이언트가 `/sunapi/...` 또는 `/sunapi/StreamingServer`로 요청합니다.
-2. Nginx가 장치 인증 결과를 헤더에 포함해 Crow Server로 전달합니다.
-3. Crow Server가 카메라 SUNAPI HTTP/WebSocket으로 중계합니다.
-
-### 4. Streaming
-1. MediaMTX가 카메라 RTSP를 FFmpeg로 ingest합니다.
-2. 내부에서 `main/sub` 경로로 재게시합니다.
-3. 외부 사용자는 Nginx 또는 MediaMTX Service를 통해 스트림에 접근합니다.
-4. `main` 스트림은 녹화 파일을 `/recordings`에 저장합니다.
-
-### 5. MQTT
-1. 장치 또는 클라이언트가 `8883`으로 접속합니다.
-2. Nginx가 mTLS를 검증합니다.
-3. 트래픽을 내부 `mqtt-service:1883`으로 포워딩합니다.
-4. Mosquitto가 메시지를 중계합니다.
-5. Crow Server는 내부 브로커에 클라이언트로 붙어 이벤트를 처리합니다.
-
-## Storage Model
-현재 저장소/매니페스트 기준으로 스토리지는 두 종류가 섞여 있습니다.
-
-- `local-path` PVC
-  MariaDB와 MediaMTX용 PVC 정의가 있습니다.
-- `hostPath`
-  Crow Server와 MediaMTX는 `/home/pi/cctv-recordings`를 직접 마운트합니다.
-
-주의할 점:
-- `hostPath`는 특정 노드 로컬 디스크에 강하게 결합됩니다.
-- Pod가 다른 노드로 이동하면 데이터 경로가 달라질 수 있습니다.
-- 그래서 현재 매니페스트는 `nodeSelector`와 함께 사용하는 구조입니다.
-
-## Security Model
-`security/generate_certs.sh`는 다음 인증서를 생성합니다.
-
-- Root CA
-- Nginx 서버 인증서
-- CCTV 장치용 클라이언트 인증서
-- STM32 장치용 클라이언트 인증서
-- Qt 클라이언트용 인증서
-
-보안 흐름:
-- Nginx는 서버 인증서를 제시합니다.
-- 클라이언트는 Root CA로 서명된 인증서를 제시해야 합니다.
-- MQTTS, RTSPS, HTTPS 모두 mTLS 적용 대상이 될 수 있습니다.
-- 내부 서비스는 ClusterIP로 숨겨 외부 직접 접근을 제한합니다.
-
-열화상 스트리밍 관련 추가 유의점:
-- Qt와 Crow Server 사이의 열화상 제어/스트림은 `HTTPS/WSS` 위에서 JWT 및 TLS 보호를 받습니다.
-- 반면 하드웨어에서 유입되는 `5005/UDP` thermal ingress는 HTTP 계층 인증이 없으므로, 송신 IP 제한이나 별도 네트워크 격리가 중요합니다.
-- 이번 구조에서는 외부 공개 포트를 `nginx` 하나로 모았지만, UDP는 애플리케이션 레벨 인증 대신 네트워크 정책으로 제어하는 것이 핵심입니다.
-
-운영 시 유의점:
-- 현재 `security/certs/`에 실제 인증서 파일이 존재합니다.
-- 실서비스에서는 민감 파일을 저장소에 직접 두지 않고 Kubernetes Secret 또는 외부 비밀 관리 체계로 옮기는 편이 안전합니다.
-
-## Deployment Order
-권장 배포 순서는 다음과 같습니다.
-
-1. K3s 클러스터와 기본 네트워크를 준비합니다.
-2. MetalLB를 설치하고 IP 풀을 적용합니다.
-3. 인증서와 Secret, ConfigMap을 준비합니다.
-4. MariaDB PVC, init ConfigMap, Secret, Deployment를 배포합니다.
-5. Mosquitto ConfigMap, Secret, Deployment를 배포합니다.
-6. MediaMTX ConfigMap, Secret, Deployment를 배포합니다.
-7. Crow Server용 ConfigMap, Secret, Deployment를 배포합니다.
-8. Nginx Gateway Deployment와 Service를 배포합니다.
-9. 외부 IP가 할당되면 HTTPS, WSS, MQTTS, RTSPS, thermal `5005/UDP` 동작을 점검합니다.
-
-## Operational Procedure
-아래 절차는 현재 저장소에 있는 매니페스트 기준으로 클러스터를 실제 배포할 때 사용할 수 있는 예시입니다. 운영 환경에 맞게 IP, 계정, 인증서 파일명은 반드시 교체해야 합니다.
-
-### 1. Prerequisites
-- K3s 클러스터가 준비되어 있어야 합니다.
-- `kubectl`이 현재 클러스터를 가리켜야 합니다.
-- MetalLB가 설치 가능해야 합니다.
-- 각 워커 노드의 hostname이 매니페스트의 `nodeSelector`와 일치해야 합니다.
-- 인증서 파일이 `RaspberryPi/k3s-cluster/security/certs/` 아래에 준비되어 있어야 합니다.
-
-기본 확인:
-```bash
-kubectl get nodes -o wide
-kubectl get pods -A
-```
-
-### 2. MetalLB Apply
-먼저 LoadBalancer IP를 줄 수 있도록 MetalLB를 준비합니다.
-
-```bash
-kubectl apply -f RaspberryPi/k3s-cluster/metallb/metallb-config.yaml
-```
-
-적용 후 확인:
-```bash
-kubectl get ipaddresspools.metallb.io -A
-kubectl get l2advertisements.metallb.io -A
-```
-
-### 3. Certificates And Secrets
-인증서가 없다면 먼저 생성합니다.
+권장 사전 작업 순서는 다음과 같습니다.
 
 ```bash
 cd RaspberryPi/k3s-cluster/security
-chmod +x ./generate_certs.sh
-SERVER_DNS=<LB_DNS_OR_IP> SERVER_IP=<LB_IP> ./generate_certs.sh
-cd ../../..
+chmod +x generate_certs.sh
+./generate_certs.sh
 ```
 
-다음 Secret들이 필요합니다.
-- `nginx-certs`
-- `mtls-ca`
-- `mqtt-certs`
-- `crow-certs`
-- `mariadb-secret`
-- `crow-sunapi-secret`
+이후 서비스별 Secret과 ConfigMap 값을 실제 운영 환경에 맞게 준비한 뒤 Kubernetes manifest를 적용합니다.
 
-파일 기반 Secret 생성 예시:
-```bash
-kubectl create secret generic nginx-certs \
-  --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
-  --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key
+##### 4. 설정 가이드 (Configuration)
 
-kubectl create secret generic mtls-ca \
-  --from-file=rootCA.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt
+###### 설정 파일명 1: `metallb/metallb-config.yaml`
 
-kubectl create secret generic mqtt-certs \
-  --from-file=ca.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
-  --from-file=server.crt=RaspberryPi/k3s-cluster/security/certs/server.crt \
-  --from-file=server.key=RaspberryPi/k3s-cluster/security/certs/server.key
+- `192.168.55.200-192.168.55.210` 범위의 외부 IP 풀 정의
+- `nginx-service`의 `LoadBalancer` 외부 IP 할당 기반 제공
 
-kubectl create secret generic crow-certs \
-  --from-file=rootCA.crt=RaspberryPi/k3s-cluster/security/certs/rootCA.crt \
-  --from-file=cctv.crt=RaspberryPi/k3s-cluster/security/certs/cctv.crt \
-  --from-file=cctv.key=RaspberryPi/k3s-cluster/security/certs/cctv.key
-```
+###### 설정 파일명 2: 서비스별 배포 manifest
 
-문자열 기반 Secret 생성 예시:
-```bash
-kubectl create secret generic mariadb-secret \
-  --from-literal=root-password='<DB_ROOT_PASSWORD>' \
-  --from-literal=user-password='<DB_USER_PASSWORD>'
+- `mariadb/mariadb-deploy.yaml`: DB Deployment, Service
+- `mosquitto/mqtt.yaml`: ConfigMap, Deployment, Service
+- `mediamtx/mediamtx.yaml`: ConfigMap, Deployment, Service
+- `crow_server/crow-server.yaml`: Crow Server Deployment, Service
+- `thermal_dtls_gateway/thermal-dtls-gateway.yaml`: DTLS Gateway Deployment, Service
+- `nginx/nginx-deployment.yaml`: Nginx Deployment, `LoadBalancer` Service
 
-kubectl create secret generic crow-sunapi-secret \
-  --from-literal=SUNAPI_USER='<CAMERA_USER>' \
-  --from-literal=SUNAPI_PASSWORD='<CAMERA_PASSWORD>'
-```
+###### 보안 및 통신 설정
 
-기존 example YAML을 복사해 적용하는 방식도 가능합니다.
-- `RaspberryPi/k3s-cluster/mariadb/mariadb-secret.example.yaml`
-- `RaspberryPi/k3s-cluster/crow_server/crow-sunapi-secret.example.yaml`
+- 외부 공개 포트: `443/TCP`, `8555/TCP`, `8883/TCP`, `5005/UDP`
+- 내부 서비스 포트: `8080/TCP`, `3306/TCP`, `1883/TCP`, `8554/TCP`, `8888/TCP`, `5005/UDP`
+- 인증서 생성은 `security/generate_certs.sh` 기준으로 관리
+- MQTT, HTTPS, RTSPS는 인증서 기반 보호를 전제로 운영
 
-### 4. ConfigMaps
-현재 매니페스트 기준으로 별도 준비가 필요한 ConfigMap은 다음과 같습니다.
-- `crow-sunapi-config`
-- `crow-cctv-ip-config`
-- `mariadb-init-sql`
-- `mediamtx-config`
-- `mosquitto-config`
+##### 5. 빌드 및 정적 분석 (Build & Static Analysis)
 
-`mariadb-init-sql`, `mediamtx-config`, `mosquitto-config`는 각 YAML 내부에 이미 포함되어 있어 `kubectl apply` 시 함께 생성됩니다.
+###### Build Process
 
-운영 환경 값으로 교체가 필요한 ConfigMap은 예제 파일을 복사해 적용하는 방식이 가장 안전합니다.
+이 디렉터리 자체에는 단일 바이너리 빌드 과정이 없고, 서비스별 이미지와 manifest 적용으로 운영합니다. 서비스별 이미지를 로컬에서 다시 빌드해야 한다면 각 하위 디렉터리의 `Dockerfile`을 사용합니다.
 
 예시:
-```bash
-cp RaspberryPi/k3s-cluster/crow_server/crow-sunapi-config.example.yaml /tmp/crow-sunapi-config.yaml
-cp RaspberryPi/k3s-cluster/crow_server/crow-cctv-ip-config.example.yaml /tmp/crow-cctv-ip-config.yaml
-```
-
-교체해야 하는 값:
-- `SUNAPI_BASE_URL`
-- `SUNAPI_WS_URL`
-- `SUNAPI_INSECURE`
-- `SUNAPI_TIMEOUT_MS`
-- `CCTV_BACKEND_HOST`
-- `CCTV_BACKEND_PORT`
-
-적용:
-```bash
-kubectl apply -f /tmp/crow-sunapi-config.yaml
-kubectl apply -f /tmp/crow-cctv-ip-config.yaml
-```
-
-직접 명령으로 생성하는 예시:
-```bash
-kubectl create configmap crow-sunapi-config \
-  --from-literal=SUNAPI_BASE_URL='https://<CAMERA_HOST>' \
-  --from-literal=SUNAPI_WS_URL='ws://<CAMERA_HOST>/StreamingServer' \
-  --from-literal=SUNAPI_INSECURE='true' \
-  --from-literal=SUNAPI_TIMEOUT_MS='12000'
-
-kubectl create configmap crow-cctv-ip-config \
-  --from-literal=CCTV_BACKEND_HOST='<CCTV_BACKEND_IP>' \
-  --from-literal=CCTV_BACKEND_PORT='9090'
-```
-
-### 5. Database Apply
-MariaDB부터 올리는 것이 안전합니다.
 
 ```bash
-kubectl apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-pvc.yaml
-kubectl apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml
-kubectl apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
+docker build -t local/nginx-gateway:dev RaspberryPi/k3s-cluster/nginx
+docker build -t local/mqtt-broker:dev RaspberryPi/k3s-cluster/mosquitto
+docker build -t local/thermal-dtls-gateway:dev RaspberryPi/k3s-cluster/thermal_dtls_gateway
 ```
 
-확인:
-```bash
-kubectl get pvc
-kubectl get pods -l app=mariadb -o wide
-kubectl get svc mariadb-service
-```
+###### Static Analysis
 
-### 6. MQTT Apply
-```bash
-kubectl apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml
-```
+- `kubectl apply --dry-run=client -f <manifest>`
+- 서비스별 YAML 문법 검토
+- 노드 고정(`nodeSelector`)과 Secret 이름 일치 여부 검토
 
-확인:
-```bash
-kubectl get pods -l app=mqtt -o wide
-kubectl get svc mqtt-service
-```
-
-### 7. Streaming Apply
-`mediamtx.yaml` 안에는 ConfigMap, Deployment, Service가 같이 포함되어 있습니다.
+예시:
 
 ```bash
-kubectl apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
+kubectl apply --dry-run=client -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
+kubectl apply --dry-run=client -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-gateway.yaml
 ```
 
-확인:
-```bash
-kubectl get pods -l app=mediamtx -o wide
-kubectl get svc mediamtx-service
-```
+##### 6. 테스트 및 실행 (Test & Run)
 
-### 8. Crow Server Apply
-Crow Server는 DB, SUNAPI ConfigMap, CCTV backend ConfigMap, 인증서 Secret이 준비된 뒤 배포해야 합니다.
+###### Run (실행 방법)
 
-```bash
-kubectl apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
-```
-
-확인:
-```bash
-kubectl get pods -l app=crow-server -o wide
-kubectl get svc crow-server-service
-```
-
-열화상 기능이 포함된 현재 매니페스트에서는 `crow-server-service`가 내부 `8080/TCP`뿐 아니라 `5005/UDP`도 함께 노출합니다.
-
-### 9. Nginx Gateway Apply
-마지막으로 외부 진입점을 올립니다.
-
-```bash
-kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
-```
-
-확인:
-```bash
-kubectl get pods -l app=nginx-gateway -o wide
-kubectl get svc nginx-service
-```
-
-`nginx-service`가 `LoadBalancer` 타입이므로 외부 IP가 붙는지 확인합니다. 현재 구조에서는 외부 클라이언트의 `443/TCP`와 하드웨어 열화상 입력용 `5005/UDP` 모두 이 게이트웨이를 통해 들어옵니다.
-
-주의:
-- `nginx.conf`는 현재 ConfigMap 마운트가 아니라 이미지 안에 포함되는 구조이므로, 설정을 바꿨다면 단순 `kubectl apply`만으로는 반영되지 않을 수 있습니다.
-- `/thermal/stream` WebSocket 또는 `5005/UDP` 라우팅을 수정했다면 `nginx-gateway` 이미지를 다시 빌드하고 배포하는 절차가 필요할 수 있습니다.
-
-### 10. Full Apply Example
-한 번에 순서대로 적용하는 예시는 다음과 같습니다.
+권장 배포 순서는 다음과 같습니다.
 
 ```bash
 kubectl apply -f RaspberryPi/k3s-cluster/metallb/metallb-config.yaml
@@ -478,93 +181,67 @@ kubectl apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
+kubectl apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-gateway.yaml
+kubectl apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-networkpolicy.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 ```
 
-### 11. Post-Deployment Checks
-전체 상태 확인:
-```bash
-kubectl get pods -o wide
-kubectl get svc
-kubectl get endpoints
-```
+###### Test (검증 방법)
 
-로그 확인:
-```bash
-kubectl logs deploy/mariadb
-kubectl logs deploy/mqtt-broker
-kubectl logs deploy/mediamtx-server
-kubectl logs deploy/crow-server
-kubectl logs deploy/nginx-gateway
-```
+- `kubectl get pods -o wide`
+- `kubectl get svc`
+- `curl --cert client-qt.crt --key client-qt.key --cacert rootCA.crt https://<LB_IP>/health`
+- `GET /laser/status`, `GET /thermal/status` 확인
+- `openssl s_client -connect <LB_IP>:8883 -cert client-qt.crt -key client-qt.key -CAfile rootCA.crt`
 
-외부 접근 점검 예시:
-```bash
-curl -vk https://<LB_IP>/
-openssl s_client -connect <LB_IP>:8883 -cert client-qt.crt -key client-qt.key -CAfile rootCA.crt
-openssl s_client -connect <LB_IP>:8555 -cert client-qt.crt -key client-qt.key -CAfile rootCA.crt
-```
+##### 7. 통신 프로토콜 및 제어 로직 (Control Lifecycle & Protocol)
 
-열화상 기능 점검 예시:
-- `POST /thermal/control/start`가 `202`를 반환하는지 확인합니다.
-- nginx access log에서 `GET /thermal/stream HTTP/1.1" 101`이 보이는지 확인합니다.
-- `GET /thermal/status`에서 `udp_bound=true`, `ws_clients > 0`, `packets_received` 증가 여부를 확인합니다.
-- 하드웨어가 `nginx-service external IP:5005/UDP`로 전송하는지 확인합니다.
+###### Control Lifecycle
 
-### 12. Update And Restart
-설정 변경 후 재적용:
-```bash
-kubectl apply -f <updated-yaml>
-```
+- **Start:** MetalLB와 인증서 준비 후 DB, MQTT, MediaMTX, Crow, Thermal Gateway, Nginx 순으로 올립니다.
+- **Steady State:** 외부 HTTPS/WSS, RTSPS, MQTTS, DTLS/UDP 요청이 Nginx를 통해 내부 서비스로 분기됩니다.
+- **Device Control:** Crow Server가 `motor/control`, `laser/control`, `system/control` 등 MQTT 토픽에 명령을 publish합니다.
+- **Streaming:** 열화상은 DTLS/UDP -> Thermal Gateway -> Crow Server -> WebSocket으로, CCTV는 RTSP -> MediaMTX -> RTSPS/HLS로 전달됩니다.
 
-열화상 관련 주의:
-- `crow-server.yaml` 변경은 일반적인 `kubectl apply`와 rollout restart로 반영 가능합니다.
-- `nginx/nginx.conf` 변경은 이미지 재빌드가 필요할 수 있으므로, 운영 절차에서 별도로 관리하는 편이 안전합니다.
+###### Command Reference
 
-강제 재시작:
-```bash
-kubectl rollout restart deploy/mariadb
-kubectl rollout restart deploy/mqtt-broker
-kubectl rollout restart deploy/mediamtx-server
-kubectl rollout restart deploy/crow-server
-kubectl rollout restart deploy/nginx-gateway
-```
+| 구분 | 명령/경로 | 설명 |
+| --- | --- | --- |
+| 배포 | `kubectl apply -f .../metallb-config.yaml` | 외부 IP 풀 준비 |
+| 배포 | `kubectl apply -f .../crow-server.yaml` | API 서버 배포 |
+| 상태 확인 | `kubectl get svc nginx-service` | 외부 IP 할당 확인 |
+| API | `GET /health` | Crow Server 헬스체크 |
+| API | `GET /laser/status` | MQTT 레이저 브리지 상태 |
+| API | `GET /thermal/status` | 열화상 UDP 수신 상태 |
 
-롤아웃 상태 확인:
-```bash
-kubectl rollout status deploy/mariadb
-kubectl rollout status deploy/mqtt-broker
-kubectl rollout status deploy/mediamtx-server
-kubectl rollout status deploy/crow-server
-kubectl rollout status deploy/nginx-gateway
-```
+###### Stream/Data Format
 
-## Directory Layout
-```text
-RaspberryPi/k3s-cluster/
-  README.md
-  THERMAL_STREAMING_NETWORK_PROTOCOL.md
-  crow_server/
-    crow-server.yaml
-    Dockerfile
-    swagger/
-  mariadb/
-    mariadb-deploy.yaml
-    mariadb-init.yaml
-    mariadb-pvc.yaml
-  mediamtx/
-    mediamtx.yaml
-    mediamtx.yml
-    recording-pvc.yaml
-  mosquitto/
-    mqtt.yaml
-    mosquitto.conf
-  nginx/
-    nginx.conf
-    nginx-deployment.yaml
-  metallb/
-    metallb-config.yaml
-  security/
-    generate_certs.sh
-    certs/
-```
+| 흐름 | 프로토콜 | 데이터 형식 |
+| --- | --- | --- |
+| REST/API | HTTPS | JSON |
+| 장치 제어 | MQTT/MQTTS | ASCII 명령 문자열 |
+| CCTV 스트림 | RTSP, RTSPS, HLS | 영상 스트림 |
+| 열화상 센서 | DTLS/UDP | 바이너리 thermal frame payload |
+
+##### 8. 문제 해결 및 운영 체크리스트 (Troubleshooting & Checklist)
+
+###### Troubleshooting
+
+| 증상 | 원인 | 해결책 |
+| --- | --- | --- |
+| `nginx-service`에 `EXTERNAL-IP`가 없음 | MetalLB 미설치 또는 IP 풀 문제 | `metallb-system` 상태와 `metallb-config.yaml` 확인 |
+| `https://<LB_IP>/health` 실패 | Nginx Secret 또는 Crow upstream 문제 | `nginx-certs`, `mtls-ca`, `crow-server` Pod 상태 확인 |
+| `GET /laser/status`에서 브로커 미연결 | Mosquitto 또는 Crow MQTT 설정 문제 | `mqtt-service`, `MQTT_HOST`, `MQTT_PORT` 확인 |
+| HLS/RTSPS 스트림 실패 | MediaMTX ingest 또는 Nginx 프록시 문제 | `CAMERA_*` 값, MediaMTX 로그, Nginx stream 설정 확인 |
+| 열화상 수신 없음 | DTLS Secret, Nginx UDP, Crow UDP 바인드 문제 | `thermal-dtls-secret`, `thermal-dtls-gateway`, Crow thermal 상태 확인 |
+
+###### Operational Checklist
+
+- MetalLB가 설치되어 있고 IP 풀 범위가 네트워크와 충돌하지 않는가
+- `mariadb-secret`, `mqtt-certs`, `nginx-certs`, `mtls-ca`, `thermal-dtls-secret`, `crow-certs`가 준비되었는가
+- `pi-master`, `pi-worker1`, `pi-worker2` 노드명이 manifest의 `nodeSelector`와 일치하는가
+- `/home/pi/cctv-recordings` 경로가 쓰기 가능한가
+- `GET /health`, `GET /docs`, `GET /laser/status`, `GET /thermal/status`가 정상 응답하는가
+
+**작성자:** VEDA Team  
+**마지막 업데이트:** 2026-03-19
