@@ -75,6 +75,8 @@ struct BackendPrivate
     bool m_twoFactorDisableInProgress = false;
     QPointer<QNetworkReply> m_accountDeleteReply;
     bool m_accountDeleteInProgress = false;
+    QPointer<QNetworkReply> m_passwordChangeReply;
+    bool m_passwordChangeInProgress = false;
     QPointer<QNetworkReply> m_registerReply;
     bool m_registerInProgress = false;
 

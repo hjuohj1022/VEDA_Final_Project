@@ -68,6 +68,11 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
     }
     state->m_accountDeleteReply = nullptr;
     state->m_accountDeleteInProgress = false;
+    if (state->m_passwordChangeReply && state->m_passwordChangeReply->isRunning()) {
+        state->m_passwordChangeReply->abort();
+    }
+    state->m_passwordChangeReply = nullptr;
+    state->m_passwordChangeInProgress = false;
     if (state->m_thermalStartReply && state->m_thermalStartReply->isRunning()) {
         state->m_thermalStartReply->abort();
     }

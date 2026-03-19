@@ -18,7 +18,7 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
     const QString date = dateText.trimmed();
     const QString time = timeText.trimmed();
     if (channelIndex < 0 || date.isEmpty() || time.isEmpty()) {
-        emit backend->playbackPrepareFailed("Playback URL ?앹꽦 ?ㅽ뙣: 梨꾨꼸/?좎쭨/?쒓컙 ?뺤떇???뺤씤??二쇱꽭??");
+        emit backend->playbackPrepareFailed("Playback URL 생성 실패: 채널/날짜/시간 형식을 확인해 주세요.");
         return;
     }
 
@@ -37,7 +37,7 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
 
     QObject::connect(sessionReply, &QNetworkReply::finished, backend, [backend, state, sessionReply]() {
         if (sessionReply->error() != QNetworkReply::NoError) {
-            const QString err = QString("Playback 以鍮??ㅽ뙣: %1").arg(sessionReply->errorString());
+            const QString err = QString("Playback 준비 실패: %1").arg(sessionReply->errorString());
             sessionReply->deleteLater();
             emit backend->playbackPrepareFailed(err);
             return;
@@ -70,7 +70,7 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
         }
 
         if (digestUriText.isEmpty()) {
-            emit backend->playbackPrepareFailed("Playback 以鍮??ㅽ뙣: RTSP URI ?꾨씫");
+            emit backend->playbackPrepareFailed("Playback 준비 실패: RTSP URI 누락");
             return;
         }
 
@@ -82,15 +82,15 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
 
         if (wsEnabled) {
             if (realm.isEmpty() || nonce.isEmpty()) {
-                emit backend->playbackPrepareFailed("Playback WS 以鍮??ㅽ뙣: Digest challenge 媛믪씠 鍮꾩뼱 ?덉뒿?덈떎.");
+                emit backend->playbackPrepareFailed("Playback WS 준비 실패: Digest challenge 값이 비어 있습니다.");
                 return;
             }
             if (wsDigestResponse.isEmpty()) {
-                emit backend->playbackPrepareFailed("Playback WS 以鍮??ㅽ뙣: digest Response 媛믪씠 鍮꾩뼱 ?덉뒿?덈떎.");
+                emit backend->playbackPrepareFailed("Playback WS 준비 실패: digest Response 값이 비어 있습니다.");
                 return;
             }
             if (wsUser.isEmpty()) {
-                emit backend->playbackPrepareFailed("Playback WS 以鍮??ㅽ뙣: digest ?ъ슜???뺣낫媛 鍮꾩뼱 ?덉뒿?덈떎.");
+                emit backend->playbackPrepareFailed("Playback WS 준비 실패: digest 사용자 정보가 비어 있습니다.");
                 return;
             }
 
@@ -199,4 +199,5 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
         }
     });
 }
+
 

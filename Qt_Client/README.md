@@ -147,6 +147,21 @@
   - Windows API 기반 실제 키보드 상태 조회 사용
 - `Clear`, `Back to Sign In` 버튼 텍스트 대비를 높여 가독성 개선
 
+### 6-3. 로그인 후 비밀번호 변경
+- 우측 상단 프로필 메뉴에서 `비밀번호 변경` 버튼으로 다이얼로그 오픈
+- 다이얼로그 입력 항목
+  - `현재 비밀번호`, `새 비밀번호`
+  - 각 입력칸 표시/숨김(눈 아이콘) 토글 지원
+- 클라이언트 사전 검증
+  - 현재/새 비밀번호 빈 값 차단
+  - 현재/새 비밀번호 동일 입력 차단
+  - 새 비밀번호 복잡도 검증(8~16자, 숫자 1개 이상, 특수문자 1개 이상, 공백 불가)
+- 서버 연동
+  - `POST /account/password/change`
+  - 성공 시 다이얼로그 닫힘 + 성공 상태 표시
+  - 실패 시 서버 응답/네트워크 상태에 따라 오류 문구 표시
+- 로그아웃/세션 종료 시 비밀번호 변경 진행 요청은 안전하게 중단 처리
+
 ### 7. 클라이언트 사양(System Specs) 팝업
 - 헤더 좌측 홈 아이콘 클릭 시 클라이언트 사양 다이얼로그 표시
 - 홈 아이콘 툴팁 문구: `클라이언트 사양`
@@ -315,6 +330,7 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/2fa/setup/confirm` | OTP 등록 완료(첫 OTP 검증) |
 | `POST` | `/2fa/disable` | 현재 OTP로 2FA 비활성화 |
 | `POST` | `/account/delete` | 비밀번호 재입력 기반 회원탈퇴(2FA 계정은 OTP 추가) |
+| `POST` | `/account/password/change` | 로그인 사용자 비밀번호 변경(현재 비밀번호 검증 + 새 비밀번호 정책 검증) |
 | `POST` | `/thermal/control/start` | Thermal 스트림 시작 (`THERMAL_TRANSPORT=ws`일 때 사용) |
 | `POST` | `/thermal/control/stop` | Thermal 스트림 중지 (`THERMAL_TRANSPORT=ws`일 때 사용) |
 | `WS` | `/thermal/stream` | Thermal 바이너리 청크 수신 (`THERMAL_TRANSPORT=ws`) |
