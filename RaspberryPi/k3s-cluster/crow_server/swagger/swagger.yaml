@@ -4,7 +4,7 @@ info:
   description: CCTV 녹화, SUNAPI 연동, 모터 제어, ESP32 상태 확인을 제공하는 서버 API
   version: 1.0.0
 servers:
-  - url: https://192.168.55.200/
+  - url: https://<LB_IP>/
     description: 개발 서버
 
 paths:
@@ -1214,7 +1214,7 @@ paths:
           required: true
           schema:
             type: string
-            example: 'rtsp://192.168.55.16/0/recording/20260306071236/play.smp'
+            example: 'rtsp://<CAMERA_IP>/0/recording/20260306071236/play.smp'
         - name: rtsp_port
           in: query
           required: false

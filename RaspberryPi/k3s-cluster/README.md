@@ -119,7 +119,7 @@ chmod +x generate_certs.sh
 
 ###### 설정 파일명 1: `metallb/metallb-config.yaml`
 
-- `192.168.55.200-192.168.55.210` 범위의 외부 IP 풀 정의
+- `<METALLB_ADDRESS_RANGE>` 범위의 외부 IP 풀 정의
 - `nginx-service`의 `LoadBalancer` 외부 IP 할당 기반 제공
 
 ###### 설정 파일명 2: 서비스별 배포 manifest

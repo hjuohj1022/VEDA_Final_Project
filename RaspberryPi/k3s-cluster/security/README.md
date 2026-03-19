@@ -5,7 +5,7 @@ Security Assets 디렉터리는 Nginx Gateway와 Mosquitto가 사용하는 mTLS 
 **주요 환경 및 버전**
 - 도구: `openssl`
 - 기본 유효기간: `3650`일
-- 기본 SAN 대상: `veda.team3.com`, `192.168.55.200`
+- 기본 SAN 대상: `<GATEWAY_SERVER_DNS>`, `<GATEWAY_SERVER_IP>`
 
 ##### 1. 컴포넌트 구성 요소 및 역할 (Component Overview & Module Map)
 
@@ -72,8 +72,8 @@ Generated assets
 - **기본 환경변수**
   - `CERT_DIR=./certs`
   - `DAYS=3650`
-  - `GATEWAY_SERVER_DNS=veda.team3.com`
-  - `GATEWAY_SERVER_IP=192.168.55.200`
+  - `GATEWAY_SERVER_DNS=<GATEWAY_SERVER_DNS>`
+  - `GATEWAY_SERVER_IP=<GATEWAY_SERVER_IP>`
 - **출력 경로**
   - `./certs/nginx-mtls`
 
@@ -140,8 +140,8 @@ chmod +x generate_certs.sh
 
 ```bash
 CERT_DIR=./certs \
-GATEWAY_SERVER_DNS=my-gateway.local \
-GATEWAY_SERVER_IP=192.168.55.210 \
+GATEWAY_SERVER_DNS=<GATEWAY_SERVER_DNS> \
+GATEWAY_SERVER_IP=<GATEWAY_SERVER_IP> \
 ./generate_certs.sh
 ```
 
