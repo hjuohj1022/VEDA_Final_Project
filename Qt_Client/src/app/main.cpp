@@ -38,8 +38,9 @@ int main(int argc, char *argv[])
         // QML top-level window icons
         QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app,
                          [appIcon](QObject *obj, const QUrl &) {
-            if (auto *window = qobject_cast<QWindow *>(obj))
+            if (auto *window = qobject_cast<QWindow *>(obj)) {
                 window->setIcon(appIcon);
+            }
         });
     }
 

@@ -208,16 +208,31 @@
 - 아이콘 파일:
   - `src/ui/assets/icons/Hanwha_logo.ico`
   - 원본 벡터/소스는 현재 AEGIS 브랜드 아이콘 기준으로 관리
+- 로그인 화면/시작 오버레이의 화면 표시용 로고는 별도 `PNG` 리소스 사용
+  - `src/ui/assets/icons/AEGIS_logo.png`
 - Windows 리소스 파일:
   - `src/app/app_icon.rc`
 - CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘과 파일 메타데이터를 반영
+
+### 8-1. 창 라운드 처리(Windows)
+- 프레임리스 메인 창과 3D Map 보조 창은 직각 창 대신 둥근 모서리로 표시
+- 초기 Win32 `SetWindowRgn(CreateRoundRectRgn(...))` 방식은 듀얼 모니터 이동 시 모서리 복원/계단 현상 이슈가 있어 제거
+- 현재는 `QML transparent window + OpacityMask` 기반 라운드 마스킹 사용
+  - 메인 창: `src/ui/qml/Main.qml`
+  - 3D Map 창: `src/ui/qml/Main.qml` 내부 `cctv3dMapDebugWindow`
+- 장점
+  - 듀얼 모니터 이동 시 region이 풀리며 직각으로 돌아가는 문제 완화
+  - Win32 region 방식보다 더 부드러운 모서리 표현
+- 빌드 시 `Qt5Compat.GraphicalEffects` 사용을 위해 `Qt::Core5Compat` 링크 필요
+
 ### 9. 앱 시작 로딩 오버레이
 - 앱 시작 직후 풀스크린 로딩 오버레이(스플래시) 표시
 - 고정 시간만으로 종료하지 않고, 카메라 준비 상태를 함께 반영해 종료
   - 종료 조건: `초기 UI 준비` + `최소 표시 시간` + (`4채널 준비 완료` 또는 `최대 대기시간 만료`)
   - 로딩 문구 예시: `카메라 스트림 준비 중... (x/4)`
-  - 최대 대기시간 만료 시 일부 채널 미준비여도 로그인 화면으로 진행
+- 최대 대기시간 만료 시 일부 채널 미준비여도 로그인 화면으로 진행
 - 오버레이는 한 번 닫히면 다시 표시되지 않음
+- 시작 오버레이도 메인 창과 동일한 라운드 기준을 사용
 - 종료 후 기존 로그인 화면 노출(로그인/세션 동작 변경 없음)
 - 관련 구현: `src/ui/qml/Main.qml`
 
@@ -514,7 +529,7 @@ Team3VideoReceiver/
 ## 빌드
 
 필수:
-1. Qt 6 SDK (Qt Quick, Qt Multimedia, Qt Network, Qt WebSockets)
+1. Qt 6 SDK (Qt Quick, Qt Multimedia, Qt Network, Qt WebSockets, Qt5Compat/Core5Compat)
 2. CMake 3.19+
 3. MinGW 64-bit (Qt Kit와 동일)
 
@@ -576,6 +591,11 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - 아이콘 리소스(`.ico`, `.rc`, CMake`) 변경 후에는 `Clean`만으로 반영이 안 될 수 있음
   - `build/Desktop_Qt_6_10_2_MinGW_64_bit-Release` 폴더 삭제 후 재빌드 권장
   - 작업표시줄 고정 아이콘 사용 중이면 고정 해제 후 재실행/재고정 필요
+
+- 프레임리스 창 모서리가 직각/계단처럼 보일 때
+  - 현재 라운드 처리는 Win32 region이 아닌 `QML OpacityMask` 기반
+  - `Qt::Core5Compat` 또는 관련 QML 모듈이 배포 누락되면 창 외곽 표시가 기대와 다를 수 있음
+  - `windeployqt` 재실행 후 `Qt5Compat.GraphicalEffects` 관련 QML 리소스 포함 여부 확인
 
 ## License
 

@@ -2,8 +2,8 @@
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
-# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
+# Network 모듈 추가 (Core Core5Compat Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Core5Compat Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
 
 qt_standard_project_setup()
 
@@ -27,6 +27,10 @@ set_source_files_properties(
 set_source_files_properties(
     src/ui/assets/icons/Hanwha_logo.svg
     PROPERTIES QT_RESOURCE_ALIAS icons/Hanwha_logo.svg
+)
+set_source_files_properties(
+    src/ui/assets/icons/AEGIS_logo.png
+    PROPERTIES QT_RESOURCE_ALIAS icons/AEGIS_logo.png
 )
 
 
@@ -153,6 +157,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/assets/icons/tooltip_light.svg
         src/ui/assets/icons/Hanwha_logo.ico
         src/ui/assets/icons/Hanwha_logo.svg
+        src/ui/assets/icons/AEGIS_logo.png
 )
 
 target_include_directories(Team3VideoReceiver
@@ -164,6 +169,7 @@ target_include_directories(Team3VideoReceiver
 target_link_libraries(Team3VideoReceiver
     PRIVATE
         Qt::Core
+        Qt::Core5Compat
         Qt::Widgets
         Qt::Multimedia
         Qt::MultimediaWidgets
