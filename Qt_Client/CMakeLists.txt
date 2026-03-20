@@ -98,6 +98,10 @@ qt_add_executable(Team3VideoReceiver
     .env
 )
 
+set_target_properties(Team3VideoReceiver PROPERTIES
+    OUTPUT_NAME "AEGIS"
+)
+
 if (WIN32)
     target_sources(Team3VideoReceiver PRIVATE src/app/app_icon.rc)
 endif()

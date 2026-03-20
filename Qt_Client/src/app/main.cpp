@@ -18,9 +18,10 @@ int main(int argc, char *argv[])
             QByteArray("file,crypto,data,udp,rtp,tcp,rtsp,rtsps,tls,http,https"));
 
     QGuiApplication app(argc, argv);
-    app.setOrganizationName("Team3");
-    app.setOrganizationDomain("team3.com");
-    app.setApplicationName("Team3VideoReceiver");
+    app.setOrganizationName("VEDA_Team3");
+    app.setOrganizationDomain("veda.team3.com");
+    app.setApplicationName("AEGIS Vision VMS");
+    app.setApplicationDisplayName("AEGIS Vision VMS");
 
     QIcon appIcon(":/qt/qml/Team3VideoReceiver/icons/Hanwha_logo.ico");
     if (appIcon.isNull())

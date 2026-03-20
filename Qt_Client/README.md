@@ -1,6 +1,6 @@
-﻿# Qt CCTV Client (Live + Playback VMS)
+﻿# AEGIS Vision VMS
 
-이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
+이 프로젝트는 **Qt 6 (C++/QML)** 기반 **AEGIS Vision VMS** CCTV 관제 클라이언트입니다.  
 실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신 + 로컬 렌더링), 그리고 **Playback WebSocket 제어 송신 + 로컬 UDP RTP 송출** 경로를 제공합니다.
 
 ## 주요 기능
@@ -198,15 +198,16 @@
 - 다이얼로그에서 `Refresh` 버튼 제거(`Close`만 유지)
 - 사양 정보는 팝업 호출 시 최초 1회 조회 후 캐시 재사용(반복 조회로 인한 UI 멈춤 완화)
 
-### 8. 실행파일 아이콘(Windows)
+### 8. 프로그램명 및 실행파일 아이콘(Windows)
+- 사용자 표시 프로그램명은 `AEGIS Vision VMS`로 통일
+- Windows 빌드 출력 실행파일 이름은 `AEGIS.exe`
 - 실행파일 아이콘은 `SVG`가 아닌 `ICO` 리소스로 적용
 - 아이콘 파일:
   - `src/ui/assets/icons/Hanwha_logo.ico`
-  - 원본 벡터: `src/ui/assets/icons/Hanwha_logo.svg`
+  - 원본 벡터/소스는 현재 AEGIS 브랜드 아이콘 기준으로 관리
 - Windows 리소스 파일:
   - `src/app/app_icon.rc`
-- CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘에 반영
-
+- CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘과 파일 메타데이터를 반영
 ### 9. 앱 시작 로딩 오버레이
 - 앱 시작 직후 풀스크린 로딩 오버레이(스플래시) 표시
 - 고정 시간만으로 종료하지 않고, 카메라 준비 상태를 함께 반영해 종료
@@ -396,7 +397,7 @@ ffmpeg 배치/버전 관리:
 참고:
 - Storage/Timeline/MonthDays/Playback digest는 Crow API를 통해 조회합니다.
 - 빌드 시 로컬 `tools/ffmpeg.exe`가 있으면 실행 폴더로 자동 복사하도록 CMake POST_BUILD가 설정되어 있습니다.
-- Windows 실행파일 아이콘은 `src/app/app_icon.rc` + `src/ui/assets/icons/Hanwha_logo.ico` 조합으로 설정됩니다.
+- Windows 실행파일 이름은 `AEGIS.exe`이며, 아이콘/파일 메타데이터는 `src/app/app_icon.rc` + `src/ui/assets/icons/Hanwha_logo.ico` 조합으로 설정됩니다.
 
 ## Qt -> Crow API 전환 현황 (한글)
 
@@ -576,3 +577,5 @@ Playback 동작 검증 시 아래를 확인했습니다.
 ## License
 
 교육/프로젝트 목적 샘플 코드입니다.
+
+
