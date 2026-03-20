@@ -182,3 +182,4 @@ Hardware/laser.md
 Hardware/esp32/main/app_secrets.defaults.h
 Hardware/esp32/.pio-core/.cache/telemetry.json
 /Hardware/esp32/.pio-core
+Hardware/esp32/.vscode/settings.json
