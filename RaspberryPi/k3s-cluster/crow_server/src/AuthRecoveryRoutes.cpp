@@ -770,11 +770,11 @@ bool loadActiveSignupEmailVerificationByCode(MYSQL* connection,
     MysqlBindFlag record_id_is_null = 0;
     MysqlBindFlag record_id_bind_error = 0;
     std::array<char, kUserIdBufferBytes> user_id_buffer{};
-    unsigned long user_id_length = 0;
+    unsigned long user_id_result_length = 0;
     MysqlBindFlag user_id_is_null = 0;
     MysqlBindFlag user_id_bind_error = 0;
     std::array<char, kEmailBufferBytes> email_buffer{};
-    unsigned long email_length = 0;
+    unsigned long email_result_length = 0;
     MysqlBindFlag email_is_null = 0;
     MysqlBindFlag email_bind_error = 0;
 
@@ -787,14 +787,14 @@ bool loadActiveSignupEmailVerificationByCode(MYSQL* connection,
     result_bind[1].buffer_type = MYSQL_TYPE_STRING;
     result_bind[1].buffer = user_id_buffer.data();
     result_bind[1].buffer_length = static_cast<unsigned long>(user_id_buffer.size());
-    result_bind[1].length = &user_id_length;
+    result_bind[1].length = &user_id_result_length;
     result_bind[1].is_null = &user_id_is_null;
     result_bind[1].error = &user_id_bind_error;
 
     result_bind[2].buffer_type = MYSQL_TYPE_STRING;
     result_bind[2].buffer = email_buffer.data();
     result_bind[2].buffer_length = static_cast<unsigned long>(email_buffer.size());
-    result_bind[2].length = &email_length;
+    result_bind[2].length = &email_result_length;
     result_bind[2].is_null = &email_is_null;
     result_bind[2].error = &email_bind_error;
 
@@ -822,8 +822,8 @@ bool loadActiveSignupEmailVerificationByCode(MYSQL* connection,
 
     out->found = true;
     out->id = record_id_is_null ? 0 : static_cast<unsigned long long>(record_id);
-    out->user_id = user_id_is_null ? std::string{} : std::string(user_id_buffer.data(), user_id_length);
-    out->email = email_is_null ? std::string{} : std::string(email_buffer.data(), email_length);
+    out->user_id = user_id_is_null ? std::string{} : std::string(user_id_buffer.data(), user_id_result_length);
+    out->email = email_is_null ? std::string{} : std::string(email_buffer.data(), email_result_length);
     return true;
 }
 
