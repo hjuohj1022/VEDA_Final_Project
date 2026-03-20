@@ -55,7 +55,7 @@
 
 static const char *TAG = "udp_stream";
 static const TickType_t UDP_SEND_RETRY_DELAY_TICKS = 1U;
-static const int UDP_SEND_RETRY_COUNT = 6;
+static const int UDP_SEND_RETRY_COUNT = 8;
 static const TickType_t UDP_SEND_ENOMEM_BASE_DELAY_TICKS = pdMS_TO_TICKS(8U);
 static const TickType_t UDP_SEND_POST_HANDSHAKE_DELAY_TICKS = pdMS_TO_TICKS(20U);
 static const int64_t DTLS_TX_CONGESTION_HOLD_US = 500000LL;
@@ -80,6 +80,8 @@ static volatile bool s_dtls_reset_requested = false;
 static int64_t s_dtls_send_ready_after_us = 0;
 static int64_t s_dtls_tx_congested_until_us = 0;
 static int64_t s_dtls_retry_after_us = 0;
+
+static void dtlsApplyPendingResetLocked(void);
 
 static void dtlsLogError(const char *message, int err)
 {
@@ -227,6 +229,38 @@ static void dtlsUnlock(void)
     if (s_dtls_mutex != NULL) {
         (void)xSemaphoreGive(s_dtls_mutex);
     }
+}
+
+static bool dtlsDelayAndRelock(TickType_t delay_ticks)
+{
+    dtlsUnlock();
+    vTaskDelay((delay_ticks > 0U) ? delay_ticks : 1U);
+
+    if (!dtlsLock(portMAX_DELAY)) {
+        ESP_LOGE(TAG, "DTLS mutex unavailable");
+        return false;
+    }
+
+    dtlsApplyPendingResetLocked();
+    if (!(s_udp_enabled && s_dtls_configured)) {
+        dtlsUnlock();
+        return false;
+    }
+
+    return true;
+}
+
+static bool dtlsWaitUntilLocked(int64_t wait_until_us)
+{
+    const int64_t now_us = esp_timer_get_time();
+
+    if ((wait_until_us == 0) || (now_us >= wait_until_us)) {
+        return true;
+    }
+
+    const int64_t wait_us = wait_until_us - now_us;
+    const TickType_t wait_ticks = pdMS_TO_TICKS((uint32_t)((wait_us + 999LL) / 1000LL));
+    return dtlsDelayAndRelock(wait_ticks);
 }
 
 static void dtlsApplyPendingResetLocked(void)
@@ -549,26 +583,23 @@ int udpStreamSend(const void *payload, size_t len)
         return -1;
     }
 
-    if ((s_dtls_send_ready_after_us != 0) &&
-        (esp_timer_get_time() < s_dtls_send_ready_after_us)) {
-        const int64_t wait_us = s_dtls_send_ready_after_us - esp_timer_get_time();
-        const TickType_t wait_ticks = pdMS_TO_TICKS((uint32_t)((wait_us + 999LL) / 1000LL));
-        dtlsUnlock();
-        vTaskDelay((wait_ticks > 0U) ? wait_ticks : 1U);
-        if (!dtlsLock(portMAX_DELAY)) {
-            ESP_LOGE(TAG, "DTLS mutex unavailable");
-            return -1;
-        }
-        dtlsApplyPendingResetLocked();
-        if (!(s_udp_enabled && s_dtls_configured)) {
-            dtlsUnlock();
-            return -1;
-        }
-    }
-
-    s_dtls_send_ready_after_us = 0;
-
     for (int attempt = 0; attempt < UDP_SEND_RETRY_COUNT; attempt++) {
+        int64_t wait_until_us = s_dtls_send_ready_after_us;
+
+        if (s_dtls_tx_congested_until_us > wait_until_us) {
+            wait_until_us = s_dtls_tx_congested_until_us;
+        }
+
+        if (!dtlsWaitUntilLocked(wait_until_us)) {
+            return -1;
+        }
+
+        s_dtls_send_ready_after_us = 0;
+        if ((s_dtls_tx_congested_until_us != 0) &&
+            (esp_timer_get_time() >= s_dtls_tx_congested_until_us)) {
+            s_dtls_tx_congested_until_us = 0;
+        }
+
         ret = mbedtls_ssl_write(&s_dtls_ssl, (const unsigned char *)payload, len);
         if (ret > 0) {
             if ((size_t)ret != len) {
@@ -580,47 +611,38 @@ int udpStreamSend(const void *payload, size_t len)
                 dtlsUnlock();
                 return -1;
             }
+            s_dtls_tx_congested_until_us = 0;
             dtlsUnlock();
             return ret;
         }
 
         if ((ret == MBEDTLS_ERR_SSL_WANT_READ) || (ret == MBEDTLS_ERR_SSL_WANT_WRITE)) {
-            dtlsUnlock();
-            vTaskDelay(UDP_SEND_RETRY_DELAY_TICKS);
-            if (!dtlsLock(portMAX_DELAY)) {
-                ESP_LOGE(TAG, "DTLS mutex unavailable");
-                return -1;
-            }
-            dtlsApplyPendingResetLocked();
-            if (!(s_udp_enabled && s_dtls_configured)) {
-                dtlsUnlock();
+            if (!dtlsDelayAndRelock(UDP_SEND_RETRY_DELAY_TICKS)) {
                 return -1;
             }
             continue;
         }
 
         if ((ret == MBEDTLS_ERR_NET_SEND_FAILED) && (errno == ENOMEM)) {
+            const int64_t congestion_until_us = esp_timer_get_time() + DTLS_TX_CONGESTION_HOLD_US;
+
+            if (congestion_until_us > s_dtls_tx_congested_until_us) {
+                s_dtls_tx_congested_until_us = congestion_until_us;
+            }
+
             if (attempt + 1 >= UDP_SEND_RETRY_COUNT) {
                 s_dtls_tx_congested_until_us = esp_timer_get_time() + DTLS_TX_CONGESTION_HOLD_US;
                 dtlsLogError("mbedtls_ssl_write() failed after ENOMEM retries", ret);
+                dtlsLogHeap("DTLS send ENOMEM");
                 dtlsUnlock();
                 return -1;
             }
 
             const TickType_t enomem_delay_ticks =
                 UDP_SEND_ENOMEM_BASE_DELAY_TICKS * (TickType_t)(attempt + 1);
-            s_dtls_tx_congested_until_us = esp_timer_get_time() + DTLS_TX_CONGESTION_HOLD_US;
-            dtlsUnlock();
-            vTaskDelay((enomem_delay_ticks > 0U)
-                           ? enomem_delay_ticks
-                           : UDP_SEND_RETRY_DELAY_TICKS);
-            if (!dtlsLock(portMAX_DELAY)) {
-                ESP_LOGE(TAG, "DTLS mutex unavailable");
-                return -1;
-            }
-            dtlsApplyPendingResetLocked();
-            if (!(s_udp_enabled && s_dtls_configured)) {
-                dtlsUnlock();
+            if (!dtlsDelayAndRelock((enomem_delay_ticks > 0U)
+                                        ? enomem_delay_ticks
+                                        : UDP_SEND_RETRY_DELAY_TICKS)) {
                 return -1;
             }
             continue;
