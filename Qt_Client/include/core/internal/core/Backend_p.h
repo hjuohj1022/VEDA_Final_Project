@@ -88,6 +88,10 @@ struct BackendPrivate
     bool m_accountDeleteInProgress = false;
     QPointer<QNetworkReply> m_passwordChangeReply;
     bool m_passwordChangeInProgress = false;
+    QPointer<QNetworkReply> m_emailVerifyRequestReply;
+    bool m_emailVerifyRequestInProgress = false;
+    QPointer<QNetworkReply> m_emailVerifyConfirmReply;
+    bool m_emailVerifyConfirmInProgress = false;
     QPointer<QNetworkReply> m_registerReply;
     bool m_registerInProgress = false;
 

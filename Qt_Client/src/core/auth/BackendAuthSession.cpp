@@ -1,10 +1,5 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 #include "internal/auth/BackendAuthSessionService.h"
-
-void Backend::skipLoginTemporarily()
-{
-    BackendAuthSessionService::skipLoginTemporarily(this, d_ptr.get());
-}
 
 void Backend::logout()
 {

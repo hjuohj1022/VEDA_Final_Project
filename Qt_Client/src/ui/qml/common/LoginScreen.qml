@@ -12,6 +12,15 @@ Item {
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
     property bool passwordVisible: false
     property bool capsLockOn: false
+    property bool signupEmailCodeVisible: false
+    property bool signupEmailVerified: false
+    property string signupEmailVerifiedId: ""
+    property string signupEmailVerifiedAddress: ""
+    property string signupEmailStatusText: ""
+    property int authFieldWidth: 320
+    property int authInlineButtonWidth: 78
+    property int authInlineSpacing: 8
+    property int authInlineRowWidth: authFieldWidth + authInlineButtonWidth + authInlineSpacing
     
     property bool isLoggedIn: backend.isLoggedIn
     property bool twoFactorRequired: backend.twoFactorRequired
@@ -53,6 +62,40 @@ Item {
         return ""
     }
 
+    // 회원가입 이메일 형식 검증 함수
+    function validateSignupEmail(email) {
+        const trimmed = email.trim()
+        if (trimmed.length === 0) {
+            return "이메일을 입력해 주세요."
+        }
+        if (/\s/.test(trimmed)) {
+            return "이메일에는 공백을 사용할 수 없습니다."
+        }
+        if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(trimmed)) {
+            return "이메일 형식이 올바르지 않습니다."
+        }
+        return ""
+    }
+
+    // 회원가입 이메일 인증 상태 초기화 함수
+    function resetSignupEmailVerificationState() {
+        signupEmailCodeVisible = false
+        signupEmailVerified = false
+        signupEmailVerifiedId = ""
+        signupEmailVerifiedAddress = ""
+        signupEmailStatusText = ""
+        if (emailCodeField) {
+            emailCodeField.text = ""
+        }
+    }
+
+    // 현재 입력값 기준 이메일 인증 완료 여부 확인 함수
+    function isCurrentSignupEmailVerified() {
+        return signupEmailVerified
+                && signupEmailVerifiedId === idField.text.trim()
+                && signupEmailVerifiedAddress === emailField.text.trim()
+    }
+
     Timer {
         id: keyboardLockTimer
         interval: 150
@@ -72,7 +115,7 @@ Item {
         
         ColumnLayout {
             anchors.centerIn: parent
-            width: 320
+            width: root.signupMode ? root.authInlineRowWidth : root.authFieldWidth
             spacing: 24
             
             ColumnLayout {
@@ -119,7 +162,8 @@ Item {
                     id: idField
                     placeholderText: "ID"
                     placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     Layout.preferredHeight: 40
                     height: 40
                     rightPadding: 40
@@ -132,10 +176,160 @@ Item {
                         radius: 6
                     }
                     onAccepted: triggerSignIn()
+                    onTextChanged: {
+                        if (root.signupMode && (root.signupEmailCodeVisible || root.signupEmailVerified)) {
+                            root.resetSignupEmailVerificationState()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authInlineRowWidth
+                    Layout.preferredHeight: 40
+                    spacing: root.authInlineSpacing
+                    visible: root.signupMode && !backend.twoFactorRequired
+                    enabled: !backend.twoFactorRequired
+                    opacity: backend.twoFactorRequired ? 0.65 : 1.0
+
+                    TextField {
+                        id: emailField
+                        Layout.preferredWidth: root.authFieldWidth
+                        Layout.preferredHeight: 40
+                        height: 40
+                        placeholderText: "Email"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: emailField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onTextChanged: {
+                            if (root.signupEmailCodeVisible || root.signupEmailVerified) {
+                                root.resetSignupEmailVerificationState()
+                            }
+                        }
+                    }
+
+                    Button {
+                        id: requestEmailVerifyButton
+                        Layout.preferredWidth: root.authInlineButtonWidth
+                        Layout.preferredHeight: 40
+                        text: root.isCurrentSignupEmailVerified() ? "완료" : "인증"
+                        enabled: !root.isCurrentSignupEmailVerified()
+                        scale: down ? 0.97 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                        background: Rectangle {
+                            color: !parent.enabled
+                                   ? (theme ? theme.border : "#3f3f46")
+                                   : (parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316"))
+                            radius: 6
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            if (idField.text.trim().length === 0) {
+                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.text = "이메일 인증 전에 ID를 먼저 입력해 주세요."
+                                errorDialog.open()
+                                return
+                            }
+                            const emailError = validateSignupEmail(emailField.text)
+                            if (emailError.length > 0) {
+                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.text = emailError
+                                errorDialog.open()
+                                return
+                            }
+                            root.signupEmailCodeVisible = true
+                            root.signupEmailVerified = false
+                            root.signupEmailVerifiedId = ""
+                            root.signupEmailVerifiedAddress = ""
+                            root.signupEmailStatusText = "인증 코드를 전송 중입니다..."
+                            emailCodeField.text = ""
+                            backend.requestEmailVerification(idField.text, emailField.text)
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authInlineRowWidth
+                    Layout.preferredHeight: 40
+                    spacing: root.authInlineSpacing
+                    visible: root.signupMode && !backend.twoFactorRequired && root.signupEmailCodeVisible
+
+                    TextField {
+                        id: emailCodeField
+                        Layout.preferredWidth: root.authFieldWidth
+                        Layout.preferredHeight: 40
+                        height: 40
+                        placeholderText: "인증 코드 입력"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: emailCodeField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onAccepted: {
+                            if (text.trim().length > 0) {
+                                backend.confirmEmailVerification(idField.text, emailField.text, text.trim())
+                            }
+                        }
+                    }
+
+                    Button {
+                        id: verifyEmailCodeButton
+                        Layout.preferredWidth: root.authInlineButtonWidth
+                        Layout.preferredHeight: 40
+                        text: "확인"
+                        scale: down ? 0.97 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                        background: Rectangle {
+                            color: parent.down ? "#ea580c" : (theme ? theme.accent : "#f97316")
+                            radius: 6
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            if (emailCodeField.text.trim().length === 0) {
+                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.text = "이메일 인증 코드를 입력해 주세요."
+                                errorDialog.open()
+                                return
+                            }
+                            backend.confirmEmailVerification(idField.text, emailField.text, emailCodeField.text.trim())
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    visible: root.signupMode && root.signupEmailStatusText.length > 0
+                    color: root.isCurrentSignupEmailVerified()
+                           ? "#22c55e"
+                           : (theme ? theme.textSecondary : "#a1a1aa")
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    text: root.signupEmailStatusText
                 }
                 
                 Item {
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     Layout.preferredHeight: 40
                     enabled: !backend.twoFactorRequired
                     opacity: backend.twoFactorRequired ? 0.65 : 1.0
@@ -192,7 +386,8 @@ Item {
 
                 ColumnLayout {
                     visible: root.signupMode && !backend.twoFactorRequired
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     spacing: 2
 
                     TextMetrics {
@@ -221,7 +416,8 @@ Item {
                 }
 
                 RowLayout {
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     spacing: 10
                     visible: !backend.twoFactorRequired && root.capsLockOn
 
@@ -237,12 +433,14 @@ Item {
                 }
 
                 ColumnLayout {
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     spacing: 10
                     visible: backend.twoFactorRequired && !root.signupMode
 
                     Rectangle {
-                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: root.authFieldWidth
                         color: theme ? theme.bgComponent : "#18181b"
                         border.color: theme ? theme.border : "#27272a"
                         radius: 8
@@ -260,9 +458,10 @@ Item {
 
                     TextField {
                         id: otpField
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: root.authFieldWidth
                         placeholderText: "6-digit OTP"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
-                        Layout.fillWidth: true
                         height: 40
                         maximumLength: 6
                         inputMethodHints: Qt.ImhDigitsOnly
@@ -279,7 +478,8 @@ Item {
                 
                 Button {
                     text: backend.twoFactorRequired ? "Verify OTP" : "Sign In"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     height: 40
                     visible: !root.signupMode
                     enabled: !backend.loginLocked
@@ -308,7 +508,8 @@ Item {
 
                 Button {
                     text: root.signupMode ? "Create Account" : "Sign Up"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     height: 40
                     visible: !backend.twoFactorRequired
                     scale: down ? 0.97 : 1.0
@@ -332,14 +533,31 @@ Item {
                         if (!root.signupMode) {
                             root.signupMode = true
                             idField.text = ""
+                            emailField.text = ""
                             pwField.text = ""
+                            root.resetSignupEmailVerificationState()
                             root.passwordVisible = false
                             root.capsLockOn = false
                             return
                         }
-                        if (idField.text.trim().length === 0 || pwField.text.length === 0) {
+                        if (idField.text.trim().length === 0
+                                || emailField.text.trim().length === 0
+                                || pwField.text.length === 0) {
                             errorDialog.title = "Sign Up Failed"
-                            errorDialog.text = "ID와 비밀번호를 모두 입력해 주세요."
+                            errorDialog.text = "ID, 이메일, 비밀번호를 모두 입력해 주세요."
+                            errorDialog.open()
+                            return
+                        }
+                        const emailError = validateSignupEmail(emailField.text)
+                        if (emailError.length > 0) {
+                            errorDialog.title = "Sign Up Failed"
+                            errorDialog.text = emailError
+                            errorDialog.open()
+                            return
+                        }
+                        if (!root.isCurrentSignupEmailVerified()) {
+                            errorDialog.title = "Sign Up Failed"
+                            errorDialog.text = "이메일 인증을 완료해 주세요."
                             errorDialog.open()
                             return
                         }
@@ -350,7 +568,7 @@ Item {
                             errorDialog.open()
                             return
                         }
-                        backend.registerUser(idField.text, pwField.text)
+                        backend.registerUser(idField.text, pwField.text, emailField.text)
                     }
                 }
 
@@ -379,30 +597,9 @@ Item {
                     }
                 }
 
-                Button {
-                    text: "Skip (Temporary)"
-                    Layout.fillWidth: true
-                    height: 36
-                    visible: !root.signupMode && !backend.twoFactorRequired
-                    scale: down ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-                    background: Rectangle {
-                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
-                        border.color: theme ? theme.border : "#52525b"
-                        radius: 6
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: theme ? theme.textPrimary : "#f4f4f5"
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    onClicked: backend.skipLoginTemporarily()
-                }
-
                 ColumnLayout {
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     spacing: 8
                     visible: backend.loginLocked && !root.signupMode && !backend.twoFactorRequired
 
@@ -457,7 +654,8 @@ Item {
                 
                 Button {
                     text: backend.twoFactorRequired ? "Clear OTP" : "Clear"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     height: 40
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
@@ -482,14 +680,17 @@ Item {
                             return
                         }
                         idField.text = ""
+                        emailField.text = ""
                         pwField.text = ""
+                        root.resetSignupEmailVerificationState()
                         root.passwordVisible = false
                         root.capsLockOn = false
                     }
                 }
 
                 Text {
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     visible: !root.signupMode && !backend.twoFactorRequired
                     color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 12
@@ -501,7 +702,8 @@ Item {
 
                 Button {
                     text: "Back to Sign In"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
                     height: 36
                     visible: root.signupMode
                     scale: down ? 0.97 : 1.0
@@ -521,8 +723,10 @@ Item {
                     onClicked: {
                         root.signupMode = false
                         idField.text = ""
+                        emailField.text = ""
                         pwField.text = ""
                         otpField.text = ""
+                        root.resetSignupEmailVerificationState()
                         root.passwordVisible = false
                         root.capsLockOn = false
                     }
@@ -610,6 +814,7 @@ Item {
                 otpField.text = ""
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
+                root.resetSignupEmailVerificationState()
                 root.passwordVisible = false
                 root.capsLockOn = false
                 backend.stopThermalStream()
@@ -642,12 +847,42 @@ Item {
             errorDialog.open()
             root.signupMode = false
             idField.text = ""
+            emailField.text = ""
             pwField.text = ""
             otpField.text = ""
+            root.resetSignupEmailVerificationState()
         }
 
         function onRegisterFailed(error) {
             errorDialog.title = "Sign Up Failed"
+            errorDialog.text = error
+            errorDialog.open()
+        }
+
+        function onEmailVerificationRequested(message, _debugToken) {
+            root.signupEmailCodeVisible = true
+            root.signupEmailStatusText = message
+        }
+
+        function onEmailVerificationRequestFailed(error) {
+            root.signupEmailStatusText = ""
+            errorDialog.title = "Email Verification Failed"
+            errorDialog.text = error
+            errorDialog.open()
+        }
+
+        function onEmailVerificationConfirmed(message) {
+            root.signupEmailVerified = true
+            root.signupEmailVerifiedId = idField.text.trim()
+            root.signupEmailVerifiedAddress = emailField.text.trim()
+            root.signupEmailStatusText = message
+        }
+
+        function onEmailVerificationConfirmFailed(error) {
+            root.signupEmailVerified = false
+            root.signupEmailVerifiedId = ""
+            root.signupEmailVerifiedAddress = ""
+            errorDialog.title = "Email Verification Failed"
             errorDialog.text = error
             errorDialog.open()
         }

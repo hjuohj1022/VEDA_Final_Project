@@ -122,8 +122,11 @@ public:
     Q_INVOKABLE void deleteAccount(QString password, QString otp = QString());
     // 로그인 계정 비밀번호 변경 요청
     Q_INVOKABLE void changePassword(QString currentPassword, QString newPassword);
-    Q_INVOKABLE void registerUser(QString id, QString pw);
-    Q_INVOKABLE void skipLoginTemporarily();
+    // 회원가입 이메일 인증 코드 요청
+    Q_INVOKABLE void requestEmailVerification(QString id, QString email);
+    // 회원가입 이메일 인증 코드 확인
+    Q_INVOKABLE void confirmEmailVerification(QString id, QString email, QString code);
+    Q_INVOKABLE void registerUser(QString id, QString pw, QString email);
     Q_INVOKABLE void logout();
     Q_INVOKABLE void resetSessionTimer();
     Q_INVOKABLE bool adminUnlock(QString adminCode);
@@ -225,6 +228,10 @@ signals:
     void accountDeleteFailed(QString error);
     void passwordChangeCompleted();
     void passwordChangeFailed(QString error);
+    void emailVerificationRequested(QString message, QString debugToken);
+    void emailVerificationRequestFailed(QString error);
+    void emailVerificationConfirmed(QString message);
+    void emailVerificationConfirmFailed(QString error);
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();

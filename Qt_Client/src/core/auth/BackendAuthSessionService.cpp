@@ -1,41 +1,7 @@
-﻿#include "internal/auth/BackendAuthSessionService.h"
+#include "internal/auth/BackendAuthSessionService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
-
-void BackendAuthSessionService::skipLoginTemporarily(Backend *backend, BackendPrivate *state)
-{
-    if (state->m_isLoggedIn) {
-        return;
-    }
-
-    state->m_isLoggedIn = true;
-    if (state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty()) {
-        state->m_twoFactorRequired = false;
-        state->m_preAuthToken.clear();
-        state->m_pendingLoginId.clear();
-        emit backend->twoFactorRequiredChanged();
-    }
-    if (state->m_twoFactorEnabled) {
-        state->m_twoFactorEnabled = false;
-        emit backend->twoFactorEnabledChanged();
-    }
-    state->m_userId = "Skip";
-    state->m_authToken.clear();
-    state->m_sessionRemainingSeconds = state->m_sessionTimeoutSeconds;
-    state->m_sessionTimer->start();
-
-    if (state->m_loginFailedAttempts != 0 || state->m_loginLocked) {
-        state->m_loginFailedAttempts = 0;
-        state->m_loginLocked = false;
-        emit backend->loginLockChanged();
-    }
-
-    emit backend->isLoggedInChanged();
-    emit backend->userIdChanged();
-    emit backend->sessionRemainingSecondsChanged();
-    emit backend->loginSuccess();
-}
 
 void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
 {

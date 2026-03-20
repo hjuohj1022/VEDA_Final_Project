@@ -133,6 +133,24 @@ QString validatePasswordComplexityForClient(const QString &password)
     return QString();
 }
 
+QString validateEmailForClient(const QString &email)
+{
+    // 회원가입 이메일 형식 사전 검증
+    const QString trimmed = email.trimmed();
+    if (trimmed.isEmpty()) {
+        return "이메일을 입력해 주세요.";
+    }
+    if (trimmed.contains(QRegularExpression("\\s"))) {
+        return "이메일에는 공백을 사용할 수 없습니다.";
+    }
+    static const QRegularExpression emailPattern(
+        "^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$");
+    if (!emailPattern.match(trimmed).hasMatch()) {
+        return "이메일 형식이 올바르지 않습니다.";
+    }
+    return QString();
+}
+
 } // namespace
 
 void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, QString id, QString pw)
@@ -743,11 +761,164 @@ void BackendAuthRequestService::changePassword(Backend *backend, BackendPrivate 
     });
 }
 
-void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw)
+void BackendAuthRequestService::requestEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email)
+{
+    // 회원가입 이메일 인증 코드 발급 요청 처리
+    const QString trimmedId = id.trimmed();
+    const QString trimmedEmail = email.trimmed();
+    if (trimmedId.isEmpty() || trimmedEmail.isEmpty()) {
+        emit backend->emailVerificationRequestFailed("ID와 이메일을 모두 입력해 주세요.");
+        return;
+    }
+    const QString emailError = validateEmailForClient(trimmedEmail);
+    if (!emailError.isEmpty()) {
+        emit backend->emailVerificationRequestFailed(emailError);
+        return;
+    }
+    if (state->m_emailVerifyRequestInProgress) {
+        emit backend->emailVerificationRequestFailed("이메일 인증 요청이 이미 처리 중입니다.");
+        return;
+    }
+
+    const QString requestUrl = backend->serverUrl() + "/auth/email/verify/request";
+    QNetworkRequest request{QUrl(requestUrl)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    backend->applySslIfNeeded(request);
+
+    QJsonObject json;
+    json["id"] = trimmedId;
+    json["email"] = trimmedEmail;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_emailVerifyRequestReply = reply;
+    state->m_emailVerifyRequestInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "EMAIL_VERIFY_REQUEST");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            QString message;
+            QString debugToken;
+            const QJsonDocument doc = QJsonDocument::fromJson(responseBody);
+            if (doc.isObject()) {
+                const QJsonObject obj = doc.object();
+                message = obj.value("message").toString().trimmed();
+                debugToken = obj.value("debug_token").toString().trimmed();
+            }
+            if (message.isEmpty()) {
+                message = "이메일 인증 코드를 전송했습니다.";
+            }
+            emit backend->emailVerificationRequested(message, debugToken);
+        } else if (isSslFailure(netError)) {
+            emit backend->emailVerificationRequestFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->emailVerificationRequestFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->emailVerificationRequestFailed(bodyText.isEmpty()
+                                                             ? "이메일 인증 코드 전송에 실패했습니다."
+                                                             : bodyText);
+        }
+
+        if (state->m_emailVerifyRequestReply == reply) {
+            state->m_emailVerifyRequestReply = nullptr;
+        }
+        state->m_emailVerifyRequestInProgress = false;
+        reply->deleteLater();
+    });
+}
+
+void BackendAuthRequestService::confirmEmailVerification(Backend *backend,
+                                                         BackendPrivate *state,
+                                                         QString id,
+                                                         QString email,
+                                                         QString code)
+{
+    // 회원가입 이메일 인증 코드 확인 요청 처리
+    const QString trimmedId = id.trimmed();
+    const QString trimmedEmail = email.trimmed();
+    const QString trimmedCode = code.trimmed();
+    if (trimmedId.isEmpty() || trimmedEmail.isEmpty()) {
+        emit backend->emailVerificationConfirmFailed("ID와 이메일을 먼저 입력해 주세요.");
+        return;
+    }
+    const QString emailError = validateEmailForClient(trimmedEmail);
+    if (!emailError.isEmpty()) {
+        emit backend->emailVerificationConfirmFailed(emailError);
+        return;
+    }
+    if (trimmedCode.isEmpty()) {
+        emit backend->emailVerificationConfirmFailed("인증 코드를 입력해 주세요.");
+        return;
+    }
+    if (state->m_emailVerifyConfirmInProgress) {
+        emit backend->emailVerificationConfirmFailed("인증 코드 확인 요청이 이미 처리 중입니다.");
+        return;
+    }
+
+    const QString confirmUrl = backend->serverUrl() + "/auth/email/verify/confirm";
+    QNetworkRequest request{QUrl(confirmUrl)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    backend->applySslIfNeeded(request);
+
+    QJsonObject json;
+    json["id"] = trimmedId;
+    json["email"] = trimmedEmail;
+    json["code"] = trimmedCode;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_emailVerifyConfirmReply = reply;
+    state->m_emailVerifyConfirmInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "EMAIL_VERIFY_CONFIRM");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            QString message;
+            const QJsonDocument doc = QJsonDocument::fromJson(responseBody);
+            if (doc.isObject()) {
+                message = doc.object().value("message").toString().trimmed();
+            }
+            if (message.isEmpty()) {
+                message = "이메일 인증이 완료되었습니다.";
+            }
+            emit backend->emailVerificationConfirmed(message);
+        } else if (isSslFailure(netError)) {
+            emit backend->emailVerificationConfirmFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->emailVerificationConfirmFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->emailVerificationConfirmFailed(bodyText.isEmpty()
+                                                             ? "이메일 인증 코드 확인에 실패했습니다."
+                                                             : bodyText);
+        }
+
+        if (state->m_emailVerifyConfirmReply == reply) {
+            state->m_emailVerifyConfirmReply = nullptr;
+        }
+        state->m_emailVerifyConfirmInProgress = false;
+        reply->deleteLater();
+    });
+}
+
+void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw, QString email)
 {
     const QString trimmedId = id.trimmed();
-    if (trimmedId.isEmpty() || pw.isEmpty()) {
-        emit backend->registerFailed("ID와 비밀번호를 입력해 주세요.");
+    const QString trimmedEmail = email.trimmed();
+    if (trimmedId.isEmpty() || pw.isEmpty() || trimmedEmail.isEmpty()) {
+        emit backend->registerFailed("ID, 비밀번호, 이메일을 모두 입력해 주세요.");
+        return;
+    }
+    const QString emailError = validateEmailForClient(trimmedEmail);
+    if (!emailError.isEmpty()) {
+        emit backend->registerFailed(emailError);
         return;
     }
     if (state->m_registerInProgress) {
@@ -765,6 +936,7 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
     QJsonObject json;
     json["id"] = trimmedId;
     json["password"] = pw;
+    json["email"] = trimmedEmail;
     QJsonDocument doc(json);
 
     QNetworkReply *reply = state->m_manager->post(request, doc.toJson());
@@ -788,6 +960,8 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
         const bool timedOut = reply->property("timedOut").toBool();
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
         if (registerTimeout) {
             registerTimeout->stop();
         }
@@ -806,16 +980,24 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
         }
 
         if (reply->error() == QNetworkReply::NoError) {
-            emit backend->registerSuccess(QString("회원가입 완료: %1").arg(trimmedId));
+            const QJsonDocument jsonDoc = QJsonDocument::fromJson(responseBody);
+            QString successMessage;
+            if (jsonDoc.isObject()) {
+                successMessage = jsonDoc.object().value("message").toString().trimmed();
+            }
+            if (successMessage.isEmpty()) {
+                successMessage = "회원가입이 완료되었습니다. 이메일 인증 후 로그인해 주세요.";
+            }
+            emit backend->registerSuccess(successMessage);
         } else {
             if (timedOut) {
                 emit backend->registerFailed("회원가입 요청 시간이 초과되었습니다.");
             } else if (netError == QNetworkReply::OperationCanceledError) {
                 emit backend->registerFailed("회원가입 요청이 취소되었습니다.");
             } else if (statusCode == 409) {
-                emit backend->registerFailed("이미 사용 중인 ID입니다.");
+                emit backend->registerFailed(bodyText.isEmpty() ? "이미 사용 중인 ID 또는 이메일입니다." : bodyText);
             } else if (statusCode == 400) {
-                emit backend->registerFailed("회원가입 입력값이 올바르지 않습니다.");
+                emit backend->registerFailed(bodyText.isEmpty() ? "회원가입 입력값이 올바르지 않습니다." : bodyText);
             } else if (statusCode >= 500) {
                 emit backend->registerFailed("서버 오류로 회원가입에 실패했습니다.");
             } else {
