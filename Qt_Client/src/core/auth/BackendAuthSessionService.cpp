@@ -39,6 +39,16 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
     }
     state->m_passwordChangeReply = nullptr;
     state->m_passwordChangeInProgress = false;
+    if (state->m_passwordResetRequestReply && state->m_passwordResetRequestReply->isRunning()) {
+        state->m_passwordResetRequestReply->abort();
+    }
+    state->m_passwordResetRequestReply = nullptr;
+    state->m_passwordResetRequestInProgress = false;
+    if (state->m_passwordResetReply && state->m_passwordResetReply->isRunning()) {
+        state->m_passwordResetReply->abort();
+    }
+    state->m_passwordResetReply = nullptr;
+    state->m_passwordResetInProgress = false;
     if (state->m_thermalStartReply && state->m_thermalStartReply->isRunning()) {
         state->m_thermalStartReply->abort();
     }
@@ -131,4 +141,3 @@ void BackendAuthSessionService::onSessionTick(Backend *backend, BackendPrivate *
         emit backend->sessionExpired();
     }
 }
-

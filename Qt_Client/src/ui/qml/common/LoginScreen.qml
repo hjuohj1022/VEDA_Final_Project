@@ -115,7 +115,7 @@ Item {
         
         ColumnLayout {
             anchors.centerIn: parent
-            width: root.signupMode ? root.authInlineRowWidth : root.authFieldWidth
+            width: root.authFieldWidth
             spacing: 24
             
             ColumnLayout {
@@ -183,20 +183,20 @@ Item {
                     }
                 }
 
-                RowLayout {
+                Item {
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: root.authInlineRowWidth
+                    Layout.preferredWidth: root.authFieldWidth
                     Layout.preferredHeight: 40
-                    spacing: root.authInlineSpacing
                     visible: root.signupMode && !backend.twoFactorRequired
                     enabled: !backend.twoFactorRequired
                     opacity: backend.twoFactorRequired ? 0.65 : 1.0
 
                     TextField {
                         id: emailField
-                        Layout.preferredWidth: root.authFieldWidth
-                        Layout.preferredHeight: 40
-                        height: 40
+                        width: root.authFieldWidth
+                        height: parent.height
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
                         placeholderText: "Email"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         color: theme ? theme.textPrimary : "white"
@@ -214,8 +214,10 @@ Item {
 
                     Button {
                         id: requestEmailVerifyButton
-                        Layout.preferredWidth: root.authInlineButtonWidth
-                        Layout.preferredHeight: 40
+                        width: root.authInlineButtonWidth
+                        height: parent.height
+                        x: parent.width + root.authInlineSpacing
+                        anchors.verticalCenter: parent.verticalCenter
                         text: root.isCurrentSignupEmailVerified() ? "완료" : "인증"
                         enabled: !root.isCurrentSignupEmailVerified()
                         scale: down ? 0.97 : 1.0
@@ -258,18 +260,18 @@ Item {
                     }
                 }
 
-                RowLayout {
+                Item {
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: root.authInlineRowWidth
+                    Layout.preferredWidth: root.authFieldWidth
                     Layout.preferredHeight: 40
-                    spacing: root.authInlineSpacing
                     visible: root.signupMode && !backend.twoFactorRequired && root.signupEmailCodeVisible
 
                     TextField {
                         id: emailCodeField
-                        Layout.preferredWidth: root.authFieldWidth
-                        Layout.preferredHeight: 40
-                        height: 40
+                        width: root.authFieldWidth
+                        height: parent.height
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
                         placeholderText: "인증 코드 입력"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         color: theme ? theme.textPrimary : "white"
@@ -287,8 +289,10 @@ Item {
 
                     Button {
                         id: verifyEmailCodeButton
-                        Layout.preferredWidth: root.authInlineButtonWidth
-                        Layout.preferredHeight: 40
+                        width: root.authInlineButtonWidth
+                        height: parent.height
+                        x: parent.width + root.authInlineSpacing
+                        anchors.verticalCenter: parent.verticalCenter
                         text: "확인"
                         scale: down ? 0.97 : 1.0
                         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
@@ -324,6 +328,7 @@ Item {
                            : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignLeft
                     text: root.signupEmailStatusText
                 }
                 
@@ -384,6 +389,36 @@ Item {
                     }
                 }
 
+                Item {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    Layout.preferredHeight: forgotPasswordLink.implicitHeight
+                    visible: !root.signupMode && !backend.twoFactorRequired
+
+                    Text {
+                        id: forgotPasswordLink
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "비밀번호를 잊으셨나요?"
+                        color: forgotPasswordMouse.containsMouse
+                               ? (theme ? theme.accent : "#f97316")
+                               : (theme ? theme.textSecondary : "#a1a1aa")
+                        font.pixelSize: 12
+                        font.underline: forgotPasswordMouse.containsMouse
+                    }
+
+                    MouseArea {
+                        id: forgotPasswordMouse
+                        x: forgotPasswordLink.x
+                        y: forgotPasswordLink.y
+                        width: forgotPasswordLink.implicitWidth
+                        height: forgotPasswordLink.implicitHeight
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: passwordForgotDialog.openDialog(idField.text)
+                    }
+                }
+
                 ColumnLayout {
                     visible: root.signupMode && !backend.twoFactorRequired
                     Layout.alignment: Qt.AlignHCenter
@@ -402,6 +437,7 @@ Item {
                         color: theme ? theme.textPrimary : "#e4e4e7"
                         font.pixelSize: 11
                         font.bold: true
+                        horizontalAlignment: Text.AlignLeft
                         text: "비밀번호 규칙: 8~16자 · 숫자 1개 이상 · 특수문자 1개 이상"
                     }
 
@@ -411,6 +447,7 @@ Item {
                         color: theme ? theme.textPrimary : "#e4e4e7"
                         font.pixelSize: 11
                         font.bold: true
+                        horizontalAlignment: Text.AlignLeft
                         text: "공백 불가"
                     }
                 }
@@ -894,6 +931,28 @@ Item {
         anchors.centerIn: parent
         theme: root.theme
         title: "Error"
+    }
+
+    PasswordForgotDialog {
+        id: passwordForgotDialog
+        theme: root.theme
+        backendObject: backend
+        onResetRequested: function(userId, email, debugCode, message) {
+            passwordResetDialog.openDialog(userId, email, debugCode, message)
+        }
+    }
+
+    PasswordResetDialog {
+        id: passwordResetDialog
+        theme: root.theme
+        backendObject: backend
+        onResetCompleted: function(message) {
+            errorDialog.title = "비밀번호 재설정"
+            errorDialog.text = message && message.length > 0
+                             ? message
+                             : "비밀번호가 재설정되었습니다. 새 비밀번호로 로그인해 주세요."
+            errorDialog.open()
+        }
     }
 
 }

@@ -21,6 +21,10 @@ public:
     static void requestEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email);
     // 회원가입 이메일 인증 코드 확인 요청 처리
     static void confirmEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email, QString code);
+    // 비밀번호 재설정 코드 발급 요청 처리
+    static void requestPasswordReset(Backend *backend, BackendPrivate *state, QString id, QString email);
+    // 비밀번호 재설정 코드로 새 비밀번호 적용 처리
+    static void resetPasswordWithCode(Backend *backend, BackendPrivate *state, QString code, QString newPassword);
     static void registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw, QString email);
 };
 

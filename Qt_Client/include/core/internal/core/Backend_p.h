@@ -92,6 +92,10 @@ struct BackendPrivate
     bool m_emailVerifyRequestInProgress = false;
     QPointer<QNetworkReply> m_emailVerifyConfirmReply;
     bool m_emailVerifyConfirmInProgress = false;
+    QPointer<QNetworkReply> m_passwordResetRequestReply;
+    bool m_passwordResetRequestInProgress = false;
+    QPointer<QNetworkReply> m_passwordResetReply;
+    bool m_passwordResetInProgress = false;
     QPointer<QNetworkReply> m_registerReply;
     bool m_registerInProgress = false;
 

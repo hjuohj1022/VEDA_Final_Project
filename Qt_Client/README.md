@@ -146,6 +146,14 @@
 ### 6-2. 로그인 인터페이스 개선
 - 비밀번호 입력칸 우측에 표시/숨김 토글(눈 아이콘) 추가
   - 숨김 상태는 슬래시 오버레이(가리기 표시)로 시각화
+- 비밀번호 입력칸 아래에 클릭형 텍스트 `비밀번호를 잊으셨나요?` 제공
+- `비밀번호를 잊으셨나요?` 클릭 시 비밀번호 재설정 1단계 다이얼로그 오픈
+  - `ID`, `Email` 입력 후 `POST /auth/password/forgot` 호출
+  - 입력한 정보가 일치하면 메일로 재설정 코드가 전송되는 구조로 안내
+- 비밀번호 재설정 2단계 다이얼로그 제공
+  - 메일로 받은 재설정 코드와 새 비밀번호 입력
+  - `POST /auth/password/reset` 호출로 비밀번호 변경
+  - 새 비밀번호 입력칸 표시/숨김(눈 아이콘) 토글 지원
 - ID/Password 입력 필드 크기/정렬을 동일 기준으로 맞춤
 - 회원가입 화면도 로그인 화면과 동일한 기준 폭으로 정렬
 - 회원가입 이메일 인증 버튼/인증코드 확인 버튼은 입력칸 바깥 오른쪽에 배치
@@ -154,7 +162,22 @@
   - Windows API 기반 실제 키보드 상태 조회 사용
 - `Clear`, `Back to Sign In` 버튼 텍스트 대비를 높여 가독성 개선
 
-### 6-3. 로그인 후 비밀번호 변경
+### 6-3. 로그인 전 비밀번호 재설정
+- 비밀번호 찾기 1단계 다이얼로그
+  - 입력 항목: `ID`, `Email`
+  - 클라이언트에서 이메일 형식 검증 수행
+  - 성공 시 안내 문구와 함께 재설정 코드 입력 단계로 이동
+- 비밀번호 재설정 2단계 다이얼로그
+  - 입력 항목: `재설정 코드`, `새 비밀번호`
+  - 새 비밀번호 복잡도 규칙을 클라이언트에서 사전 검증
+  - 성공 시 다이얼로그 종료 후 완료 메시지 표시
+- 관련 구현:
+  - `src/ui/qml/dialogs/PasswordForgotDialog.qml`
+  - `src/ui/qml/dialogs/PasswordResetDialog.qml`
+  - `src/core/auth/BackendAuthRecovery.cpp`
+  - `src/core/auth/BackendAuthRequestService.cpp`
+
+### 6-4. 로그인 후 비밀번호 변경
 - 우측 상단 프로필 메뉴에서 `비밀번호 변경` 버튼으로 다이얼로그 오픈
 - 다이얼로그 입력 항목
   - `현재 비밀번호`, `새 비밀번호`
@@ -333,6 +356,8 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/register` | 회원가입 |
 | `POST` | `/auth/email/verify/request` | 회원가입 이메일 인증 코드 요청 |
 | `POST` | `/auth/email/verify/confirm` | 회원가입 이메일 인증 코드 확인 |
+| `POST` | `/auth/password/forgot` | 로그인 전 비밀번호 재설정 코드 요청 |
+| `POST` | `/auth/password/reset` | 로그인 전 재설정 코드로 비밀번호 변경 |
 | `POST` | `/2fa/verify` | 비밀번호 로그인 후 OTP 검증 및 최종 JWT 발급 |
 | `GET` | `/2fa/status` | 현재 로그인 사용자 2FA 상태 조회 |
 | `POST` | `/2fa/setup/init` | OTP 등록용 `manual_key`/`otpauth_url` 발급 |
