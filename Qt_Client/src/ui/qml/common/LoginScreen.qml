@@ -122,18 +122,16 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 8
                 
-                Rectangle {
+                Image {
                     Layout.alignment: Qt.AlignHCenter
-                    width: 48; height: 48
-                    color: theme ? theme.accent : "#f97316"
-                    radius: 12
-                    Text {
-                        anchors.centerIn: parent
-                        text: "\uE72E"
-                        color: "white"
-                        font.family: "Segoe MDL2 Assets"
-                        font.pixelSize: 20
-                    }
+                    Layout.preferredWidth: 56
+                    Layout.preferredHeight: 56
+                    source: "qrc:/qt/qml/Team3VideoReceiver/icons/AEGIS_logo.png"
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize.width: 112
+                    sourceSize.height: 112
+                    smooth: true
+                    mipmap: true
                 }
                 
                 Text {
@@ -956,8 +954,6 @@ Item {
     }
 
 }
-
-
 
 
 

@@ -24,7 +24,6 @@ Rectangle {
     signal requestPasswordChange()
     signal requestHome()
     signal requestRtspSettings()
-    signal requestMotorControl()
     signal requestExportCancel()
 
     function formatSession(seconds) {
@@ -140,7 +139,7 @@ Rectangle {
                 spacing: 1
 
                 Text {
-                    text: "Vision VMS"
+                    text: "AEGIS Vision VMS"
                     color: theme ? theme.textPrimary : "white"
                     font.bold: true
                     font.pixelSize: 32/2
@@ -152,77 +151,6 @@ Rectangle {
                     font.pixelSize: 10
                 }
             }
-        }
-
-        Rectangle {
-            Layout.preferredWidth: root.isLoggedIn ? 250 : 0
-            Layout.preferredHeight: 34
-            Layout.leftMargin: 8
-            visible: root.isLoggedIn
-            radius: 9
-            color: theme ? theme.bgComponent : "#18181b"
-            border.color: theme ? theme.border : "#27272a"
-            border.width: 1
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 8
-
-                Text {
-                    text: "O"
-                    color: theme ? theme.accent : "#f97316"
-                    font.bold: true
-                    font.pixelSize: 12
-                }
-
-                Text {
-                    text: "Search..."
-                    color: theme ? theme.textSecondary : "#71717a"
-                    font.pixelSize: 12
-                    Layout.fillWidth: true
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.preferredWidth: root.isLoggedIn ? 88 : 0
-            Layout.preferredHeight: 34
-            visible: root.isLoggedIn
-            radius: 9
-            color: motorBtnMouse.pressed
-                   ? "#ea580c"
-                   : (motorBtnMouse.containsMouse
-                      ? "#fb923c"
-                      : (theme ? theme.accent : "#f97316"))
-            border.color: "transparent"
-            scale: motorBtnMouse.pressed ? 0.96 : 1.0
-            Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-
-            Text {
-                anchors.centerIn: parent
-                text: "Motor"
-                color: "white"
-                font.bold: true
-                font.pixelSize: 12
-            }
-
-            MouseArea {
-                id: motorBtnMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    backend.resetSessionTimer()
-                    root.requestMotorControl()
-                }
-            }
-
-            ToolTip.visible: motorBtnMouse.containsMouse
-            ToolTip.text: "모터 제어"
-            ToolTip.delay: 250
-            ToolTip.timeout: 1800
         }
 
         Rectangle {

@@ -6,6 +6,8 @@ Rectangle {
     id: root
     property var theme
     property var backendObject: null
+    property int liveSidebarTab: 0
+    property int cameraSidebarTab: 0
 
     property alias cameraNames: store.cameraNames
     property alias showCameraControls: store.showCameraControls
@@ -76,6 +78,36 @@ Rectangle {
     function refreshDisplaySettings() { store.refreshDisplaySettings() }
     function restartCameraControlStatusTimer() { store.restartCameraControlStatusTimer() }
 
+    function showLiveTabs() {
+        return !store.showCameraControls && !store.showPlaybackControls && !store.showThermalControls
+    }
+
+    function showCameraTabs() {
+        return store.showCameraControls
+    }
+
+    function sidebarTitle() {
+        if (showCameraTabs())
+            return "Side Panel"
+        if (store.showPlaybackControls)
+            return "Playback Controls"
+        if (store.showThermalControls)
+            return "Thermal Panel"
+        return "Side Panel"
+    }
+
+    function tabSelectedColor(selected) {
+        return selected ? (theme ? theme.accent : "#f97316") : (theme ? theme.bgComponent : "#18181b")
+    }
+
+    function tabBorderColor(selected) {
+        return selected ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+    }
+
+    function tabTextColor(selected) {
+        return selected ? "white" : (theme ? theme.textSecondary : "#a1a1aa")
+    }
+
     SidebarStore {
         id: store
         backend: root.backendObject
@@ -118,15 +150,92 @@ Rectangle {
         anchors.margins: 8
         spacing: 8
 
-        Text {
-            text: store.showCameraControls
-                  ? "Camera Controls"
-                  : (store.showPlaybackControls
-                     ? "Playback Controls"
-                     : (store.showThermalControls ? "Thermal Panel" : "System Metrics"))
-            color: theme ? theme.textPrimary : "white"
-            font.bold: true
-            font.pixelSize: 14
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Text {
+                text: root.sidebarTitle()
+                color: theme ? theme.textPrimary : "white"
+                font.bold: true
+                font.pixelSize: 14
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                visible: root.showLiveTabs()
+
+                Repeater {
+                    model: [
+                        { label: "System Metrics", index: 0 },
+                        { label: "Motor Control", index: 1 }
+                    ]
+
+                    delegate: Button {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        hoverEnabled: true
+
+                        background: Rectangle {
+                            radius: 6
+                            border.width: 1
+                            border.color: root.tabBorderColor(root.liveSidebarTab === parent.modelData.index)
+                            color: root.tabSelectedColor(root.liveSidebarTab === parent.modelData.index)
+                        }
+
+                        contentItem: Text {
+                            text: parent.modelData.label
+                            color: root.tabTextColor(root.liveSidebarTab === parent.modelData.index)
+                            font.pixelSize: 11
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        onClicked: root.liveSidebarTab = modelData.index
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                visible: root.showCameraTabs()
+
+                Repeater {
+                    model: [
+                        { label: "Camera Controls", index: 0 },
+                        { label: "Motor Control", index: 1 }
+                    ]
+
+                    delegate: Button {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        hoverEnabled: true
+
+                        background: Rectangle {
+                            radius: 6
+                            border.width: 1
+                            border.color: root.tabBorderColor(root.cameraSidebarTab === parent.modelData.index)
+                            color: root.tabSelectedColor(root.cameraSidebarTab === parent.modelData.index)
+                        }
+
+                        contentItem: Text {
+                            text: parent.modelData.label
+                            color: root.tabTextColor(root.cameraSidebarTab === parent.modelData.index)
+                            font.pixelSize: 11
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        onClicked: root.cameraSidebarTab = modelData.index
+                    }
+                }
+            }
         }
 
         SidebarPlaybackControlsPanel {
@@ -139,6 +248,7 @@ Rectangle {
             Layout.fillWidth: true
             theme: root.theme
             store: store
+            active: root.cameraSidebarTab === 0
         }
 
         SidebarThermalControlsPanel {
@@ -152,6 +262,15 @@ Rectangle {
             Layout.fillWidth: true
             theme: root.theme
             store: store
+            active: root.liveSidebarTab === 0
+        }
+
+        SidebarMotorControlPanel {
+            Layout.fillWidth: true
+            theme: root.theme
+            store: store
+            active: (root.showCameraTabs() && root.cameraSidebarTab === 1)
+                    || (root.showLiveTabs() && root.liveSidebarTab === 1)
         }
 
         Item {

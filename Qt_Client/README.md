@@ -1,6 +1,6 @@
-﻿# Qt CCTV Client (Live + Playback VMS)
+﻿# AEGIS Vision VMS
 
-이 프로젝트는 **Qt 6 (C++/QML)** 기반 CCTV 관제 클라이언트입니다.  
+이 프로젝트는 **Qt 6 (C++/QML)** 기반 **AEGIS Vision VMS** CCTV 관제 클라이언트입니다.  
 실시간 Live(4채널), 카메라 SD 저장소 표시, SUNAPI 기반 Playback(타임라인/구간 탐색), CCTV 3D Map 1차 연동(API/WS 수신 + 로컬 렌더링), 그리고 **Playback WebSocket 제어 송신 + 로컬 UDP RTP 송출** 경로를 제공합니다.
 
 ## 주요 기능
@@ -8,7 +8,8 @@
 ### 1. Live 모니터링
 - 2x2 그리드 4채널 동시 표시
 - MediaMTX 경유 RTSP/RTSPS 재생
-- 우측 `System Metrics` 패널 제공
+- 우측 사이드 패널 제공
+  - 기본 Live 화면: `System Metrics` / `Motor Control` 탭 전환
   - 상단: `FPS`, `LATENCY` 차트
   - 하단: `ACTIVE`, `STORAGE`, `CLIENT`, `SERVER` 4개 카드 세로 배치(패널 높이 전체 사용)
   - `CLIENT`는 실시간 CPU 사용률/메모리 사용률/GPU 정보 표시
@@ -41,6 +42,7 @@
 
 ### 3-1. 카메라 표시(Image Enhancements) 제어
 - Camera Controls 패널에서 채널별 표시값 제어
+  - 확대 화면 우측 패널에서 `Camera Controls` / `Motor Control` 탭 전환 가능
   - 대비(1~100), 밝기(1~100), 윤곽 조정(Enable + Level 1~32), 컬러 레벨(1~100)
   - 각 항목 값은 3자리 입력칸으로 직접 수정 가능(예: `100`)
   - 윤곽 활성화(SharpnessEnable) on/off
@@ -50,17 +52,18 @@
   - `POST /api/sunapi/display/settings`
   - `POST /api/sunapi/display/reset`
 
-### 3-2. 모터 제어(임시 UI)
-- 헤더 검색창 오른쪽 `Motor` 버튼으로 임시 모터 제어 다이얼로그 오픈
-- 다이얼로그에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
+### 3-2. 모터 제어
+- 헤더 버튼 대신 우측 사이드 패널 탭에서 모터 제어 제공
+  - 기본 Live 화면: `System Metrics` / `Motor Control`
+  - 확대 화면: `Camera Controls` / `Motor Control`
+- 패널에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
 - 지원 동작
   - `Hold` / `Stop` / `Set` / `Center All` / `Stop All`
   - `Hold` 버튼: 누르는 동안 `press`, 손을 떼면 자동 `release`
   - `Stop` 버튼: 선택한 `Target` 모터 즉시 정지
-- 현재 위치는 기능 검증용이며, 추후 Camera Controls 패널로 통합 예정
 - 관련 구현:
-  - `src/ui/qml/common/Header.qml`
-  - `src/ui/qml/dialogs/MotorControlDialog.qml`
+  - `src/ui/qml/sidebar/Sidebar.qml`
+  - `src/ui/qml/sidebar/SidebarMotorControlPanel.qml`
   - `src/core/cctv/BackendMotorControl.cpp`
   - `src/core/cctv/BackendMotorControlService.cpp`
 
@@ -198,22 +201,38 @@
 - 다이얼로그에서 `Refresh` 버튼 제거(`Close`만 유지)
 - 사양 정보는 팝업 호출 시 최초 1회 조회 후 캐시 재사용(반복 조회로 인한 UI 멈춤 완화)
 
-### 8. 실행파일 아이콘(Windows)
+### 8. 프로그램명 및 실행파일 아이콘(Windows)
+- 사용자 표시 프로그램명은 `AEGIS Vision VMS`로 통일
+- Windows 빌드 출력 실행파일 이름은 `AEGIS.exe`
 - 실행파일 아이콘은 `SVG`가 아닌 `ICO` 리소스로 적용
 - 아이콘 파일:
   - `src/ui/assets/icons/Hanwha_logo.ico`
-  - 원본 벡터: `src/ui/assets/icons/Hanwha_logo.svg`
+  - 원본 벡터/소스는 현재 AEGIS 브랜드 아이콘 기준으로 관리
+- 로그인 화면/시작 오버레이의 화면 표시용 로고는 별도 `PNG` 리소스 사용
+  - `src/ui/assets/icons/AEGIS_logo.png`
 - Windows 리소스 파일:
   - `src/app/app_icon.rc`
-- CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘에 반영
+- CMake에서 `WIN32` 빌드 시 `app_icon.rc`를 타깃 소스로 포함해 exe 아이콘과 파일 메타데이터를 반영
+
+### 8-1. 창 라운드 처리(Windows)
+- 프레임리스 메인 창과 3D Map 보조 창은 직각 창 대신 둥근 모서리로 표시
+- 초기 Win32 `SetWindowRgn(CreateRoundRectRgn(...))` 방식은 듀얼 모니터 이동 시 모서리 복원/계단 현상 이슈가 있어 제거
+- 현재는 `QML transparent window + OpacityMask` 기반 라운드 마스킹 사용
+  - 메인 창: `src/ui/qml/Main.qml`
+  - 3D Map 창: `src/ui/qml/Main.qml` 내부 `cctv3dMapDebugWindow`
+- 장점
+  - 듀얼 모니터 이동 시 region이 풀리며 직각으로 돌아가는 문제 완화
+  - Win32 region 방식보다 더 부드러운 모서리 표현
+- 빌드 시 `Qt5Compat.GraphicalEffects` 사용을 위해 `Qt::Core5Compat` 링크 필요
 
 ### 9. 앱 시작 로딩 오버레이
 - 앱 시작 직후 풀스크린 로딩 오버레이(스플래시) 표시
 - 고정 시간만으로 종료하지 않고, 카메라 준비 상태를 함께 반영해 종료
   - 종료 조건: `초기 UI 준비` + `최소 표시 시간` + (`4채널 준비 완료` 또는 `최대 대기시간 만료`)
   - 로딩 문구 예시: `카메라 스트림 준비 중... (x/4)`
-  - 최대 대기시간 만료 시 일부 채널 미준비여도 로그인 화면으로 진행
+- 최대 대기시간 만료 시 일부 채널 미준비여도 로그인 화면으로 진행
 - 오버레이는 한 번 닫히면 다시 표시되지 않음
+- 시작 오버레이도 메인 창과 동일한 라운드 기준을 사용
 - 종료 후 기존 로그인 화면 노출(로그인/세션 동작 변경 없음)
 - 관련 구현: `src/ui/qml/Main.qml`
 
@@ -396,7 +415,7 @@ ffmpeg 배치/버전 관리:
 참고:
 - Storage/Timeline/MonthDays/Playback digest는 Crow API를 통해 조회합니다.
 - 빌드 시 로컬 `tools/ffmpeg.exe`가 있으면 실행 폴더로 자동 복사하도록 CMake POST_BUILD가 설정되어 있습니다.
-- Windows 실행파일 아이콘은 `src/app/app_icon.rc` + `src/ui/assets/icons/Hanwha_logo.ico` 조합으로 설정됩니다.
+- Windows 실행파일 이름은 `AEGIS.exe`이며, 아이콘/파일 메타데이터는 `src/app/app_icon.rc` + `src/ui/assets/icons/Hanwha_logo.ico` 조합으로 설정됩니다.
 
 ## Qt -> Crow API 전환 현황 (한글)
 
@@ -510,7 +529,7 @@ Team3VideoReceiver/
 ## 빌드
 
 필수:
-1. Qt 6 SDK (Qt Quick, Qt Multimedia, Qt Network, Qt WebSockets)
+1. Qt 6 SDK (Qt Quick, Qt Multimedia, Qt Network, Qt WebSockets, Qt5Compat/Core5Compat)
 2. CMake 3.19+
 3. MinGW 64-bit (Qt Kit와 동일)
 
@@ -573,6 +592,13 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - `build/Desktop_Qt_6_10_2_MinGW_64_bit-Release` 폴더 삭제 후 재빌드 권장
   - 작업표시줄 고정 아이콘 사용 중이면 고정 해제 후 재실행/재고정 필요
 
+- 프레임리스 창 모서리가 직각/계단처럼 보일 때
+  - 현재 라운드 처리는 Win32 region이 아닌 `QML OpacityMask` 기반
+  - `Qt::Core5Compat` 또는 관련 QML 모듈이 배포 누락되면 창 외곽 표시가 기대와 다를 수 있음
+  - `windeployqt` 재실행 후 `Qt5Compat.GraphicalEffects` 관련 QML 리소스 포함 여부 확인
+
 ## License
 
 교육/프로젝트 목적 샘플 코드입니다.
+
+

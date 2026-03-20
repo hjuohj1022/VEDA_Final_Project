@@ -2,6 +2,7 @@
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import Qt5Compat.GraphicalEffects
 import "common"
 import "view"
 import "playback"
@@ -62,6 +63,7 @@ ApplicationWindow {
     property int startupCameraTarget: 4
     property int startupMaxWaitMs: 10000
     property string startupStatusText: "초기 리소스 준비 중..."
+    property int windowRadius: 18
 
     QtObject {
         id: uiStore
@@ -396,9 +398,34 @@ ApplicationWindow {
         property color accent: "#f97316"
     }
 
-    title: "Vision VMS"
-    color: theme.bgPrimary
-    
+    title: "AEGIS Vision VMS"
+    color: "transparent"
+
+    Rectangle {
+        id: windowMaskSource
+        anchors.fill: parent
+        radius: window.windowRadius
+        color: "black"
+        antialiasing: true
+        visible: false
+    }
+
+    Item {
+        id: windowChrome
+        anchors.fill: parent
+        property var maskSourceItem: windowMaskSource
+        layer.enabled: true
+        layer.effect: OpacityMask {
+            maskSource: windowChrome.maskSourceItem
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: window.windowRadius
+            color: theme.bgPrimary
+            antialiasing: true
+        }
+
     ColumnLayout {
         // 전체 레이아웃(타이틀바 + 헤더 + 본문)
         anchors.fill: parent
@@ -437,7 +464,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: "Vision VMS"
+                            text: "AEGIS Vision VMS"
                             color: theme.textPrimary
                             font.pixelSize: 12
                             font.bold: true
@@ -549,9 +576,6 @@ ApplicationWindow {
             }
             onRequestRtspSettings: {
                 rtspSettingsPopup.prepareAndShow()
-            }
-            onRequestMotorControl: {
-                motorControlDialog.openDialog()
             }
             onRequestExportCancel: {
                 backend.cancelPlaybackExport()
@@ -863,9 +887,13 @@ ApplicationWindow {
         z: 5000
         visible: startupOverlayVisible
         color: theme.bgSecondary
+        radius: window.windowRadius
+        antialiasing: true
 
         Rectangle {
             anchors.fill: parent
+            radius: window.windowRadius
+            antialiasing: true
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop { position: 0.0; color: theme.bgSecondary }
@@ -878,24 +906,20 @@ ApplicationWindow {
             anchors.centerIn: parent
             spacing: 16
 
-            Rectangle {
-                width: 72
-                height: 72
-                radius: 18
-                color: theme.accent
+            Image {
+                width: 84
+                height: 84
                 anchors.horizontalCenter: parent.horizontalCenter
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "\uE72E"
-                    color: "white"
-                    font.family: "Segoe MDL2 Assets"
-                    font.pixelSize: 30
-                }
+                source: "qrc:/qt/qml/Team3VideoReceiver/icons/AEGIS_logo.png"
+                fillMode: Image.PreserveAspectFit
+                sourceSize.width: 168
+                sourceSize.height: 168
+                smooth: true
+                mipmap: true
             }
 
             Text {
-                text: "Vision VMS"
+                text: "AEGIS Vision VMS"
                 color: theme.textPrimary
                 font.pixelSize: 30
                 font.bold: true
@@ -1194,12 +1218,6 @@ ApplicationWindow {
         hostWindow: window
     }
 
-    MotorControlDialog {
-        id: motorControlDialog
-        theme: window.appTheme
-        hostWindow: window
-    }
-
     TwoFactorDialog {
         id: twoFactorDialog
         theme: window.appTheme
@@ -1235,9 +1253,10 @@ ApplicationWindow {
         height: 760
         minimumWidth: 640
         minimumHeight: 520
-        title: "Vision VMS - 3D Map"
+        title: "AEGIS Vision VMS - 3D Map"
         flags: Qt.Window | Qt.FramelessWindowHint
-        color: theme.bgPrimary
+        color: "transparent"
+        property int chromeRadius: window.windowRadius
         property real viewRx: -20.0
         property real viewRy: 35.0
         property bool dragging: false
@@ -1282,6 +1301,31 @@ ApplicationWindow {
                 sendViewUpdate(true)
             }
         }
+
+        Rectangle {
+            id: mapWindowMaskSource
+            anchors.fill: parent
+            radius: cctv3dMapDebugWindow.chromeRadius
+            color: "black"
+            antialiasing: true
+            visible: false
+        }
+
+        Item {
+            id: mapWindowChrome
+            anchors.fill: parent
+            property var maskSourceItem: mapWindowMaskSource
+            layer.enabled: true
+            layer.effect: OpacityMask {
+                maskSource: mapWindowChrome.maskSourceItem
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: cctv3dMapDebugWindow.chromeRadius
+                color: theme.bgPrimary
+                antialiasing: true
+            }
 
         Rectangle {
             anchors.fill: parent
@@ -1543,13 +1587,18 @@ ApplicationWindow {
                 }
             }
         }
+        }
     }
 
     Rectangle {
         anchors.fill: parent
         color: "transparent"
+        radius: window.windowRadius
+        antialiasing: true
         border.color: window.isDarkMode ? "transparent" : "#d4d4d8"
         border.width: window.isDarkMode ? 0 : 1
         z: 1000
     }
+    }
 }
+

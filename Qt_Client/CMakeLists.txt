@@ -2,14 +2,14 @@
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
-# Network 紐⑤뱢 異붽? (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
+# Network 모듈 추가 (Core Core5Compat Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Core5Compat Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
 
 qt_standard_project_setup()
 
-# QTP0001: QML 紐⑤뱢??湲곕낯 由ъ냼???묐몢?щ? :/qt/qml/濡??ㅼ젙
+# QTP0001: QML 모듈의 기본 리소스 prefix를 :/qt/qml/로 설정
 qt_policy(SET QTP0001 NEW)
-# QTP0004: ?섏쐞 QML ?붾젆?곕━(qmldir) ?뺤콉 寃쎄퀬 ?듭젣
+# QTP0004: 하위 QML 디렉터리(qmldir) 정책 경고 억제
 qt_policy(SET QTP0004 OLD)
 
 set_source_files_properties(
@@ -27,6 +27,10 @@ set_source_files_properties(
 set_source_files_properties(
     src/ui/assets/icons/Hanwha_logo.svg
     PROPERTIES QT_RESOURCE_ALIAS icons/Hanwha_logo.svg
+)
+set_source_files_properties(
+    src/ui/assets/icons/AEGIS_logo.png
+    PROPERTIES QT_RESOURCE_ALIAS icons/AEGIS_logo.png
 )
 
 
@@ -98,6 +102,10 @@ qt_add_executable(Team3VideoReceiver
     .env
 )
 
+set_target_properties(Team3VideoReceiver PROPERTIES
+    OUTPUT_NAME "AEGIS"
+)
+
 if (WIN32)
     target_sources(Team3VideoReceiver PRIVATE src/app/app_icon.rc)
 endif()
@@ -130,9 +138,9 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/sidebar/SidebarCameraControlsPanel.qml
         src/ui/qml/sidebar/SidebarThermalControlsPanel.qml
         src/ui/qml/sidebar/SidebarSystemMetricsPanel.qml
+        src/ui/qml/sidebar/SidebarMotorControlPanel.qml
         src/ui/qml/dialogs/PlaybackExportSaveDialog.qml
         src/ui/qml/dialogs/RtspSettingsDialog.qml
-        src/ui/qml/dialogs/MotorControlDialog.qml
         src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/dialogs/SystemSpecsDialog.qml
         src/ui/qml/dialogs/TwoFactorDialog.qml
@@ -149,6 +157,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/assets/icons/tooltip_light.svg
         src/ui/assets/icons/Hanwha_logo.ico
         src/ui/assets/icons/Hanwha_logo.svg
+        src/ui/assets/icons/AEGIS_logo.png
 )
 
 target_include_directories(Team3VideoReceiver
@@ -160,6 +169,7 @@ target_include_directories(Team3VideoReceiver
 target_link_libraries(Team3VideoReceiver
     PRIVATE
         Qt::Core
+        Qt::Core5Compat
         Qt::Widgets
         Qt::Multimedia
         Qt::MultimediaWidgets

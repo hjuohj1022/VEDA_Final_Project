@@ -7,8 +7,9 @@ Item {
     id: root
     property var theme
     property var store
+    property bool active: true
 
-    visible: store ? store.showCameraControls : false
+    visible: store ? (active && store.showCameraControls) : false
     Layout.preferredHeight: visible ? 616 : 0
     Layout.maximumHeight: visible ? 616 : 0
     Layout.minimumHeight: visible ? 616 : 0
