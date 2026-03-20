@@ -75,7 +75,7 @@ static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t eve
             if ((APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_BOTH) ||
                 (APP_FRAME_STREAM_MODE == FRAME_STREAM_MODE_UDP_FRAME_MQTT_CONTROL)) {
                 udpStreamDeferInit(3000U);
-                (void)printf("DTLS init deferred for 3000 ms to let MQTT/TLS start first\n");
+                (void)printf("UDP stream init deferred for 3000 ms to let MQTT/TLS start first\n");
             }
         }
         else
