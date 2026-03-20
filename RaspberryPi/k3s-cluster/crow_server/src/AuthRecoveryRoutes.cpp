@@ -33,8 +33,7 @@ constexpr size_t kPasswordHashBytes = 32;
 constexpr char kPasswordHashPrefix[] = "pbkdf2_sha256";
 constexpr int kEmailVerifyCodeTtlSeconds = 300;
 constexpr int kEmailVerifyResendCooldownSeconds = 30;
-constexpr int kPasswordResetTokenTtlSeconds = 600;
-constexpr size_t kAuthTokenRandomBytes = 32;
+constexpr int kPasswordResetCodeTtlSeconds = 300;
 constexpr size_t kEmailVerifyCodeDigits = 6;
 constexpr size_t kEmailBufferBytes = 320;
 constexpr size_t kUserIdBufferBytes = 128;
@@ -303,6 +302,20 @@ std::optional<std::string> validateEmailVerificationCode(const std::string& code
     }
     if (!std::all_of(code.begin(), code.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
         return "인증 코드는 6자리 숫자여야 합니다.";
+    }
+    return std::nullopt;
+}
+
+// Password reset code validation helper
+std::optional<std::string> validatePasswordResetCode(const std::string& code) {
+    if (code.empty()) {
+        return "재설정 코드를 입력해 주세요.";
+    }
+    if (code.size() != kEmailVerifyCodeDigits) {
+        return "재설정 코드는 6자리 숫자여야 합니다.";
+    }
+    if (!std::all_of(code.begin(), code.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+        return "재설정 코드는 6자리 숫자여야 합니다.";
     }
     return std::nullopt;
 }
@@ -1394,6 +1407,43 @@ bool markTokenUsed(MYSQL* connection, const std::string& table_name, const std::
     return mysql_stmt_affected_rows(statement.get()) > 0;
 }
 
+// Delete unused recovery code record
+bool deleteRecoveryTokenByHash(MYSQL* connection,
+                               const std::string& table_name,
+                               const std::string& token_hash) {
+    if (!connection) {
+        return false;
+    }
+
+    const std::string query =
+        "DELETE FROM " + table_name +
+        " WHERE token_hash = ? AND used_at IS NULL LIMIT 1";
+    auto statement = prepareStatement(connection, query);
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND param_bind[1] = {};
+    unsigned long token_hash_length = static_cast<unsigned long>(token_hash.size());
+    param_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    param_bind[0].buffer = const_cast<char*>(token_hash.c_str());
+    param_bind[0].buffer_length = token_hash_length;
+    param_bind[0].length = &token_hash_length;
+
+    if (mysql_stmt_bind_param(statement.get(), param_bind) != 0) {
+        std::cerr << "[AUTH][DB] Failed to bind deleteRecoveryTokenByHash param: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[AUTH][DB] Failed to execute deleteRecoveryTokenByHash: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    return mysql_stmt_affected_rows(statement.get()) > 0;
+}
+
 // 디버그 토큰 응답 노출 여부 확인 함수
 bool shouldExposeDebugToken() {
     const char* env = std::getenv("AUTH_DEBUG_TOKEN_RESPONSE");
@@ -1592,39 +1642,49 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
             can_issue_token = true;
         }
 
-        std::optional<std::string> debug_token;
+        std::optional<std::string> debug_code;
         if (can_issue_token) {
-            const std::string token = generateRandomTokenHex(kAuthTokenRandomBytes);
-            const std::string token_hash = sha256Hex(token);
-            if (token.empty() || token_hash.empty()) {
-                return crow::response(500, "재설정 토큰 생성에 실패했습니다.");
+            const std::string code = generateEmailVerificationCode(kEmailVerifyCodeDigits);
+            const std::string code_hash = sha256Hex(code);
+            if (code.empty() || code_hash.empty()) {
+                return crow::response(500, "비밀번호 재설정 코드 생성에 실패했습니다.");
             }
 
             const long long expires_at =
-                static_cast<long long>(std::time(nullptr)) + kPasswordResetTokenTtlSeconds;
+                static_cast<long long>(std::time(nullptr)) + kPasswordResetCodeTtlSeconds;
             const std::string request_ip = resolveRequestIp(req);
             const std::string user_agent = req.get_header_value("User-Agent");
             if (!insertRecoveryToken(connection.get(),
                                      "password_reset_tokens",
                                      user_id,
-                                     token_hash,
+                                     code_hash,
                                      expires_at,
                                      request_ip,
                                      user_agent)) {
-                return crow::response(500, "재설정 토큰 저장에 실패했습니다.");
+                return crow::response(500, "비밀번호 재설정 코드 저장에 실패했습니다.");
+            }
+
+            std::string mail_error;
+            if (!sendAppScriptMail(email, code, "password_reset", &mail_error)) {
+                deleteRecoveryTokenByHash(connection.get(), "password_reset_tokens", code_hash);
+                return crow::response(
+                    502,
+                    mail_error.empty()
+                        ? "비밀번호 재설정 메일 발송에 실패했습니다."
+                        : mail_error);
             }
 
             if (shouldExposeDebugToken()) {
-                debug_token = token;
+                debug_code = code;
             }
         }
 
         crow::json::wvalue res;
         res["status"] = "success";
-        res["message"] = "입력한 정보가 일치하면 비밀번호 재설정 토큰이 발급됩니다.";
-        if (debug_token.has_value()) {
-            res["debug_token"] = *debug_token;
-            res["expires_in"] = kPasswordResetTokenTtlSeconds;
+        res["message"] = "입력한 정보가 일치하면 비밀번호 재설정 코드가 메일로 전송됩니다.";
+        res["expires_in"] = kPasswordResetCodeTtlSeconds;
+        if (debug_code.has_value()) {
+            res["debug_code"] = *debug_code;
         }
         return crow::response(200, res);
     });
@@ -1632,14 +1692,15 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
     CROW_ROUTE(app, "/auth/password/reset").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req) {
         auto x = crow::json::load(req.body);
-        if (!x || !x.has("token") || !x.has("new_password")) {
-            return crow::response(400, "token 또는 new_password 값이 없습니다.");
+        if (!x || !x.has("new_password") || (!x.has("code") && !x.has("token"))) {
+            return crow::response(400, "code 또는 new_password 값이 없습니다.");
         }
 
-        const std::string token = x["token"].s();
+        const bool is_legacy_token_request = x.has("token") && !x.has("code");
+        const std::string code = x.has("code") ? x["code"].s() : x["token"].s();
         const std::string new_password = x["new_password"].s();
-        if (token.empty()) {
-            return crow::response(400, "token 값이 없습니다.");
+        if (code.empty()) {
+            return crow::response(400, "재설정 코드를 입력해 주세요.");
         }
         if (new_password.empty()) {
             return crow::response(400, "새 비밀번호를 입력해 주세요.");
@@ -1647,10 +1708,15 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
         if (const auto complexity_error = validatePasswordComplexity(new_password)) {
             return crow::response(400, *complexity_error);
         }
+        if (!is_legacy_token_request) {
+            if (const auto code_error = validatePasswordResetCode(code)) {
+                return crow::response(400, *code_error);
+            }
+        }
 
-        const std::string token_hash = sha256Hex(token);
-        if (token_hash.empty()) {
-            return crow::response(500, "토큰 해시 계산에 실패했습니다.");
+        const std::string code_hash = sha256Hex(code);
+        if (code_hash.empty()) {
+            return crow::response(500, "재설정 코드 해시 계산에 실패했습니다.");
         }
 
         auto connection = openDatabaseConnection();
@@ -1659,8 +1725,8 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
         }
 
         std::string user_id;
-        if (!loadActiveTokenUserId(connection.get(), "password_reset_tokens", token_hash, &user_id)) {
-            return crow::response(400, "유효하지 않거나 만료된 재설정 토큰입니다.");
+        if (!loadActiveTokenUserId(connection.get(), "password_reset_tokens", code_hash, &user_id)) {
+            return crow::response(400, "유효하지 않거나 만료된 재설정 코드입니다.");
         }
 
         const std::string new_password_hash = hashPassword(new_password);
@@ -1670,13 +1736,14 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
         if (!updateStoredPasswordHash(connection.get(), user_id, new_password_hash)) {
             return crow::response(500, "비밀번호 변경에 실패했습니다.");
         }
-        if (!markTokenUsed(connection.get(), "password_reset_tokens", token_hash)) {
-            return crow::response(500, "재설정 토큰 상태 갱신에 실패했습니다.");
+        if (!markTokenUsed(connection.get(), "password_reset_tokens", code_hash)) {
+            return crow::response(500, "재설정 코드 해시 계산에 실패했습니다.");
         }
 
         crow::json::wvalue res;
         res["status"] = "success";
         res["changed"] = true;
+        res["message"] = "비밀번호가 성공적으로 재설정되었습니다.";
         return crow::response(200, res);
     });
 }
