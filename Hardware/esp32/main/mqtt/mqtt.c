@@ -32,6 +32,7 @@ static int64_t                  s_next_health_publish_us = 0;
 #define MQTT_FRAME_BACKOFF_DELAY_MS      0U
 #define MQTT_FRAME_IDLE_DELAY_MS         10U
 #define UDP_FAST_FRAME_IDLE_DELAY_MS     1U
+#define UDP_CONGESTED_FRAME_DELAY_MS     12U
 #define UDP_FAST_FRAME_YIELD_TICKS       1U
 #define UDP_FAST_CHUNK_YIELD_INTERVAL    0U
 #define UDP_CONGESTED_CHUNK_YIELD_INTERVAL 4U
@@ -416,7 +417,9 @@ void mqttFrameTask(void *arg)
             (uint16_t)((frame_payload_bytes + chunk_payload_size - 1U) / chunk_payload_size);
         const bool verbose_frame_log = use_mqtt;
         const TickType_t idle_delay_ticks = delayTicksAtLeast1(use_udp_fast8
-                                                               ? UDP_FAST_FRAME_IDLE_DELAY_MS
+                                                               ? (udp_congested
+                                                                      ? UDP_CONGESTED_FRAME_DELAY_MS
+                                                                      : UDP_FAST_FRAME_IDLE_DELAY_MS)
                                                                : MQTT_FRAME_IDLE_DELAY_MS);
 
         if (!use_mqtt && !use_udp) {
@@ -425,6 +428,11 @@ void mqttFrameTask(void *arg)
         }
 
         if (use_udp && !wifiIsConnected()) {
+            vTaskDelay(idle_delay_ticks);
+            continue;
+        }
+
+        if (use_udp_fast8 && udp_congested) {
             vTaskDelay(idle_delay_ticks);
             continue;
         }
@@ -556,7 +564,9 @@ void mqttFrameTask(void *arg)
         frameLinkReleaseReadyFrame(buffer_idx);
         if (use_udp_fast8) {
             // Let IDLE run often enough to satisfy the task watchdog under sustained UDP load.
-            vTaskDelay(UDP_FAST_FRAME_YIELD_TICKS);
+            vTaskDelay(udpStreamIsCongested()
+                           ? delayTicksAtLeast1(UDP_CONGESTED_FRAME_DELAY_MS)
+                           : UDP_FAST_FRAME_YIELD_TICKS);
         } else if (MQTT_FRAME_BACKOFF_DELAY_MS > 0U) {
             vTaskDelay(delayTicksAtLeast1(MQTT_FRAME_BACKOFF_DELAY_MS));
         }
