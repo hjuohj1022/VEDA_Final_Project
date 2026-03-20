@@ -8,7 +8,8 @@
 ### 1. Live 모니터링
 - 2x2 그리드 4채널 동시 표시
 - MediaMTX 경유 RTSP/RTSPS 재생
-- 우측 `System Metrics` 패널 제공
+- 우측 사이드 패널 제공
+  - 기본 Live 화면: `System Metrics` / `Motor Control` 탭 전환
   - 상단: `FPS`, `LATENCY` 차트
   - 하단: `ACTIVE`, `STORAGE`, `CLIENT`, `SERVER` 4개 카드 세로 배치(패널 높이 전체 사용)
   - `CLIENT`는 실시간 CPU 사용률/메모리 사용률/GPU 정보 표시
@@ -41,6 +42,7 @@
 
 ### 3-1. 카메라 표시(Image Enhancements) 제어
 - Camera Controls 패널에서 채널별 표시값 제어
+  - 확대 화면 우측 패널에서 `Camera Controls` / `Motor Control` 탭 전환 가능
   - 대비(1~100), 밝기(1~100), 윤곽 조정(Enable + Level 1~32), 컬러 레벨(1~100)
   - 각 항목 값은 3자리 입력칸으로 직접 수정 가능(예: `100`)
   - 윤곽 활성화(SharpnessEnable) on/off
@@ -50,17 +52,18 @@
   - `POST /api/sunapi/display/settings`
   - `POST /api/sunapi/display/reset`
 
-### 3-2. 모터 제어(임시 UI)
-- 헤더 검색창 오른쪽 `Motor` 버튼으로 임시 모터 제어 다이얼로그 오픈
-- 다이얼로그에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
+### 3-2. 모터 제어
+- 헤더 버튼 대신 우측 사이드 패널 탭에서 모터 제어 제공
+  - 기본 Live 화면: `System Metrics` / `Motor Control`
+  - 확대 화면: `Camera Controls` / `Motor Control`
+- 패널에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
 - 지원 동작
   - `Hold` / `Stop` / `Set` / `Center All` / `Stop All`
   - `Hold` 버튼: 누르는 동안 `press`, 손을 떼면 자동 `release`
   - `Stop` 버튼: 선택한 `Target` 모터 즉시 정지
-- 현재 위치는 기능 검증용이며, 추후 Camera Controls 패널로 통합 예정
 - 관련 구현:
-  - `src/ui/qml/common/Header.qml`
-  - `src/ui/qml/dialogs/MotorControlDialog.qml`
+  - `src/ui/qml/sidebar/Sidebar.qml`
+  - `src/ui/qml/sidebar/SidebarMotorControlPanel.qml`
   - `src/core/cctv/BackendMotorControl.cpp`
   - `src/core/cctv/BackendMotorControlService.cpp`
 

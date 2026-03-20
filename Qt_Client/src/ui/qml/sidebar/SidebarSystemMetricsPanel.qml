@@ -6,11 +6,12 @@ Item {
     id: root
     property var theme
     property var store
+    property bool active: true
     property var clientInfo: ({})
     property bool clientInfoReady: false
     property int lastCpuPercent: -1
 
-    visible: store ? (!store.showCameraControls && !store.showPlaybackControls && !store.showThermalControls) : false
+    visible: store ? (active && !store.showCameraControls && !store.showPlaybackControls && !store.showThermalControls) : false
     Layout.fillHeight: visible
     Layout.preferredHeight: visible ? 1 : 0
     Layout.minimumHeight: visible ? 1 : 0
