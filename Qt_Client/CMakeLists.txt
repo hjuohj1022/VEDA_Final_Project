@@ -134,9 +134,9 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/sidebar/SidebarCameraControlsPanel.qml
         src/ui/qml/sidebar/SidebarThermalControlsPanel.qml
         src/ui/qml/sidebar/SidebarSystemMetricsPanel.qml
+        src/ui/qml/sidebar/SidebarMotorControlPanel.qml
         src/ui/qml/dialogs/PlaybackExportSaveDialog.qml
         src/ui/qml/dialogs/RtspSettingsDialog.qml
-        src/ui/qml/dialogs/MotorControlDialog.qml
         src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/dialogs/SystemSpecsDialog.qml
         src/ui/qml/dialogs/TwoFactorDialog.qml

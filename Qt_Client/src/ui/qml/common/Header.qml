@@ -24,7 +24,6 @@ Rectangle {
     signal requestPasswordChange()
     signal requestHome()
     signal requestRtspSettings()
-    signal requestMotorControl()
     signal requestExportCancel()
 
     function formatSession(seconds) {
@@ -152,45 +151,6 @@ Rectangle {
                     font.pixelSize: 10
                 }
             }
-        }
-
-        Rectangle {
-            Layout.preferredWidth: root.isLoggedIn ? 88 : 0
-            Layout.preferredHeight: 34
-            visible: root.isLoggedIn
-            radius: 9
-            color: motorBtnMouse.pressed
-                   ? "#ea580c"
-                   : (motorBtnMouse.containsMouse
-                      ? "#fb923c"
-                      : (theme ? theme.accent : "#f97316"))
-            border.color: "transparent"
-            scale: motorBtnMouse.pressed ? 0.96 : 1.0
-            Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-
-            Text {
-                anchors.centerIn: parent
-                text: "Motor"
-                color: "white"
-                font.bold: true
-                font.pixelSize: 12
-            }
-
-            MouseArea {
-                id: motorBtnMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    backend.resetSessionTimer()
-                    root.requestMotorControl()
-                }
-            }
-
-            ToolTip.visible: motorBtnMouse.containsMouse
-            ToolTip.text: "모터 제어"
-            ToolTip.delay: 250
-            ToolTip.timeout: 1800
         }
 
         Rectangle {
