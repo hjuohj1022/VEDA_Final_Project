@@ -51,6 +51,7 @@ qt_add_executable(Team3VideoReceiver
     src/core/core/BackendCoreSystemInfoService.cpp
     src/core/auth/BackendAuthLogin.cpp
     src/core/auth/BackendAuthRegister.cpp
+    src/core/auth/BackendAuthRecovery.cpp
     src/core/auth/BackendAuthRequestService.cpp
     src/core/auth/BackendAuthSession.cpp
     src/core/auth/BackendAuthSessionService.cpp
@@ -137,6 +138,8 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/dialogs/TwoFactorDialog.qml
         src/ui/qml/dialogs/AccountDeleteDialog.qml
         src/ui/qml/dialogs/ChangePasswordDialog.qml
+        src/ui/qml/dialogs/PasswordForgotDialog.qml
+        src/ui/qml/dialogs/PasswordResetDialog.qml
         src/ui/qml/components/IconButton.qml
         src/ui/qml/components/SidebarControlButton.qml
         src/ui/qml/components/SidebarDisplaySlider.qml

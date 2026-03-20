@@ -126,6 +126,10 @@ public:
     Q_INVOKABLE void requestEmailVerification(QString id, QString email);
     // 회원가입 이메일 인증 코드 확인
     Q_INVOKABLE void confirmEmailVerification(QString id, QString email, QString code);
+    // 비밀번호 재설정 코드 요청
+    Q_INVOKABLE void requestPasswordReset(QString id, QString email);
+    // 재설정 코드로 새 비밀번호 적용
+    Q_INVOKABLE void resetPasswordWithCode(QString code, QString newPassword);
     Q_INVOKABLE void registerUser(QString id, QString pw, QString email);
     Q_INVOKABLE void logout();
     Q_INVOKABLE void resetSessionTimer();
@@ -232,6 +236,10 @@ signals:
     void emailVerificationRequestFailed(QString error);
     void emailVerificationConfirmed(QString message);
     void emailVerificationConfirmFailed(QString error);
+    void passwordResetRequested(QString message, QString debugCode);
+    void passwordResetRequestFailed(QString error);
+    void passwordResetCompleted(QString message);
+    void passwordResetFailed(QString error);
     void registerSuccess(QString message);
     void registerFailed(QString error);
     void sessionExpired();

@@ -761,6 +761,152 @@ void BackendAuthRequestService::changePassword(Backend *backend, BackendPrivate 
     });
 }
 
+void BackendAuthRequestService::requestPasswordReset(Backend *backend, BackendPrivate *state, QString id, QString email)
+{
+    // 비밀번호 재설정 코드 발급 요청 처리
+    const QString trimmedId = id.trimmed();
+    const QString trimmedEmail = email.trimmed();
+    if (trimmedId.isEmpty() || trimmedEmail.isEmpty()) {
+        emit backend->passwordResetRequestFailed("ID와 이메일을 모두 입력해 주세요.");
+        return;
+    }
+    const QString emailError = validateEmailForClient(trimmedEmail);
+    if (!emailError.isEmpty()) {
+        emit backend->passwordResetRequestFailed(emailError);
+        return;
+    }
+    if (state->m_passwordResetRequestInProgress) {
+        emit backend->passwordResetRequestFailed("비밀번호 재설정 요청이 이미 처리 중입니다.");
+        return;
+    }
+
+    const QString requestUrl = backend->serverUrl() + "/auth/password/forgot";
+    QNetworkRequest request{QUrl(requestUrl)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    backend->applySslIfNeeded(request);
+
+    QJsonObject json;
+    json["id"] = trimmedId;
+    json["email"] = trimmedEmail;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_passwordResetRequestReply = reply;
+    state->m_passwordResetRequestInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "PASSWORD_RESET_REQUEST");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            QString message;
+            QString debugCode;
+            const QJsonDocument doc = QJsonDocument::fromJson(responseBody);
+            if (doc.isObject()) {
+                const QJsonObject obj = doc.object();
+                message = obj.value("message").toString().trimmed();
+                debugCode = obj.value("debug_code").toString().trimmed();
+                if (debugCode.isEmpty())
+                    debugCode = obj.value("debug_token").toString().trimmed();
+            }
+            if (message.isEmpty()) {
+                message = "입력한 정보가 일치하면 비밀번호 재설정 코드가 메일로 전송됩니다.";
+            }
+            emit backend->passwordResetRequested(message, debugCode);
+        } else if (isSslFailure(netError)) {
+            emit backend->passwordResetRequestFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->passwordResetRequestFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->passwordResetRequestFailed(bodyText.isEmpty()
+                                                         ? "비밀번호 재설정 요청에 실패했습니다."
+                                                         : bodyText);
+        }
+
+        if (state->m_passwordResetRequestReply == reply) {
+            state->m_passwordResetRequestReply = nullptr;
+        }
+        state->m_passwordResetRequestInProgress = false;
+        reply->deleteLater();
+    });
+}
+
+void BackendAuthRequestService::resetPasswordWithCode(Backend *backend,
+                                                       BackendPrivate *state,
+                                                       QString code,
+                                                       QString newPassword)
+{
+    // 재설정 코드 기반 새 비밀번호 적용 요청 처리
+    const QString trimmedCode = code.trimmed();
+    if (trimmedCode.isEmpty()) {
+        emit backend->passwordResetFailed("재설정 코드를 입력해 주세요.");
+        return;
+    }
+    if (newPassword.isEmpty()) {
+        emit backend->passwordResetFailed("새 비밀번호를 입력해 주세요.");
+        return;
+    }
+    const QString complexityError = validatePasswordComplexityForClient(newPassword);
+    if (!complexityError.isEmpty()) {
+        emit backend->passwordResetFailed(complexityError);
+        return;
+    }
+    if (state->m_passwordResetInProgress) {
+        emit backend->passwordResetFailed("비밀번호 재설정 요청이 이미 처리 중입니다.");
+        return;
+    }
+
+    const QString resetUrl = backend->serverUrl() + "/auth/password/reset";
+    QNetworkRequest request{QUrl(resetUrl)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    backend->applySslIfNeeded(request);
+
+    QJsonObject json;
+    json["code"] = trimmedCode;
+    json["token"] = trimmedCode;
+    json["new_password"] = newPassword;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_passwordResetReply = reply;
+    state->m_passwordResetInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "PASSWORD_RESET");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            QString message;
+            const QJsonDocument doc = QJsonDocument::fromJson(responseBody);
+            if (doc.isObject()) {
+                message = doc.object().value("message").toString().trimmed();
+            }
+            if (message.isEmpty()) {
+                message = "비밀번호가 성공적으로 재설정되었습니다.";
+            }
+            emit backend->passwordResetCompleted(message);
+        } else if (isSslFailure(netError)) {
+            emit backend->passwordResetFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->passwordResetFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->passwordResetFailed(bodyText.isEmpty()
+                                                  ? "비밀번호 재설정에 실패했습니다."
+                                                  : bodyText);
+        }
+
+        if (state->m_passwordResetReply == reply) {
+            state->m_passwordResetReply = nullptr;
+        }
+        state->m_passwordResetInProgress = false;
+        reply->deleteLater();
+    });
+}
+
 void BackendAuthRequestService::requestEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email)
 {
     // 회원가입 이메일 인증 코드 발급 요청 처리
@@ -1012,6 +1158,4 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
         reply->deleteLater();
     });
 }
-
-
 

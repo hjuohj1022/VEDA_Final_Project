@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
@@ -7,9 +7,12 @@ Dialog {
     property var theme
     property var backendObject
     property string statusText: ""
+    property string helperText: ""
+    property string userId: ""
+    property string email: ""
     property bool busy: false
-    property bool currentPasswordVisible: false
     property bool newPasswordVisible: false
+    signal resetCompleted(string message)
     readonly property int dialogRadius: 8
 
     modal: true
@@ -20,7 +23,7 @@ Dialog {
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
 
     function validateNewPasswordComplexity(password) {
-        // 비밀번호 복잡도 규칙 검증
+        // 새 비밀번호 복잡도 규칙 검증
         if (password.length < 8)
             return "비밀번호는 8자 이상이어야 합니다."
         if (password.length > 16)
@@ -34,32 +37,65 @@ Dialog {
         return ""
     }
 
-    function openDialog() {
-        // 다이얼로그 초기화 후 표시
+    // 재설정 코드 입력 다이얼로그 초기화 함수
+    function openDialog(userIdValue, emailValue, initialCode, message) {
         statusText = ""
+        helperText = "입력한 정보가 일치하면 메일로 코드가 전송됩니다. 메일을 받은 경우에만 아래 코드를 입력해 주세요."
+        userId = userIdValue || ""
+        email = emailValue || ""
         busy = false
-        currentPasswordVisible = false
         newPasswordVisible = false
-        currentPasswordField.text = ""
+        codeField.text = initialCode || ""
         newPasswordField.text = ""
         open()
-        currentPasswordField.forceActiveFocus()
+        if (codeField.text.length > 0) {
+            newPasswordField.forceActiveFocus()
+        } else {
+            codeField.forceActiveFocus()
+        }
     }
 
-    onOpened: if (backendObject) backendObject.resetSessionTimer()
+    function submitReset() {
+        if (!backendObject) {
+            root.statusText = "Backend is not available."
+            return
+        }
+        if (codeField.text.trim().length === 0) {
+            root.statusText = "재설정 코드를 입력해 주세요."
+            codeField.forceActiveFocus()
+            return
+        }
+        if (newPasswordField.text.length === 0) {
+            root.statusText = "새 비밀번호를 입력해 주세요."
+            newPasswordField.forceActiveFocus()
+            return
+        }
+
+        const complexityError = root.validateNewPasswordComplexity(newPasswordField.text)
+        if (complexityError.length > 0) {
+            root.statusText = complexityError
+            newPasswordField.forceActiveFocus()
+            return
+        }
+
+        root.statusText = ""
+        root.busy = true
+        backendObject.resetPasswordWithCode(codeField.text, newPasswordField.text)
+    }
 
     Connections {
         target: backendObject
 
-        function onPasswordChangeCompleted() {
+        function onPasswordResetCompleted(message) {
             if (!root.visible)
                 return
             root.busy = false
             root.statusText = ""
             root.close()
+            root.resetCompleted(message)
         }
 
-        function onPasswordChangeFailed(error) {
+        function onPasswordResetFailed(error) {
             if (!root.visible)
                 return
             root.busy = false
@@ -97,7 +133,7 @@ Dialog {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: 14
-            text: "비밀번호 변경"
+            text: "비밀번호 재설정"
             color: root.theme ? root.theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14
@@ -116,68 +152,36 @@ Dialog {
 
             Text {
                 Layout.fillWidth: true
-                text: "현재 비밀번호를 확인한 뒤 새 비밀번호로 변경합니다."
+                text: root.helperText
                 color: root.theme ? root.theme.textPrimary : "#e4e4e7"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 12
             }
 
-            Item {
+            Text {
+                Layout.fillWidth: true
+                visible: root.userId.length > 0 || root.email.length > 0
+                text: "ID: " + root.userId + (root.email.length > 0 ? "\nEmail: " + root.email : "")
+                color: root.theme ? root.theme.textPrimary : "#e4e4e7"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+
+            TextField {
+                id: codeField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
-
-                TextField {
-                    id: currentPasswordField
-                    anchors.fill: parent
-                    rightPadding: 40
-                    placeholderText: "현재 비밀번호"
-                    placeholderTextColor: root.theme ? "#d1d5db" : "#6b7280"
-                    echoMode: root.currentPasswordVisible ? TextInput.Normal : TextInput.Password
-                    color: root.theme ? root.theme.textPrimary : "white"
-                    background: Rectangle {
-                        color: root.theme ? root.theme.bgComponent : "#18181b"
-                        border.color: currentPasswordField.activeFocus
-                                      ? (root.theme ? root.theme.accent : "#f97316")
-                                      : (root.theme ? root.theme.border : "#27272a")
-                        radius: 6
-                    }
-                    onTextEdited: {
-                        if (backendObject)
-                            backendObject.resetSessionTimer()
-                        root.statusText = ""
-                    }
+                placeholderText: "재설정 코드"
+                placeholderTextColor: root.theme ? "#d1d5db" : "#6b7280"
+                color: root.theme ? root.theme.textPrimary : "white"
+                background: Rectangle {
+                    color: root.theme ? root.theme.bgComponent : "#18181b"
+                    border.color: codeField.activeFocus
+                                  ? (root.theme ? root.theme.accent : "#f97316")
+                                  : (root.theme ? root.theme.border : "#27272a")
+                    radius: 6
                 }
-
-                ToolButton {
-                    anchors.right: parent.right
-                    anchors.rightMargin: 4
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 32
-                    height: 32
-                    onClicked: root.currentPasswordVisible = !root.currentPasswordVisible
-                    contentItem: Item {
-                        Text {
-                            anchors.centerIn: parent
-                            text: "\uE890"
-                            font.family: "Segoe MDL2 Assets"
-                            font.pixelSize: 16
-                            color: root.theme ? root.theme.textSecondary : "#d4d4d8"
-                        }
-                        Rectangle {
-                            visible: !root.currentPasswordVisible
-                            anchors.centerIn: parent
-                            width: 2
-                            height: 18
-                            radius: 1
-                            rotation: -45
-                            color: root.theme ? root.theme.textSecondary : "#d4d4d8"
-                        }
-                    }
-                    background: Rectangle {
-                        color: "transparent"
-                        border.color: "transparent"
-                    }
-                }
+                onTextEdited: root.statusText = ""
             }
 
             Item {
@@ -199,11 +203,8 @@ Dialog {
                                       : (root.theme ? root.theme.border : "#27272a")
                         radius: 6
                     }
-                    onTextEdited: {
-                        if (backendObject)
-                            backendObject.resetSessionTimer()
-                        root.statusText = ""
-                    }
+                    onTextEdited: root.statusText = ""
+                    onAccepted: root.submitReset()
                 }
 
                 ToolButton {
@@ -288,43 +289,12 @@ Dialog {
             }
 
             Button {
-                text: root.busy ? "변경 중..." : "비밀번호 변경"
-                Layout.preferredWidth: 132
+                id: resetButton
+                text: root.busy ? "변경 중..." : "비밀번호 재설정"
+                Layout.preferredWidth: 148
                 Layout.preferredHeight: 34
                 enabled: !root.busy
-                onClicked: {
-                    if (!backendObject) {
-                        root.statusText = "Backend is not available."
-                        return
-                    }
-                    if (currentPasswordField.text.length === 0) {
-                        root.statusText = "현재 비밀번호를 입력해 주세요."
-                        currentPasswordField.forceActiveFocus()
-                        return
-                    }
-                    if (newPasswordField.text.length === 0) {
-                        root.statusText = "새 비밀번호를 입력해 주세요."
-                        newPasswordField.forceActiveFocus()
-                        return
-                    }
-                    if (currentPasswordField.text === newPasswordField.text) {
-                        root.statusText = "새 비밀번호는 현재 비밀번호와 달라야 합니다."
-                        newPasswordField.forceActiveFocus()
-                        return
-                    }
-
-                    const complexityError = root.validateNewPasswordComplexity(newPasswordField.text)
-                    if (complexityError.length > 0) {
-                        root.statusText = complexityError
-                        newPasswordField.forceActiveFocus()
-                        return
-                    }
-
-                    backendObject.resetSessionTimer()
-                    root.statusText = ""
-                    root.busy = true
-                    backendObject.changePassword(currentPasswordField.text, newPasswordField.text)
-                }
+                onClicked: root.submitReset()
                 background: Rectangle {
                     color: parent.enabled
                            ? (parent.down ? "#ea580c" : (root.theme ? root.theme.accent : "#f97316"))
