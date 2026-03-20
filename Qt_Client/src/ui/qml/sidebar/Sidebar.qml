@@ -88,12 +88,12 @@ Rectangle {
 
     function sidebarTitle() {
         if (showCameraTabs())
-            return cameraSidebarTab === 0 ? "Camera Controls" : "Motor Control"
+            return "Side Panel"
         if (store.showPlaybackControls)
             return "Playback Controls"
         if (store.showThermalControls)
             return "Thermal Panel"
-        return liveSidebarTab === 0 ? "System Metrics" : "Motor Control"
+        return "Side Panel"
     }
 
     function tabSelectedColor(selected) {

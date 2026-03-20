@@ -2,14 +2,14 @@
 project(Team3VideoReceiver LANGUAGES CXX VERSION 1.1)
 set(CMAKE_UNITY_BUILD OFF)
 
-# Network 紐⑤뱢 異붽? (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
+# Network 모듈 추가 (Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia MultimediaWidgets Network Quick Qml QuickControls2 Mqtt WebSockets)
 
 qt_standard_project_setup()
 
-# QTP0001: QML 紐⑤뱢??湲곕낯 由ъ냼???묐몢?щ? :/qt/qml/濡??ㅼ젙
+# QTP0001: QML 모듈의 기본 리소스 prefix를 :/qt/qml/로 설정
 qt_policy(SET QTP0001 NEW)
-# QTP0004: ?섏쐞 QML ?붾젆?곕━(qmldir) ?뺤콉 寃쎄퀬 ?듭젣
+# QTP0004: 하위 QML 디렉터리(qmldir) 정책 경고 억제
 qt_policy(SET QTP0004 OLD)
 
 set_source_files_properties(
