@@ -1,4 +1,4 @@
-#ifndef BACKEND_AUTH_REQUEST_SERVICE_H
+﻿#ifndef BACKEND_AUTH_REQUEST_SERVICE_H
 #define BACKEND_AUTH_REQUEST_SERVICE_H
 
 class Backend;
@@ -17,7 +17,11 @@ public:
     static void deleteAccount(Backend *backend, BackendPrivate *state, QString password, QString otp);
     // 로그인 계정 비밀번호 변경 요청 처리
     static void changePassword(Backend *backend, BackendPrivate *state, QString currentPassword, QString newPassword);
-    static void registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw);
+    // 회원가입 이메일 인증 코드 발급 요청 처리
+    static void requestEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email);
+    // 회원가입 이메일 인증 코드 확인 요청 처리
+    static void confirmEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email, QString code);
+    static void registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw, QString email);
 };
 
 #endif // BACKEND_AUTH_REQUEST_SERVICE_H
