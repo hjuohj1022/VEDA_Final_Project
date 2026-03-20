@@ -396,7 +396,7 @@ ApplicationWindow {
         property color accent: "#f97316"
     }
 
-    title: "Vision VMS"
+    title: "AEGIS Vision VMS"
     color: theme.bgPrimary
     
     ColumnLayout {
@@ -437,7 +437,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: "Vision VMS"
+                            text: "AEGIS Vision VMS"
                             color: theme.textPrimary
                             font.pixelSize: 12
                             font.bold: true
@@ -895,7 +895,7 @@ ApplicationWindow {
             }
 
             Text {
-                text: "Vision VMS"
+                text: "AEGIS Vision VMS"
                 color: theme.textPrimary
                 font.pixelSize: 30
                 font.bold: true
@@ -1235,7 +1235,7 @@ ApplicationWindow {
         height: 760
         minimumWidth: 640
         minimumHeight: 520
-        title: "Vision VMS - 3D Map"
+        title: "AEGIS Vision VMS - 3D Map"
         flags: Qt.Window | Qt.FramelessWindowHint
         color: theme.bgPrimary
         property real viewRx: -20.0
