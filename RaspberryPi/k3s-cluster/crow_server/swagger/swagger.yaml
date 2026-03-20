@@ -4,8 +4,8 @@ info:
   description: CCTV 녹화, SUNAPI 연동, 모터 제어, ESP32 상태 확인을 제공하는 서버 API
   version: 1.0.0
 servers:
-  - url: https://<LB_IP>/
-    description: 개발 서버
+  - url: /
+    description: 현재 접속한 서버 기준
 
 paths:
   /register:
