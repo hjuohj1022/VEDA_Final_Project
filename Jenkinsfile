@@ -7,6 +7,9 @@ pipeline {
         KUBE_CONFIG = 'k3s-kubeconfig'
         GIT_CREDENTIAL_ID = 'github-login'
         THERMAL_DTLS_SECRET_CRED = 'thermal-dtls-secret-yaml'
+        MAIL_APP_SCRIPT_URL_CRED = 'crow-mail-app-script-url'
+        MAIL_SHARED_SECRET_CRED = 'crow-mail-shared-secret'
+        MAIL_APP_SCRIPT_TIMEOUT_MS_CRED = 'crow-mail-app-script-timeout-ms'
     }
 
     stages {
@@ -271,9 +274,28 @@ pipeline {
                             sh "docker buildx build --platform linux/arm64 -t hjuohj/crow-server:${env.DOCKER_VER} -t hjuohj/crow-server:latest --push ."
                         }
                     }
-                    withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG')]) {
+                    withCredentials([
+                        file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG'),
+                        string(credentialsId: MAIL_APP_SCRIPT_URL_CRED, variable: 'MAIL_APP_SCRIPT_URL'),
+                        string(credentialsId: MAIL_SHARED_SECRET_CRED, variable: 'MAIL_SHARED_SECRET'),
+                        string(credentialsId: MAIL_APP_SCRIPT_TIMEOUT_MS_CRED, variable: 'MAIL_APP_SCRIPT_TIMEOUT_MS')
+                    ]) {
                         sh '''
                             set -euo pipefail
+
+                            tmp_env="$(mktemp)"
+                            cat > "$tmp_env" <<EOF
+MAIL_APP_SCRIPT_URL=$MAIL_APP_SCRIPT_URL
+MAIL_SHARED_SECRET=$MAIL_SHARED_SECRET
+MAIL_APP_SCRIPT_TIMEOUT_MS=$MAIL_APP_SCRIPT_TIMEOUT_MS
+EOF
+
+                            tmp_secret_yaml="$(mktemp)"
+                            trap 'rm -f "$tmp_env" "$tmp_secret_yaml"' EXIT
+
+                            kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-mail-secret --from-env-file="$tmp_env" --dry-run=client -o yaml > "$tmp_secret_yaml"
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_secret_yaml"
+
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
                             kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/crow-server
                             kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/crow-server --timeout=180s
