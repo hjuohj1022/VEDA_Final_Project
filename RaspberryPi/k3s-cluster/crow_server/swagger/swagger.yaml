@@ -141,7 +141,9 @@ paths:
       summary: 회원가입 전 이메일 인증 코드 발급
       description: |
         users 선등록 없이 signup_email_verifications 테이블에 pending 인증 정보를 저장하고
-        이메일 인증 코드를 발급합니다.
+        6자리 이메일 인증 코드를 발급합니다.
+        인증 코드는 5분 동안 유효하며,
+        같은 id+email 조합에 대해 30초 이내 재발송은 제한됩니다.
         이 단계에서는 users 테이블을 수정하지 않습니다.
         이후 /auth/email/verify/confirm에서 verified 상태로 바꾼 뒤,
         /register가 같은 id+email 조합의 인증 완료 여부를 검사합니다.
@@ -164,8 +166,12 @@ paths:
           description: pending 이메일 인증 코드 발급 성공
         '400':
           description: 입력값 오류
+        '429':
+          description: 재발송 쿨다운 미경과
         '409':
           description: 이미 사용 중인 ID 또는 이메일
+        '502':
+          description: Apps Script 메일 발송 실패
         '500':
           description: 서버 내부 오류
 
@@ -184,10 +190,17 @@ paths:
             schema:
               type: object
               required:
-                - token
+                - id
+                - email
+                - code
               properties:
-                token:
+                id:
                   type: string
+                email:
+                  type: string
+                code:
+                  type: string
+                  description: 6자리 숫자 인증 코드
       responses:
         '200':
           description: 이메일 인증 완료

@@ -92,6 +92,21 @@ spec:
           value: "0.0.0.0"
         - name: THERMAL_UDP_PORT
           value: "5005"
+        - name: MAIL_APP_SCRIPT_URL
+          valueFrom:
+            secretKeyRef:
+              name: crow-mail-secret
+              key: MAIL_APP_SCRIPT_URL
+        - name: MAIL_SHARED_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: crow-mail-secret
+              key: MAIL_SHARED_SECRET
+        - name: MAIL_APP_SCRIPT_TIMEOUT_MS
+          valueFrom:
+            secretKeyRef:
+              name: crow-mail-secret
+              key: MAIL_APP_SCRIPT_TIMEOUT_MS
 
         # 마운트
         volumeMounts:

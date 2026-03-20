@@ -31,6 +31,7 @@ find_package(OpenSSL REQUIRED)
 add_executable(
   crow_server
   src/main.cpp
+  src/AppScriptMailSender.cpp
   src/AuthRecoveryRoutes.cpp
   src/EspHealthManager.cpp
   src/MotorManager.cpp
