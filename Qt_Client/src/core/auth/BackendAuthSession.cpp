@@ -1,4 +1,5 @@
 #include "Backend.h"
+#include "internal/auth/BackendAuthRequestService.h"
 #include "internal/auth/BackendAuthSessionService.h"
 
 void Backend::logout()
@@ -13,11 +14,10 @@ void Backend::resetSessionTimer()
 
 bool Backend::adminUnlock(QString adminCode)
 {
-    return BackendAuthSessionService::adminUnlock(this, d_ptr.get(), adminCode);
+    return BackendAuthRequestService::adminUnlock(this, d_ptr.get(), adminCode);
 }
 
 void Backend::onSessionTick()
 {
     BackendAuthSessionService::onSessionTick(this, d_ptr.get());
 }
-

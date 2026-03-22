@@ -10,7 +10,6 @@ class BackendAuthSessionService
 public:
     static void logout(Backend *backend, BackendPrivate *state);
     static void resetSessionTimer(Backend *backend, BackendPrivate *state);
-    static bool adminUnlock(Backend *backend, BackendPrivate *state, const QString &adminCode);
     static void onSessionTick(Backend *backend, BackendPrivate *state);
 };
 
