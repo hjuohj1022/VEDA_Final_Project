@@ -105,25 +105,6 @@ void BackendAuthSessionService::resetSessionTimer(Backend *backend, BackendPriva
     }
 }
 
-bool BackendAuthSessionService::adminUnlock(Backend *backend, BackendPrivate *state, const QString &adminCode)
-{
-    const QString expected = state->m_env.value("ADMIN_UNLOCK_KEY").trimmed();
-    if (expected.isEmpty()) {
-        emit backend->loginFailed("관리자 해제 키가 설정되어 있지 않습니다.");
-        return false;
-    }
-
-    if (adminCode.trimmed() != expected) {
-        emit backend->loginFailed("관리자 해제 키가 올바르지 않습니다.");
-        return false;
-    }
-
-    state->m_loginLocked = false;
-    state->m_loginFailedAttempts = 0;
-    emit backend->loginLockChanged();
-    return true;
-}
-
 void BackendAuthSessionService::onSessionTick(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_isLoggedIn) {

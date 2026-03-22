@@ -153,6 +153,59 @@ QString validateEmailForClient(const QString &email)
 
 } // namespace
 
+bool BackendAuthRequestService::adminUnlock(Backend *backend, BackendPrivate *state, QString adminCode)
+{
+    const QString trimmedCode = adminCode.trimmed();
+    if (trimmedCode.isEmpty()) {
+        emit backend->loginFailed("관리자 해제 키를 입력해 주세요.");
+        return false;
+    }
+    if (state->m_adminUnlockInProgress) {
+        emit backend->loginFailed("관리자 잠금 해제 요청 처리 중입니다. 잠시만 기다려 주세요.");
+        return false;
+    }
+
+    const QString unlockUrl = backend->serverUrl() + "/auth/admin/unlock";
+    QNetworkRequest request{QUrl(unlockUrl)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    backend->applySslIfNeeded(request);
+
+    QJsonObject json;
+    json["code"] = trimmedCode;
+
+    QNetworkReply *reply = state->m_manager->post(request, QJsonDocument(json).toJson());
+    state->m_adminUnlockReply = reply;
+    state->m_adminUnlockInProgress = true;
+    backend->attachIgnoreSslErrors(reply, "ADMIN_UNLOCK");
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [=]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray responseBody = reply->readAll();
+        const QString bodyText = responseText(responseBody);
+
+        if (netError == QNetworkReply::NoError) {
+            resetLoginLockState(backend, state);
+        } else if (isSslFailure(netError)) {
+            emit backend->loginFailed("서버 SSL 검증에 실패했습니다.");
+        } else if (isServerUnavailable(statusCode, netError)) {
+            emit backend->loginFailed("서버에 연결할 수 없습니다.");
+        } else {
+            emit backend->loginFailed(bodyText.isEmpty()
+                                          ? "관리자 잠금 해제에 실패했습니다."
+                                          : bodyText);
+        }
+
+        if (state->m_adminUnlockReply == reply) {
+            state->m_adminUnlockReply = nullptr;
+        }
+        state->m_adminUnlockInProgress = false;
+        reply->deleteLater();
+    });
+
+    return true;
+}
+
 void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, QString id, QString pw)
 {
     const QString trimmedId = id.trimmed();
@@ -1158,4 +1211,3 @@ void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *s
         reply->deleteLater();
     });
 }
-

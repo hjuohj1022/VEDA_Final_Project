@@ -631,9 +631,9 @@ ApplicationWindow {
                                                ? "#ea580c"
                                                : (!backend.isLoggedIn
                                                ? (window.isDarkMode ? "#27272a" : "#e4e4e7")
-                                               : (stackLayout.currentIndex === 0 ? theme.accent : theme.bgComponent))
+                                               : ((stackLayout.currentIndex === 0 || stackLayout.currentIndex === 3) ? theme.accent : theme.bgComponent))
                                         border.color: theme.border
-                                        border.width: stackLayout.currentIndex === 0 ? 0 : 1
+                                        border.width: (stackLayout.currentIndex === 0 || stackLayout.currentIndex === 3) ? 0 : 1
                                         radius: 6
                                         scale: gridMouse.pressed ? 0.97 : 1.0
                                         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
@@ -643,7 +643,7 @@ ApplicationWindow {
                                             text: "View"
                                             color: !backend.isLoggedIn
                                                    ? (window.isDarkMode ? "#71717a" : "#a1a1aa")
-                                                   : (stackLayout.currentIndex === 0 ? "white" : theme.textSecondary)
+                                                   : ((stackLayout.currentIndex === 0 || stackLayout.currentIndex === 3) ? "white" : theme.textSecondary)
                                             font.pixelSize: 12
                                             font.bold: true
                                         }

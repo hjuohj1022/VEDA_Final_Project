@@ -8,6 +8,7 @@ class QString;
 class BackendAuthRequestService
 {
 public:
+    static bool adminUnlock(Backend *backend, BackendPrivate *state, QString adminCode);
     static void login(Backend *backend, BackendPrivate *state, QString id, QString pw);
     static void verifyTwoFactorOtp(Backend *backend, BackendPrivate *state, QString otp);
     static void refreshTwoFactorStatus(Backend *backend, BackendPrivate *state);

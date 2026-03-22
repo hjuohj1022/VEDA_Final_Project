@@ -734,10 +734,7 @@ Item {
                         }
                         onTextChanged: root.adminUnlockCode = text
                         onAccepted: {
-                            if (backend.adminUnlock(text)) {
-                                text = ""
-                                root.adminUnlockCode = ""
-                            }
+                            backend.adminUnlock(text)
                         }
                     }
 
@@ -748,11 +745,8 @@ Item {
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                     onClicked: {
-                            if (backend.adminUnlock(adminUnlockField.text)) {
-                                adminUnlockField.text = ""
-                                root.adminUnlockCode = ""
-                            }
-                        }
+                        backend.adminUnlock(adminUnlockField.text)
+                    }
                     background: Rectangle {
                         color: parent.down ? (theme ? theme.border : "#27272a") : (theme ? theme.bgComponent : "#18181b")
                         border.color: theme ? theme.border : "#27272a"
@@ -951,6 +945,13 @@ Item {
                 otpField.text = ""
             }
         }
+
+        function onLoginLockChanged() {
+            if (!backend.loginLocked && backend.loginFailedAttempts === 0) {
+                adminUnlockField.text = ""
+                root.adminUnlockCode = ""
+            }
+        }
         
         function onLoginFailed(error) {
             errorDialog.title = backend.twoFactorRequired ? "OTP Verification Failed" : "Login Failed"
@@ -1044,8 +1045,6 @@ Item {
     }
 
 }
-
-
 
 
 

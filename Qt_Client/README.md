@@ -123,6 +123,7 @@
 - 로그인 전에는 검색창/화면 안내 툴팁 아이콘 비노출
 - `/login` 응답이 `token`이면 즉시 로그인 완료, `pre_auth_token + requires_2fa=true`이면 OTP 입력 단계로 전환
 - 로그인 화면에서 OTP 6자리 입력 후 `POST /2fa/verify`로 최종 JWT 발급
+- 로그인 잠금 해제는 더 이상 클라이언트 `.env` 값을 직접 비교하지 않고 `POST /auth/admin/unlock`로 Crow 서버 검증을 사용
 - 로그인 잠금/세션 타이머/SSL 설정은 기존 인증 흐름과 동일하게 유지
 
 ### 6-1. 2FA 및 계정 관리
@@ -331,6 +332,10 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 실행 파일과 같은 경로의 `.env`를 로드합니다.  
 기본 템플릿은 `example.env`를 사용하세요.
 
+참고:
+- 관리자 잠금 해제 키는 클라이언트 `.env`에서 읽지 않습니다.
+- 관리자 잠금 해제는 Crow 서버의 `ADMIN_UNLOCK_KEY`(배포 시 `crow-admin-secret`에서 주입) 기준으로 검증됩니다.
+
 주요 항목:
 - API/SSL
   - `API_URL`
@@ -379,6 +384,7 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/auth/email/verify/confirm` | 회원가입 이메일 인증 코드 확인 |
 | `POST` | `/auth/password/forgot` | 로그인 전 비밀번호 재설정 코드 요청 |
 | `POST` | `/auth/password/reset` | 로그인 전 재설정 코드로 비밀번호 변경 |
+| `POST` | `/auth/admin/unlock` | 로그인 잠금 상태에서 관리자 해제 키 검증 |
 | `POST` | `/2fa/verify` | 비밀번호 로그인 후 OTP 검증 및 최종 JWT 발급 |
 | `GET` | `/2fa/status` | 현재 로그인 사용자 2FA 상태 조회 |
 | `POST` | `/2fa/setup/init` | OTP 등록용 `manual_key`/`otpauth_url` 발급 |
@@ -426,13 +432,15 @@ ffmpeg 배치/버전 관리:
   - Export WS 준비: Qt direct challenge/digest 호출 -> Crow `/api/sunapi/export/session`
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
   - 표시 설정(대비/밝기/윤곽/컬러): Qt direct CGI -> Crow `/api/sunapi/display/*`
+  - 관리자 잠금 해제: Qt local `.env` 비교 -> Crow `/auth/admin/unlock`
   - 3D Map 1차: Qt ON/OFF/Pause/Resume -> Crow `/cctv/control/*` + `/cctv/stream` WS 수신 + 클라이언트 로컬 렌더
   - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
 
 - 현재 상태
   - Qt는 Playback/Export 준비 + PTZ/Focus + Export HTTP에서 Crow API를 사용합니다.
-  - Qt는 카메라 계정(`SUNAPI_USER/SUNAPI_PASSWORD`)을 더 이상 사용하지 않습니다.
+- Qt는 카메라 계정(`SUNAPI_USER/SUNAPI_PASSWORD`)을 더 이상 사용하지 않습니다.
+- Qt는 관리자 잠금 해제 키(`ADMIN_UNLOCK_KEY`)를 더 이상 로컬 `.env`에서 사용하지 않습니다.
 
 - 최종 목표
   - Qt는 Crow API + Bearer 토큰만 사용
@@ -598,6 +606,11 @@ Playback 동작 검증 시 아래를 확인했습니다.
   - 현재 라운드 처리는 Win32 region이 아닌 `QML OpacityMask` 기반
   - `Qt::Core5Compat` 또는 관련 QML 모듈이 배포 누락되면 창 외곽 표시가 기대와 다를 수 있음
   - `windeployqt` 재실행 후 `Qt5Compat.GraphicalEffects` 관련 QML 리소스 포함 여부 확인
+
+- 관리자 잠금 해제가 항상 실패할 때
+  - 클라이언트 `.env`가 아니라 Crow 서버의 `ADMIN_UNLOCK_KEY`를 사용합니다
+  - `crow-admin-secret`가 정상 생성되었는지, `crow-server.yaml`의 `secretKeyRef`가 맞는지 확인 필요
+  - 직접 API 확인 시 `POST /auth/admin/unlock` 응답 코드(`200/403/500`)를 먼저 점검
 
 ## License
 
