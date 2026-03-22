@@ -10,7 +10,8 @@ Item {
     property string adminUnlockCode: ""
     property bool signupMode: false
     property bool darkTheme: theme ? ((theme.bgPrimary.r + theme.bgPrimary.g + theme.bgPrimary.b) < 1.5) : true
-    property bool passwordVisible: false
+    property bool primaryPasswordVisible: false
+    property bool confirmPasswordVisible: false
     property bool capsLockOn: false
     property bool signupEmailCodeVisible: false
     property bool signupEmailVerified: false
@@ -40,6 +41,48 @@ Item {
             return
         }
         backend.login(idField.text, pwField.text)
+    }
+
+    function triggerSignUp() {
+        if (!root.signupMode || backend.twoFactorRequired) {
+            return
+        }
+        if (idField.text.trim().length === 0
+                || emailField.text.trim().length === 0
+                || pwField.text.length === 0
+                || pwConfirmField.text.length === 0) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = "ID, 이메일, 비밀번호, 비밀번호 확인을 모두 입력해 주세요."
+            errorDialog.open()
+            return
+        }
+        const emailError = validateSignupEmail(emailField.text)
+        if (emailError.length > 0) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = emailError
+            errorDialog.open()
+            return
+        }
+        if (!root.isCurrentSignupEmailVerified()) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = "이메일 인증을 완료해 주세요."
+            errorDialog.open()
+            return
+        }
+        const complexityError = validateSignupPasswordComplexity(pwField.text)
+        if (complexityError.length > 0) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = complexityError
+            errorDialog.open()
+            return
+        }
+        if (pwField.text !== pwConfirmField.text) {
+            errorDialog.title = "Sign Up Failed"
+            errorDialog.text = "비밀번호와 비밀번호 확인이 일치하지 않습니다."
+            errorDialog.open()
+            return
+        }
+        backend.registerUser(idField.text, pwField.text, emailField.text)
     }
 
     // 회원가입 비밀번호 복잡도 검증 함수
@@ -343,14 +386,20 @@ Item {
                         rightPadding: 40
                         placeholderText: "Password"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
-                        echoMode: root.passwordVisible ? TextInput.Normal : TextInput.Password
+                        echoMode: root.primaryPasswordVisible ? TextInput.Normal : TextInput.Password
                         color: theme ? theme.textPrimary : "white"
                         background: Rectangle {
                             color: theme ? theme.bgComponent : "#18181b"
                             border.color: pwField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
-                        onAccepted: triggerSignIn()
+                        onAccepted: {
+                            if (root.signupMode) {
+                                pwConfirmField.forceActiveFocus()
+                                return
+                            }
+                            triggerSignIn()
+                        }
                     }
 
                     ToolButton {
@@ -359,7 +408,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 32
                         height: 32
-                        onClicked: root.passwordVisible = !root.passwordVisible
+                        onClicked: root.primaryPasswordVisible = !root.primaryPasswordVisible
                         contentItem: Item {
                             Text {
                                 anchors.centerIn: parent
@@ -371,7 +420,65 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             Rectangle {
-                                visible: !root.passwordVisible
+                                visible: !root.primaryPasswordVisible
+                                anchors.centerIn: parent
+                                width: 2
+                                height: 18
+                                radius: 1
+                                rotation: -45
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                            }
+                        }
+                        background: Rectangle {
+                            color: "transparent"
+                            border.color: "transparent"
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    Layout.preferredHeight: 40
+                    visible: root.signupMode && !backend.twoFactorRequired
+                    enabled: !backend.twoFactorRequired
+                    opacity: backend.twoFactorRequired ? 0.65 : 1.0
+
+                    TextField {
+                        id: pwConfirmField
+                        anchors.fill: parent
+                        rightPadding: 40
+                        placeholderText: "Password Confirm"
+                        placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
+                        echoMode: root.confirmPasswordVisible ? TextInput.Normal : TextInput.Password
+                        color: theme ? theme.textPrimary : "white"
+                        background: Rectangle {
+                            color: theme ? theme.bgComponent : "#18181b"
+                            border.color: pwConfirmField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
+                            radius: 6
+                        }
+                        onAccepted: triggerSignUp()
+                    }
+
+                    ToolButton {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 32
+                        height: 32
+                        onClicked: root.confirmPasswordVisible = !root.confirmPasswordVisible
+                        contentItem: Item {
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\uE890"
+                                font.family: "Segoe MDL2 Assets"
+                                font.pixelSize: 16
+                                color: theme ? theme.textSecondary : "#d4d4d8"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            Rectangle {
+                                visible: !root.confirmPasswordVisible
                                 anchors.centerIn: parent
                                 width: 2
                                 height: 18
@@ -570,40 +677,14 @@ Item {
                             idField.text = ""
                             emailField.text = ""
                             pwField.text = ""
+                            pwConfirmField.text = ""
                             root.resetSignupEmailVerificationState()
-                            root.passwordVisible = false
+                            root.primaryPasswordVisible = false
+                            root.confirmPasswordVisible = false
                             root.capsLockOn = false
                             return
                         }
-                        if (idField.text.trim().length === 0
-                                || emailField.text.trim().length === 0
-                                || pwField.text.length === 0) {
-                            errorDialog.title = "Sign Up Failed"
-                            errorDialog.text = "ID, 이메일, 비밀번호를 모두 입력해 주세요."
-                            errorDialog.open()
-                            return
-                        }
-                        const emailError = validateSignupEmail(emailField.text)
-                        if (emailError.length > 0) {
-                            errorDialog.title = "Sign Up Failed"
-                            errorDialog.text = emailError
-                            errorDialog.open()
-                            return
-                        }
-                        if (!root.isCurrentSignupEmailVerified()) {
-                            errorDialog.title = "Sign Up Failed"
-                            errorDialog.text = "이메일 인증을 완료해 주세요."
-                            errorDialog.open()
-                            return
-                        }
-                        const complexityError = validateSignupPasswordComplexity(pwField.text)
-                        if (complexityError.length > 0) {
-                            errorDialog.title = "Sign Up Failed"
-                            errorDialog.text = complexityError
-                            errorDialog.open()
-                            return
-                        }
-                        backend.registerUser(idField.text, pwField.text, emailField.text)
+                        triggerSignUp()
                     }
                 }
 
@@ -717,8 +798,10 @@ Item {
                         idField.text = ""
                         emailField.text = ""
                         pwField.text = ""
+                        pwConfirmField.text = ""
                         root.resetSignupEmailVerificationState()
-                        root.passwordVisible = false
+                        root.primaryPasswordVisible = false
+                        root.confirmPasswordVisible = false
                         root.capsLockOn = false
                     }
                 }
@@ -760,9 +843,11 @@ Item {
                         idField.text = ""
                         emailField.text = ""
                         pwField.text = ""
+                        pwConfirmField.text = ""
                         otpField.text = ""
                         root.resetSignupEmailVerificationState()
-                        root.passwordVisible = false
+                        root.primaryPasswordVisible = false
+                        root.confirmPasswordVisible = false
                         root.capsLockOn = false
                     }
                 }
@@ -846,11 +931,13 @@ Item {
             if (!backend.isLoggedIn) {
                 idField.text = ""
                 pwField.text = ""
+                pwConfirmField.text = ""
                 otpField.text = ""
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
                 root.resetSignupEmailVerificationState()
-                root.passwordVisible = false
+                root.primaryPasswordVisible = false
+                root.confirmPasswordVisible = false
                 root.capsLockOn = false
                 backend.stopThermalStream()
             }
@@ -884,8 +971,11 @@ Item {
             idField.text = ""
             emailField.text = ""
             pwField.text = ""
+            pwConfirmField.text = ""
             otpField.text = ""
             root.resetSignupEmailVerificationState()
+            root.primaryPasswordVisible = false
+            root.confirmPasswordVisible = false
         }
 
         function onRegisterFailed(error) {
@@ -954,9 +1044,6 @@ Item {
     }
 
 }
-
-
-
 
 
 

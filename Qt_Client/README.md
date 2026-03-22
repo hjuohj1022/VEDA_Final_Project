@@ -33,6 +33,7 @@
 - WebSocket interleaved RTP 수신 데이터를 로컬 UDP(`127.0.0.1:5004`)로 송출
 - Playback Controls 내 Export(내보내기) 지원
   - 선택 시각 기준 시작/종료 구간 지정
+  - 기본 자동 범위는 5분이며, 선택 시각이 실제 녹화 구간 안에 있을 때는 종료 시각이 해당 녹화 구간 끝을 넘지 않도록 자동 보정
   - SUNAPI `export/create` 우선 시도
   - 장비가 `Error 608`(미지원)일 경우 RTSP `backup.smp` + ffmpeg fallback
   - 결과물 저장: 기본 AVI(실패 시 원인 로그 출력)
@@ -306,6 +307,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 ## Playback Export 작동 원리
 
 1. 사용자가 Playback 화면에서 내보내기 구간(시작/끝)을 지정  
+   - 자동 범위 사용 시 시작 시각 기준 5분을 기본값으로 잡되, 실제 녹화 구간 끝이 더 이르면 종료 시각을 그 구간 끝으로 자동 조정  
 2. SUNAPI CGI export API 시도  
    - `recording.cgi?msubmenu=export&action=create`  
 3. 장비가 export CGI를 지원하지 않으면(`Error 608`) RTSP backup fallback  

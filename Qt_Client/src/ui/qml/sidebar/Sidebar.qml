@@ -274,7 +274,7 @@ Rectangle {
         }
 
         Item {
-            Layout.fillHeight: store.showPlaybackControls || store.showCameraControls || store.showThermalControls
+            Layout.fillHeight: store.showPlaybackControls || store.showThermalControls
         }
     }
 }
