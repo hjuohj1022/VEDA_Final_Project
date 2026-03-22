@@ -104,6 +104,42 @@ Item {
     function applyExportRangeFromSecond(sec) {
         var startSec = Math.max(0, Math.min(86399, Math.floor(sec)))
         var endSec = Math.max(startSec, Math.min(86399, startSec + 300))
+
+        if (playbackSegments && playbackSegments.length > 0) {
+            var ranges = []
+            for (var i = 0; i < playbackSegments.length; i++) {
+                var seg = playbackSegments[i]
+                var a = Math.max(0, Math.min(86399, Number(seg.start || 0)))
+                var b = Math.max(0, Math.min(86399, Number(seg.end || 0)))
+                ranges.push({ start: Math.min(a, b), end: Math.max(a, b) })
+            }
+
+            ranges.sort(function(lhs, rhs) { return lhs.start - rhs.start })
+
+            var merged = []
+            for (var j = 0; j < ranges.length; j++) {
+                var cur = ranges[j]
+                if (merged.length === 0) {
+                    merged.push({ start: cur.start, end: cur.end })
+                    continue
+                }
+                var last = merged[merged.length - 1]
+                if (cur.start <= (last.end + 1)) {
+                    if (cur.end > last.end)
+                        last.end = cur.end
+                } else {
+                    merged.push({ start: cur.start, end: cur.end })
+                }
+            }
+
+            for (var k = 0; k < merged.length; k++) {
+                if (startSec >= merged[k].start && startSec <= merged[k].end) {
+                    endSec = Math.min(endSec, merged[k].end)
+                    break
+                }
+            }
+        }
+
         playbackExportStartText = secToHms(startSec)
         playbackExportEndText = secToHms(endSec)
     }

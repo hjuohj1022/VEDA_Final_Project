@@ -10,9 +10,8 @@ Item {
     property bool active: true
 
     visible: store ? (active && store.showCameraControls) : false
-    Layout.preferredHeight: visible ? 616 : 0
-    Layout.maximumHeight: visible ? 616 : 0
-    Layout.minimumHeight: visible ? 616 : 0
+    Layout.fillHeight: visible
+    Layout.preferredHeight: visible ? 1 : 0
 
     function syncCameraName() {
         if (!store)
@@ -55,17 +54,18 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 150
-            Layout.maximumHeight: 150
+            Layout.preferredHeight: implicitHeight
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
             radius: 8
+            implicitHeight: topControlCardContent.implicitHeight + 20
 
             ColumnLayout {
+                id: topControlCardContent
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 6
+                anchors.margins: 10
+                spacing: 4
 
                 Text {
                     text: store.selectedCameraTitle()
@@ -187,6 +187,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
+                    visible: store.mapModeEnabled
 
                     C.SidebarControlButton {
                         text: "3D Map 일시정지"
@@ -223,8 +224,8 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 460
-            Layout.maximumHeight: 460
+            Layout.fillHeight: true
+            Layout.minimumHeight: 360
             color: theme ? theme.bgComponent : "#18181b"
             border.color: theme ? theme.border : "#27272a"
             border.width: 1
@@ -233,7 +234,7 @@ Item {
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 12
-                spacing: 6
+                spacing: 4
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -310,17 +311,22 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.preferredHeight: 22
+                    spacing: 4
                     Label {
                         text: "표시"
                         color: theme ? theme.textPrimary : "white"
                         font.bold: true
                         font.pixelSize: 12
+                        Layout.alignment: Qt.AlignVCenter
                     }
                     Item { Layout.fillWidth: true }
                     C.SidebarControlButton {
                         text: "초기화"
                         compact: true
                         theme: root.theme
+                        Layout.preferredHeight: 22
+                        Layout.maximumHeight: 22
                         enabled: store.selectedCameraIndex >= 0
                         onClicked: backend.sunapiResetDisplaySettings(store.selectedCameraIndex)
                     }
@@ -328,10 +334,11 @@ Item {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    Layout.topMargin: -8
+                    spacing: 2
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 1
+                        spacing: 3
                         Label { text: "대비"; color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 34; font.pixelSize: 11 }
                         C.SidebarControlButton {
                             text: "-"
@@ -393,7 +400,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 1
+                        spacing: 3
                         Label { text: "밝기"; color: theme ? theme.textPrimary : "white"; Layout.preferredWidth: 34; font.pixelSize: 11 }
                         C.SidebarControlButton { text: "-"; compact: true; theme: root.theme; Layout.preferredWidth: 16; enabled: store.selectedCameraIndex >= 0; onClicked: { store.displayBrightness = Math.max(1, store.displayBrightness - 1); store.applyDisplaySettings() } }
                         C.SidebarDisplaySlider {
@@ -435,7 +442,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 0
+                        spacing: 3
                         Row {
                             Layout.preferredWidth: sharpnessLabel.implicitWidth + sharpnessToggle.implicitWidth + 2
                             spacing: 0
@@ -502,7 +509,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 1
+                        spacing: 3
                         Label { text: "컬러 레벨"; color: theme ? theme.textPrimary : "white"; font.pixelSize: 11; Layout.preferredWidth: 52; Layout.minimumWidth: 52 }
                         C.SidebarControlButton { text: "-"; compact: true; theme: root.theme; Layout.preferredWidth: 16; enabled: store.selectedCameraIndex >= 0; onClicked: { store.displayColorLevel = Math.max(1, store.displayColorLevel - 1); store.applyDisplaySettings() } }
                         C.SidebarDisplaySlider {
@@ -545,16 +552,15 @@ Item {
 
                 Text {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 18
+                    Layout.topMargin: 2
+                    Layout.preferredHeight: store.cameraControlStatus.length > 0 ? 18 : 0
+                    visible: store.cameraControlStatus.length > 0
                     text: store.cameraControlStatus.length > 0 ? store.cameraControlStatus : " "
                     color: store.cameraControlError ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 10
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
-                    opacity: store.cameraControlStatus.length > 0 ? 1.0 : 0.0
                 }
-
-                Rectangle { Layout.fillWidth: true; height: 1; color: theme ? theme.border : "#27272a" }
             }
         }
     }
