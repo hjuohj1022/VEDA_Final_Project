@@ -10,6 +10,7 @@ pipeline {
         MAIL_APP_SCRIPT_URL_CRED = 'crow-mail-app-script-url'
         MAIL_SHARED_SECRET_CRED = 'crow-mail-shared-secret'
         MAIL_APP_SCRIPT_TIMEOUT_MS_CRED = 'crow-mail-app-script-timeout-ms'
+        ADMIN_UNLOCK_KEY_CRED = 'crow-admin-unlock-key'
     }
 
     stages {
@@ -278,7 +279,8 @@ pipeline {
                         file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG'),
                         string(credentialsId: MAIL_APP_SCRIPT_URL_CRED, variable: 'MAIL_APP_SCRIPT_URL'),
                         string(credentialsId: MAIL_SHARED_SECRET_CRED, variable: 'MAIL_SHARED_SECRET'),
-                        string(credentialsId: MAIL_APP_SCRIPT_TIMEOUT_MS_CRED, variable: 'MAIL_APP_SCRIPT_TIMEOUT_MS')
+                        string(credentialsId: MAIL_APP_SCRIPT_TIMEOUT_MS_CRED, variable: 'MAIL_APP_SCRIPT_TIMEOUT_MS'),
+                        string(credentialsId: ADMIN_UNLOCK_KEY_CRED, variable: 'ADMIN_UNLOCK_KEY')
                     ]) {
                         sh '''
                             set -euo pipefail
@@ -290,11 +292,19 @@ MAIL_SHARED_SECRET=$MAIL_SHARED_SECRET
 MAIL_APP_SCRIPT_TIMEOUT_MS=$MAIL_APP_SCRIPT_TIMEOUT_MS
 EOF
 
+                            tmp_admin_env="$(mktemp)"
+                            cat > "$tmp_admin_env" <<EOF
+ADMIN_UNLOCK_KEY=$ADMIN_UNLOCK_KEY
+EOF
+
                             tmp_secret_yaml="$(mktemp)"
-                            trap 'rm -f "$tmp_env" "$tmp_secret_yaml"' EXIT
+                            tmp_admin_secret_yaml="$(mktemp)"
+                            trap 'rm -f "$tmp_env" "$tmp_admin_env" "$tmp_secret_yaml" "$tmp_admin_secret_yaml"' EXIT
 
                             kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-mail-secret --from-env-file="$tmp_env" --dry-run=client -o yaml > "$tmp_secret_yaml"
+                            kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-admin-secret --from-env-file="$tmp_admin_env" --dry-run=client -o yaml > "$tmp_admin_secret_yaml"
                             kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_secret_yaml"
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_admin_secret_yaml"
 
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
                             kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/crow-server
