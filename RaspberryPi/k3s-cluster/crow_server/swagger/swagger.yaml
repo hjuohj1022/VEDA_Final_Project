@@ -269,6 +269,34 @@ paths:
         '500':
           description: Server error
 
+  /auth/admin/unlock:
+    post:
+      summary: 관리자 잠금 해제 키 확인
+      description: |
+        서버에 설정된 ADMIN_UNLOCK_KEY와 요청 값을 비교해
+        클라이언트 로그인 잠금 해제에 사용할 성공/실패 결과를 반환합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+              properties:
+                code:
+                  type: string
+                  description: 관리자 잠금 해제 키
+      responses:
+        '200':
+          description: 관리자 해제 키 검증 성공
+        '400':
+          description: 해제 키 누락 또는 잘못된 요청 형식
+        '403':
+          description: 관리자 해제 키 불일치
+        '500':
+          description: 서버에 ADMIN_UNLOCK_KEY 미설정 또는 내부 오류
+
   /2fa/setup/init:
     post:
       summary: Start TOTP 2FA setup

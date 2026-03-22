@@ -107,6 +107,11 @@ spec:
             secretKeyRef:
               name: crow-mail-secret
               key: MAIL_APP_SCRIPT_TIMEOUT_MS
+        - name: ADMIN_UNLOCK_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crow-admin-secret
+              key: ADMIN_UNLOCK_KEY
 
         # 마운트
         volumeMounts:

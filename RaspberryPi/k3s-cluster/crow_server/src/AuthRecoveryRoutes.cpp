@@ -320,6 +320,21 @@ std::optional<std::string> validatePasswordResetCode(const std::string& code) {
     return std::nullopt;
 }
 
+// Trim leading/trailing ASCII whitespace from request/env values
+std::string trimWhitespace(const std::string& value) {
+    const auto first = std::find_if(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) == 0;
+    });
+    if (first == value.end()) {
+        return {};
+    }
+
+    const auto last = std::find_if(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return std::isspace(ch) == 0;
+    }).base();
+    return std::string(first, last);
+}
+
 // 사용자 이메일 인증 상태 조회 함수
 bool loadUserEmailInfo(MYSQL* connection, const std::string& user_id, UserEmailInfo* out) {
     if (!connection || !out) {
@@ -1612,6 +1627,38 @@ void registerAuthRecoveryRoutes(crow::SimpleApp& app) {
         res["message"] = "이메일 인증이 완료되었습니다.";
         return crow::response(200, res);
     });
+
+    CROW_ROUTE(app, "/auth/admin/unlock").methods(crow::HTTPMethod::POST)
+    ([](const crow::request& req) {
+        auto x = crow::json::load(req.body);
+        if (!x || (!x.has("code") && !x.has("admin_code"))) {
+            return crow::response(400, "관리자 해제 키를 입력해 주세요.");
+        }
+
+        const std::string provided_code = trimWhitespace(
+            x.has("code") ? std::string(x["code"].s()) : std::string(x["admin_code"].s()));
+        if (provided_code.empty()) {
+            return crow::response(400, "관리자 해제 키를 입력해 주세요.");
+        }
+
+        const char* configured_key = std::getenv("ADMIN_UNLOCK_KEY");
+        const std::string expected_code = configured_key ? trimWhitespace(configured_key) : std::string{};
+        if (expected_code.empty()) {
+            std::cerr << "[AUTH][ADMIN_UNLOCK] Missing ADMIN_UNLOCK_KEY" << std::endl;
+            return crow::response(500, "관리자 해제 키가 서버에 설정되어 있지 않습니다.");
+        }
+
+        if (provided_code != expected_code) {
+            return crow::response(403, "관리자 해제 키가 올바르지 않습니다.");
+        }
+
+        crow::json::wvalue res;
+        res["status"] = "success";
+        res["unlocked"] = true;
+        res["message"] = "로그인 잠금이 해제되었습니다.";
+        return crow::response(200, res);
+    });
+
     CROW_ROUTE(app, "/auth/password/forgot").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req) {
         auto x = crow::json::load(req.body);
