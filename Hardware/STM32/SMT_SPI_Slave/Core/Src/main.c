@@ -16,10 +16,6 @@
 #include "motor.h"
 /* USER CODE END Includes */
 
-SPI_HandleTypeDef  hspi1;
-DMA_HandleTypeDef  hdma_spi1_rx;
-DMA_HandleTypeDef  hdma_spi1_tx;
-TIM_HandleTypeDef  htim2;
 UART_HandleTypeDef huart2;
 I2C_HandleTypeDef  hi2c1;
 
@@ -36,11 +32,7 @@ static volatile bool uart_cmd_overflow;
 /* USER CODE END PV */
 
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
 
 /* USER CODE BEGIN PFP */
@@ -67,10 +59,7 @@ int main(void)
 {
     (void)HAL_Init();
     SystemClock_Config();
-    MX_GPIO_Init();
-    MX_DMA_Init();
     MX_USART2_UART_Init();
-    MX_TIM2_Init();
     MX_I2C1_Init();
 
     /* USER CODE BEGIN 2 */
@@ -168,7 +157,7 @@ static void laserInit(void)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
-    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, LASER_INACTIVE_STATE);
 
     GPIO_InitStruct.Pin = LASER_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -179,7 +168,7 @@ static void laserInit(void)
 
 static void laserSet(bool enabled)
 {
-    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, enabled ? LASER_ACTIVE_STATE : LASER_INACTIVE_STATE);
 }
 
 static void uartSendBootDiagnostics(void)
@@ -391,56 +380,6 @@ static void MX_I2C1_Init(void)
     }
 }
 
-static void MX_SPI1_Init(void)
-{
-    hspi1.Instance = SPI1;
-    hspi1.Init.Mode = SPI_MODE_SLAVE;
-    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-    hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi1.Init.NSS = SPI_NSS_HARD_INPUT;
-    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-    hspi1.Init.CRCPolynomial = 10;
-}
-
-static void MX_TIM2_Init(void)
-{
-    TIM_MasterConfigTypeDef sMasterConfig = {0};
-    TIM_OC_InitTypeDef sConfigOC = {0};
-
-    htim2.Instance = TIM2;
-    htim2.Init.Prescaler = 83;
-    htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim2.Init.Period = 3029;
-    htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-    if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-    sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-    if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    sConfigOC.OCMode = TIM_OCMODE_PWM1;
-    sConfigOC.Pulse = 1520;
-    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-    if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    HAL_TIM_MspPostInit(&htim2);
-}
-
 static void MX_USART2_UART_Init(void)
 {
     huart2.Instance = USART1;
@@ -455,30 +394,6 @@ static void MX_USART2_UART_Init(void)
     {
         Error_Handler();
     }
-}
-
-static void MX_DMA_Init(void)
-{
-    __HAL_RCC_DMA2_CLK_ENABLE();
-    HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
-    HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
-}
-
-static void MX_GPIO_Init(void)
-{
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    __HAL_RCC_GPIOH_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    GPIO_InitStruct.Pin = B1_Pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 }
 
 void Error_Handler(void)

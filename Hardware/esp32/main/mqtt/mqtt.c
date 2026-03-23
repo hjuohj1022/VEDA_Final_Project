@@ -525,9 +525,9 @@ void mqttFrameTask(void *arg)
             }
 
             if (use_udp) {
-                const bool dtls_connected_once = udpStreamHasConnectedOnce();
+                const bool udp_connected_once = udpStreamHasConnectedOnce();
                 const int udp_sent = udpStreamSend(msg, CHUNK_HEADER_SIZE + data_size);
-                if ((udp_sent < 0) && dtls_connected_once) {
+                if ((udp_sent < 0) && udp_connected_once) {
                     (void)printf("UDP send failed: frame=%u chunk=%u len=%u\n",
                                  (unsigned int)frame_id,
                                  (unsigned int)i,
