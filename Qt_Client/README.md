@@ -77,6 +77,41 @@
   - `src/core/cctv/BackendMotorControl.cpp`
   - `src/core/cctv/BackendMotorControlService.cpp`
 
+### 3-3. 이벤트 알림 및 자동제어 프리셋
+- MQTT 이벤트 알림 연동
+  - `MQTT_EVENT_ALERT_TOPIC`(기본 `system/event`)을 구독해 이벤트 메시지를 수신
+  - 이벤트 payload는 JSON 우선 처리
+    - 지원 키: `source`, `severity`, `title`, `message`, `autoControl`
+    - 제어 override는 `control.motor1Angle`, `control.motor2Angle`, `control.motor3Angle`, `control.laserEnabled`
+  - JSON이 아니어도 raw 문자열을 이벤트 메시지로 표시
+- 헤더 이벤트 알림 버튼
+  - 로그인 상태에서만 노출
+  - 읽지 않은 이벤트가 있으면 빨간 점 배지 표시
+  - 읽지 않은 이벤트가 있으면 버튼 아이콘 강조 + 펄스 애니메이션으로 가시성 강화
+  - 클릭 시 이벤트 알림 다이얼로그 오픈 + 읽음 처리
+- 이벤트 알림 다이얼로그
+  - 상단 카드에서 `제목`, `Source`, `Severity`, `AUTO ON/OFF`, 메시지 표시
+  - 이벤트가 없을 때는 빈 상태 카드로 유지
+  - 하단에는 얇은 상태 바를 두어 최근 적용/초기화 결과를 표시
+- 자동제어 프리셋
+  - `Motor 1`, `Motor 2`, `Motor 3` 각도와 `레이저 포함` 상태를 저장 가능
+  - `프리셋 저장`, `현재 이벤트 적용`, `이벤트 초기화`, `닫기` 버튼 제공
+  - 저장 프리셋은 이벤트 payload에 별도 제어값이 없을 때 기본값으로 사용
+- 자동제어 동작
+  - `autoControl=true` 이벤트를 받으면 즉시 제어 요청 수행
+  - payload에 `control` override가 있으면 override 우선 적용
+  - override가 없으면 저장된 프리셋을 사용
+  - 적용 대상:
+    - `motorSetAngle(1~3, angle)`
+    - `laserSetEnabled(on/off)`
+- 관련 구현:
+  - `src/ui/qml/common/Header.qml`
+  - `src/ui/qml/dialogs/EventAlertDialog.qml`
+  - `src/ui/qml/Main.qml`
+  - `src/core/core/BackendCoreEvent.cpp`
+  - `src/core/core/BackendCoreEventService.cpp`
+  - `src/core/core/BackendCoreMqttService.cpp`
+
 ### 4. Thermal 모니터링
 - 상단 탭의 `Thermal` 진입 시 열화상 스트림 시작, 이탈 시 자동 중지
 - 전송 경로 선택 지원: `THERMAL_TRANSPORT=ws|mqtt` (기본 `ws`)

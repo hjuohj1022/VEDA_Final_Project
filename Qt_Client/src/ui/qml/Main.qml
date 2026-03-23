@@ -63,7 +63,7 @@ ApplicationWindow {
     property int startupCameraTarget: 4
     property int startupMaxWaitMs: 10000
     property string startupStatusText: "초기 리소스 준비 중..."
-    property int windowRadius: 18
+    property int windowRadius: 15
 
     QtObject {
         id: uiStore
@@ -548,11 +548,11 @@ ApplicationWindow {
             userId: backend.userId
             currentSection: stackLayout.currentIndex
             sessionRemainingSeconds: backend.sessionRemainingSeconds
+            eventAlertActive: backend.eventAlertActive
+            eventAlertUnread: backend.eventAlertUnread
             exportProgressVisible: window.exportProgressVisible
             exportProgressPercent: window.exportProgressPercent
             exportProgressText: window.exportProgressText
-            eventAlertActive: backend.eventAlertActive
-            eventAlertUnread: backend.eventAlertUnread
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {

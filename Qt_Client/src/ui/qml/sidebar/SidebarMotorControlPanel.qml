@@ -444,7 +444,9 @@ Item {
                         spacing: 8
 
                         ColumnLayout {
-                            Layout.preferredWidth: 88
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 136
+                            Layout.maximumWidth: 136
                             spacing: 4
 
                             Text {
@@ -459,6 +461,10 @@ Item {
                                 implicitHeight: 36
                                 text: "90"
                                 color: theme ? theme.textPrimary : "white"
+                                leftPadding: 0
+                                rightPadding: 0
+                                topPadding: 0
+                                bottomPadding: 0
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                                 inputMethodHints: Qt.ImhDigitsOnly
@@ -485,7 +491,8 @@ Item {
                             text: "Set"
                             compact: true
                             theme: root.theme
-                            Layout.fillWidth: true
+                            Layout.preferredWidth: 88
+                            Layout.minimumWidth: 88
                             Layout.alignment: Qt.AlignBottom
                             enabled: !!motorBackend
                             onClicked: {
