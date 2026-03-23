@@ -19,6 +19,7 @@ struct ThermalAssemblyBuffer
     int frameId = -1;
     int totalChunksExpected = 0;
     qint64 frameStartedMs = 0;
+    qint64 lastChunkReceivedMs = 0;
     quint16 headerMin = 0;
     quint16 headerMax = 0;
     bool hasFrameId = false;
@@ -175,6 +176,24 @@ struct BackendPrivate
     int m_displaySharpnessLevel = 12;
     bool m_displaySharpnessEnabled = true;
     int m_displayColorLevel = 50;
+
+    // Event alert state
+    bool m_eventAlertActive = false;
+    bool m_eventAlertUnread = false;
+    QString m_eventAlertSource;
+    QString m_eventAlertSeverity = "info";
+    QString m_eventAlertTitle;
+    QString m_eventAlertMessage;
+    bool m_eventAlertAutoControl = false;
+    bool m_eventAlertHasControlOverride = false;
+    int m_eventAlertMotor1Angle = 90;
+    int m_eventAlertMotor2Angle = 90;
+    int m_eventAlertMotor3Angle = 90;
+    bool m_eventAlertLaserEnabled = false;
+    int m_eventAlertPresetMotor1Angle = 90;
+    int m_eventAlertPresetMotor2Angle = 90;
+    int m_eventAlertPresetMotor3Angle = 90;
+    bool m_eventAlertPresetLaserEnabled = false;
 
     // CCTV 3D map state (phase 1: API + WS receive)
     QPointer<QWebSocket> m_cctvStreamWs;

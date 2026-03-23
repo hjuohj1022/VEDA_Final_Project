@@ -31,8 +31,12 @@ constexpr int kThermalHeaderBytes = 10;
 constexpr int kThermalHeaderWithRangeBytes = 8;
 constexpr int kThermalHeaderLegacyBytes = 4;
 constexpr int kThermalChunkLimit = 100;
-constexpr int kMaxInflightThermalFrames = 4;
-constexpr qint64 kThermalFrameTimeoutMs = 1500;
+constexpr int kDefaultMaxInflightThermalFrames = 4;
+constexpr int kMinInflightThermalFrames = 1;
+constexpr int kMaxInflightThermalFrames = 64;
+constexpr qint64 kDefaultThermalFrameTimeoutMs = 1500;
+constexpr qint64 kMinThermalFrameTimeoutMs = 250;
+constexpr qint64 kMaxThermalFrameTimeoutMs = 30000;
 
 enum class ThermalFrameEncoding {
     Raw16,
@@ -77,6 +81,36 @@ static QString thermalWsPath(const BackendPrivate *state)
 {
     return normalizedThermalPath(state ? state->m_env.value("THERMAL_WS_PATH") : QString(),
                                  QStringLiteral("/thermal/stream"));
+}
+
+static qint64 thermalFrameTimeoutMs(const BackendPrivate *state)
+{
+    if (!state) {
+        return kDefaultThermalFrameTimeoutMs;
+    }
+
+    bool ok = false;
+    const qint64 configured = state->m_env.value("THERMAL_FRAME_TIMEOUT_MS").trimmed().toLongLong(&ok);
+    if (!ok || configured <= 0) {
+        return kDefaultThermalFrameTimeoutMs;
+    }
+
+    return std::clamp(configured, kMinThermalFrameTimeoutMs, kMaxThermalFrameTimeoutMs);
+}
+
+static int thermalMaxInflightFrames(const BackendPrivate *state)
+{
+    if (!state) {
+        return kDefaultMaxInflightThermalFrames;
+    }
+
+    bool ok = false;
+    const int configured = state->m_env.value("THERMAL_MAX_INFLIGHT_FRAMES").trimmed().toInt(&ok);
+    if (!ok || configured <= 0) {
+        return kDefaultMaxInflightThermalFrames;
+    }
+
+    return std::clamp(configured, kMinInflightThermalFrames, kMaxInflightThermalFrames);
 }
 
 static void clearThermalCurrentAssemblyState(BackendPrivate *state)
@@ -380,6 +414,7 @@ static ThermalAssemblyBuffer makeThermalAssemblyBuffer(const ThermalChunkHeader 
     buffer.frameId = header.hasFrameId ? header.frameId : frameKey;
     buffer.totalChunksExpected = static_cast<int>(header.total);
     buffer.frameStartedMs = nowMs;
+    buffer.lastChunkReceivedMs = nowMs;
     buffer.headerMin = header.minVal;
     buffer.headerMax = header.maxVal;
     buffer.hasFrameId = header.hasFrameId;
@@ -429,10 +464,12 @@ static void pruneExpiredThermalAssemblyBuffers(BackendPrivate *state, qint64 now
         return;
     }
 
+    const qint64 timeoutMs = thermalFrameTimeoutMs(state);
     QList<int> expiredKeys;
     for (auto it = state->m_thermalAssemblyBuffers.cbegin(); it != state->m_thermalAssemblyBuffers.cend(); ++it) {
         const ThermalAssemblyBuffer &frame = it.value();
-        if (frame.frameStartedMs > 0 && (nowMs - frame.frameStartedMs) > kThermalFrameTimeoutMs) {
+        const qint64 lastSeenMs = (frame.lastChunkReceivedMs > 0) ? frame.lastChunkReceivedMs : frame.frameStartedMs;
+        if (lastSeenMs > 0 && (nowMs - lastSeenMs) > timeoutMs) {
             qWarning() << "[THERMAL] frame timeout id=" << frame.frameId
                        << "chunks=" << frame.chunks.size()
                        << "/" << frame.totalChunksExpected;
@@ -451,7 +488,8 @@ static void trimThermalAssemblyBuffers(BackendPrivate *state)
         return;
     }
 
-    while (state->m_thermalAssemblyBuffers.size() > kMaxInflightThermalFrames) {
+    const int maxInflightFrames = thermalMaxInflightFrames(state);
+    while (state->m_thermalAssemblyBuffers.size() > maxInflightFrames) {
         auto oldestIt = state->m_thermalAssemblyBuffers.begin();
         for (auto it = state->m_thermalAssemblyBuffers.begin(); it != state->m_thermalAssemblyBuffers.end(); ++it) {
             if (it.value().frameStartedMs < oldestIt.value().frameStartedMs) {
@@ -763,6 +801,7 @@ void BackendThermalService::handleThermalChunkMessage(Backend *backend, BackendP
     }
 
     ThermalAssemblyBuffer &frame = frameIt.value();
+    frame.lastChunkReceivedMs = nowMs;
     frame.headerMin = header.minVal;
     frame.headerMax = header.maxVal;
     const QByteArray payload = message.mid(header.headerBytes);

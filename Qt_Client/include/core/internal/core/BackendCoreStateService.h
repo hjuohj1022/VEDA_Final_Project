@@ -38,6 +38,22 @@ public:
     static int displaySharpnessLevel(const BackendPrivate *state);
     static bool displaySharpnessEnabled(const BackendPrivate *state);
     static int displayColorLevel(const BackendPrivate *state);
+    static bool eventAlertActive(const BackendPrivate *state);
+    static bool eventAlertUnread(const BackendPrivate *state);
+    static QString eventAlertSource(const BackendPrivate *state);
+    static QString eventAlertSeverity(const BackendPrivate *state);
+    static QString eventAlertTitle(const BackendPrivate *state);
+    static QString eventAlertMessage(const BackendPrivate *state);
+    static bool eventAlertAutoControl(const BackendPrivate *state);
+    static bool eventAlertHasControlOverride(const BackendPrivate *state);
+    static int eventAlertMotor1Angle(const BackendPrivate *state);
+    static int eventAlertMotor2Angle(const BackendPrivate *state);
+    static int eventAlertMotor3Angle(const BackendPrivate *state);
+    static bool eventAlertLaserEnabled(const BackendPrivate *state);
+    static int eventAlertPresetMotor1Angle(const BackendPrivate *state);
+    static int eventAlertPresetMotor2Angle(const BackendPrivate *state);
+    static int eventAlertPresetMotor3Angle(const BackendPrivate *state);
+    static bool eventAlertPresetLaserEnabled(const BackendPrivate *state);
 
     static void setActiveCameras(Backend *backend, BackendPrivate *state, int count);
     static void setCurrentFps(Backend *backend, BackendPrivate *state, int fps);

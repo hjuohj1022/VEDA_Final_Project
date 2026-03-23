@@ -33,6 +33,22 @@ int BackendCoreStateService::displayBrightness(const BackendPrivate *state) { re
 int BackendCoreStateService::displaySharpnessLevel(const BackendPrivate *state) { return state->m_displaySharpnessLevel; }
 bool BackendCoreStateService::displaySharpnessEnabled(const BackendPrivate *state) { return state->m_displaySharpnessEnabled; }
 int BackendCoreStateService::displayColorLevel(const BackendPrivate *state) { return state->m_displayColorLevel; }
+bool BackendCoreStateService::eventAlertActive(const BackendPrivate *state) { return state->m_eventAlertActive; }
+bool BackendCoreStateService::eventAlertUnread(const BackendPrivate *state) { return state->m_eventAlertUnread; }
+QString BackendCoreStateService::eventAlertSource(const BackendPrivate *state) { return state->m_eventAlertSource; }
+QString BackendCoreStateService::eventAlertSeverity(const BackendPrivate *state) { return state->m_eventAlertSeverity; }
+QString BackendCoreStateService::eventAlertTitle(const BackendPrivate *state) { return state->m_eventAlertTitle; }
+QString BackendCoreStateService::eventAlertMessage(const BackendPrivate *state) { return state->m_eventAlertMessage; }
+bool BackendCoreStateService::eventAlertAutoControl(const BackendPrivate *state) { return state->m_eventAlertAutoControl; }
+bool BackendCoreStateService::eventAlertHasControlOverride(const BackendPrivate *state) { return state->m_eventAlertHasControlOverride; }
+int BackendCoreStateService::eventAlertMotor1Angle(const BackendPrivate *state) { return state->m_eventAlertMotor1Angle; }
+int BackendCoreStateService::eventAlertMotor2Angle(const BackendPrivate *state) { return state->m_eventAlertMotor2Angle; }
+int BackendCoreStateService::eventAlertMotor3Angle(const BackendPrivate *state) { return state->m_eventAlertMotor3Angle; }
+bool BackendCoreStateService::eventAlertLaserEnabled(const BackendPrivate *state) { return state->m_eventAlertLaserEnabled; }
+int BackendCoreStateService::eventAlertPresetMotor1Angle(const BackendPrivate *state) { return state->m_eventAlertPresetMotor1Angle; }
+int BackendCoreStateService::eventAlertPresetMotor2Angle(const BackendPrivate *state) { return state->m_eventAlertPresetMotor2Angle; }
+int BackendCoreStateService::eventAlertPresetMotor3Angle(const BackendPrivate *state) { return state->m_eventAlertPresetMotor3Angle; }
+bool BackendCoreStateService::eventAlertPresetLaserEnabled(const BackendPrivate *state) { return state->m_eventAlertPresetLaserEnabled; }
 
 void BackendCoreStateService::setActiveCameras(Backend *backend, BackendPrivate *state, int count)
 {

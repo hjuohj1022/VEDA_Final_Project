@@ -341,24 +341,24 @@ bool BackendMotorControlService::motorStopAll(Backend *backend, BackendPrivate *
                            "MOTOR");
 }
 
-bool BackendMotorControlService::laserOn(Backend *backend, BackendPrivate *state)
+bool BackendMotorControlService::laserSetEnabled(Backend *backend, BackendPrivate *state, bool enabled)
 {
     return sendControlPost(backend,
                            state,
-                           "/laser/control/on",
+                           enabled ? "/laser/control/on" : "/laser/control/off",
                            QJsonObject(),
-                           "Laser on",
+                           enabled ? "Laser on" : "Laser off",
                            "LASER");
+}
+
+bool BackendMotorControlService::laserOn(Backend *backend, BackendPrivate *state)
+{
+    return laserSetEnabled(backend, state, true);
 }
 
 bool BackendMotorControlService::laserOff(Backend *backend, BackendPrivate *state)
 {
-    return sendControlPost(backend,
-                           state,
-                           "/laser/control/off",
-                           QJsonObject(),
-                           "Laser off",
-                           "LASER");
+    return laserSetEnabled(backend, state, false);
 }
 
 bool BackendMotorControlService::laserStatus(Backend *backend, BackendPrivate *state)

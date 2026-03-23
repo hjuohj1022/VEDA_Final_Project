@@ -15,6 +15,8 @@ Rectangle {
     property bool exportProgressVisible: false
     property int exportProgressPercent: 0
     property string exportProgressText: ""
+    property bool eventAlertActive: false
+    property bool eventAlertUnread: false
     signal toggleTheme()
     signal requestLogin()
     signal requestLogout()
@@ -24,6 +26,7 @@ Rectangle {
     signal requestPasswordChange()
     signal requestHome()
     signal requestRtspSettings()
+    signal requestEventAlert()
     signal requestExportCancel()
 
     function formatSession(seconds) {
@@ -269,20 +272,29 @@ Rectangle {
             }
 
             IconButton {
+                id: eventAlertButton
                 theme: root.theme
                 label: "\uE7F4"
                 fg: theme ? theme.textSecondary : "#a1a1aa"
-                tooltipText: "이벤트 알림 (미구현)"
-            }
+                enabledButton: root.isLoggedIn
+                tooltipText: root.eventAlertUnread
+                             ? "새 이벤트 알림"
+                             : (root.eventAlertActive ? "이벤트 알림 보기" : "이벤트 알림")
+                onClicked: root.requestEventAlert()
 
-            Rectangle {
-                width: 6
-                height: 6
-                radius: 3
-                color: theme ? theme.accent : "#f97316"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.leftMargin: -10
-                Layout.rightMargin: 6
+                Rectangle {
+                    width: 10
+                    height: 10
+                    radius: 5
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.rightMargin: 2
+                    anchors.topMargin: 2
+                    color: "#ef4444"
+                    border.color: theme ? theme.bgSecondary : "#09090b"
+                    border.width: 2
+                    visible: root.eventAlertUnread
+                }
             }
 
             IconButton {
