@@ -51,33 +51,33 @@ Item {
                 || emailField.text.trim().length === 0
                 || pwField.text.length === 0
                 || pwConfirmField.text.length === 0) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = "ID, 이메일, 비밀번호, 비밀번호 확인을 모두 입력해 주세요."
             errorDialog.open()
             return
         }
         const emailError = validateSignupEmail(emailField.text)
         if (emailError.length > 0) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = emailError
             errorDialog.open()
             return
         }
         if (!root.isCurrentSignupEmailVerified()) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = "이메일 인증을 완료해 주세요."
             errorDialog.open()
             return
         }
         const complexityError = validateSignupPasswordComplexity(pwField.text)
         if (complexityError.length > 0) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = complexityError
             errorDialog.open()
             return
         }
         if (pwField.text !== pwConfirmField.text) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = "비밀번호와 비밀번호 확인이 일치하지 않습니다."
             errorDialog.open()
             return
@@ -158,6 +158,7 @@ Item {
         
         ColumnLayout {
             anchors.centerIn: parent
+            anchors.verticalCenterOffset: root.signupMode ? 0 : -12
             width: root.authFieldWidth
             spacing: 24
             
@@ -179,7 +180,7 @@ Item {
                 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
-                    text: root.signupMode ? "Create Account" : "Welcome Back"
+                    text: root.signupMode ? "회원가입" : "AEGIS Vision VMS"
                     color: theme ? theme.textPrimary : "white"
                     font.bold: true
                     font.pixelSize: 24
@@ -187,9 +188,10 @@ Item {
                 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
+                    visible: root.signupMode
                     text: root.signupMode
-                          ? "Sign up to create a new account"
-                          : "Sign in to access surveillance system"
+                          ? "새 계정을 만들려면 아래 정보를 입력하세요"
+                          : ""
                     color: theme ? theme.textSecondary : "#71717a"
                     font.pixelSize: 14
                 }
@@ -238,7 +240,7 @@ Item {
                         height: parent.height
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
-                        placeholderText: "Email"
+                        placeholderText: "이메일"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         color: theme ? theme.textPrimary : "white"
                         background: Rectangle {
@@ -278,14 +280,14 @@ Item {
                         }
                         onClicked: {
                             if (idField.text.trim().length === 0) {
-                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.title = "회원가입 실패"
                                 errorDialog.text = "이메일 인증 전에 ID를 먼저 입력해 주세요."
                                 errorDialog.open()
                                 return
                             }
                             const emailError = validateSignupEmail(emailField.text)
                             if (emailError.length > 0) {
-                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.title = "회원가입 실패"
                                 errorDialog.text = emailError
                                 errorDialog.open()
                                 return
@@ -350,7 +352,7 @@ Item {
                         }
                         onClicked: {
                             if (emailCodeField.text.trim().length === 0) {
-                                errorDialog.title = "Sign Up Failed"
+                                errorDialog.title = "회원가입 실패"
                                 errorDialog.text = "이메일 인증 코드를 입력해 주세요."
                                 errorDialog.open()
                                 return
@@ -384,7 +386,7 @@ Item {
                         id: pwField
                         anchors.fill: parent
                         rightPadding: 40
-                        placeholderText: "Password"
+                        placeholderText: "비밀번호"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         echoMode: root.primaryPasswordVisible ? TextInput.Normal : TextInput.Password
                         color: theme ? theme.textPrimary : "white"
@@ -448,7 +450,7 @@ Item {
                         id: pwConfirmField
                         anchors.fill: parent
                         rightPadding: 40
-                        placeholderText: "Password Confirm"
+                        placeholderText: "비밀번호 확인"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         echoMode: root.confirmPasswordVisible ? TextInput.Normal : TextInput.Password
                         color: theme ? theme.textPrimary : "white"
@@ -602,7 +604,7 @@ Item {
                         id: otpField
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: root.authFieldWidth
-                        placeholderText: "6-digit OTP"
+                        placeholderText: "6자리 OTP"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         height: 40
                         maximumLength: 6
@@ -619,7 +621,7 @@ Item {
                 }
                 
                 Button {
-                    text: backend.twoFactorRequired ? "Verify OTP" : "Sign In"
+                    text: backend.twoFactorRequired ? "OTP 확인" : "로그인"
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
                     height: 40
@@ -649,7 +651,7 @@ Item {
                 }
 
                 Button {
-                    text: root.signupMode ? "Create Account" : "Sign Up"
+                    text: root.signupMode ? "가입하기" : "회원가입"
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
                     height: 40
@@ -689,7 +691,7 @@ Item {
                 }
 
                 Button {
-                    text: "Cancel OTP"
+                    text: "OTP 취소"
                     Layout.fillWidth: true
                     height: 36
                     visible: backend.twoFactorRequired && !root.signupMode
@@ -721,7 +723,7 @@ Item {
 
                     TextField {
                         id: adminUnlockField
-                        placeholderText: "Admin unlock key"
+                        placeholderText: "관리자 해제 키"
                         placeholderTextColor: theme ? theme.textSecondary : "#a1a1aa"
                         echoMode: TextInput.Password
                         Layout.fillWidth: true
@@ -763,7 +765,7 @@ Item {
                 }
                 
                 Button {
-                    text: backend.twoFactorRequired ? "Clear OTP" : "Clear"
+                    text: backend.twoFactorRequired ? "OTP 초기화" : "초기화"
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
                     height: 40
@@ -803,17 +805,15 @@ Item {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
-                    visible: !root.signupMode && !backend.twoFactorRequired
+                    visible: backend.loginLocked && !root.signupMode && !backend.twoFactorRequired
                     color: backend.loginLocked ? "#ef4444" : (theme ? theme.textSecondary : "#a1a1aa")
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
-                    text: backend.loginLocked
-                          ? "Account locked after " + backend.loginMaxAttempts + " failed attempts."
-                          : ("Failed attempts: " + backend.loginFailedAttempts + " / " + backend.loginMaxAttempts)
+                    text: "로그인 시도 횟수를 초과해 계정이 잠겼습니다."
                 }
 
                 Button {
-                    text: "Back to Sign In"
+                    text: "로그인으로 돌아가기"
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
                     height: 36
@@ -961,10 +961,11 @@ Item {
         
         function onLoginSuccess() {
             otpField.text = ""
+            backend.startThermalStream()
         }
 
         function onRegisterSuccess(message) {
-            errorDialog.title = "Sign Up"
+            errorDialog.title = "회원가입"
             errorDialog.text = message
             errorDialog.open()
             root.signupMode = false
@@ -979,7 +980,7 @@ Item {
         }
 
         function onRegisterFailed(error) {
-            errorDialog.title = "Sign Up Failed"
+            errorDialog.title = "회원가입 실패"
             errorDialog.text = error
             errorDialog.open()
         }
@@ -1044,6 +1045,3 @@ Item {
     }
 
 }
-
-
-

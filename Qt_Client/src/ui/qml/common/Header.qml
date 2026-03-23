@@ -271,29 +271,103 @@ Rectangle {
                 visible: root.isLoggedIn
             }
 
-            IconButton {
-                id: eventAlertButton
-                theme: root.theme
-                label: "\uE7F4"
-                fg: theme ? theme.textSecondary : "#a1a1aa"
-                enabledButton: root.isLoggedIn
-                tooltipText: root.eventAlertUnread
-                             ? "새 이벤트 알림"
-                             : (root.eventAlertActive ? "이벤트 알림 보기" : "이벤트 알림")
-                onClicked: root.requestEventAlert()
+            Item {
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                visible: root.isLoggedIn
 
                 Rectangle {
-                    width: 10
-                    height: 10
-                    radius: 5
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.rightMargin: 2
-                    anchors.topMargin: 2
-                    color: "#ef4444"
-                    border.color: theme ? theme.bgSecondary : "#09090b"
-                    border.width: 2
+                    id: eventAlertPulse
+                    anchors.centerIn: parent
+                    width: 32
+                    height: 32
+                    radius: 9
+                    color: "transparent"
+                    border.width: 1
+                    border.color: theme ? theme.accent : "#f97316"
+                    opacity: 0.0
+                    scale: 1.0
                     visible: root.eventAlertUnread
+                }
+
+                SequentialAnimation {
+                    id: eventAlertPulseAnim
+                    running: root.isLoggedIn && root.eventAlertUnread
+                    loops: Animation.Infinite
+
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: eventAlertPulse
+                            property: "opacity"
+                            from: 0.15
+                            to: 0.78
+                            duration: 420
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            target: eventAlertPulse
+                            property: "scale"
+                            from: 1.0
+                            to: 1.18
+                            duration: 420
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: eventAlertPulse
+                            property: "opacity"
+                            from: 0.78
+                            to: 0.0
+                            duration: 520
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            target: eventAlertPulse
+                            property: "scale"
+                            from: 1.18
+                            to: 1.28
+                            duration: 520
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    onRunningChanged: {
+                        if (!running) {
+                            eventAlertPulse.opacity = 0.0
+                            eventAlertPulse.scale = 1.0
+                        }
+                    }
+                }
+
+                IconButton {
+                    id: eventAlertButton
+                    anchors.centerIn: parent
+                    theme: root.theme
+                    label: "\uE7F4"
+                    fg: root.eventAlertUnread
+                        ? (theme ? theme.accent : "#f97316")
+                        : (theme ? theme.textSecondary : "#a1a1aa")
+                    enabledButton: root.isLoggedIn
+                    tooltipText: root.eventAlertUnread
+                                 ? "새 이벤트 알림"
+                                 : (root.eventAlertActive ? "이벤트 알림 보기" : "이벤트 알림")
+                    onClicked: root.requestEventAlert()
+
+                    Rectangle {
+                        width: 10
+                        height: 10
+                        radius: 5
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.rightMargin: 2
+                        anchors.topMargin: 2
+                        color: "#ef4444"
+                        border.color: theme ? theme.bgSecondary : "#09090b"
+                        border.width: 2
+                        visible: root.eventAlertUnread
+                    }
                 }
             }
 
@@ -335,7 +409,7 @@ Rectangle {
             Rectangle {
                 id: authBtn
                 Layout.preferredHeight: 34
-                Layout.preferredWidth: root.isLoggedIn ? 214 : 110
+                Layout.preferredWidth: root.isLoggedIn ? 214 : 104
                 radius: 12
                 color: authMouse.pressed
                        ? (theme ? theme.border : "#27272a")
@@ -367,11 +441,12 @@ Rectangle {
                     }
 
                     Column {
+                        visible: root.isLoggedIn
                         Layout.fillWidth: true
                         spacing: 1
 
                         Text {
-                            text: root.isLoggedIn ? displayUserName() : "Login"
+                            text: displayUserName()
                             color: theme ? theme.textPrimary : "white"
                             font.bold: true
                             font.pixelSize: 12
@@ -380,12 +455,24 @@ Rectangle {
                         }
 
                         Text {
-                            text: root.isLoggedIn ? "Secure account" : "Sign in"
+                            text: "Secure account"
                             color: theme ? theme.textSecondary : "#a1a1aa"
                             font.pixelSize: 9
                             elide: Text.ElideRight
                             width: parent.width
                         }
+                    }
+
+                    Text {
+                        visible: !root.isLoggedIn
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        text: "로그인"
+                        color: theme ? theme.textPrimary : "white"
+                        font.bold: true
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
 
                     Rectangle {
