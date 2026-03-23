@@ -27,6 +27,8 @@ spec:
           value: "5005"
         - name: DTLS_USE_COOKIE_EXCHANGE
           value: "false"
+        - name: DTLS_ALLOW_PLAIN_UDP_FALLBACK
+          value: "true"
         - name: CROW_FORWARD_HOST
           value: "crow-server-service"
         - name: CROW_FORWARD_PORT

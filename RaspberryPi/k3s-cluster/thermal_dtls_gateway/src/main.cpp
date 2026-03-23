@@ -34,6 +34,7 @@ constexpr int kDefaultDtlsPort = 5005;
 constexpr int kDefaultForwardPort = 5005;
 constexpr size_t kMaxThermalPacketBytes = 4096;
 constexpr size_t kThermalHeaderBytes = 10;
+constexpr size_t kDtlsRecordHeaderBytes = 13;
 constexpr int kMinPskBytes = 16;
 constexpr int kHandshakeTimeoutSeconds = 15;
 constexpr int kSessionIdleTimeoutSeconds = 30;
@@ -297,6 +298,12 @@ struct GatewayStats {
     long long lastLogAtMs = 0;
 };
 
+enum class IncomingDatagramKind {
+    DtlsRecord,
+    ThermalChunk,
+    Unknown,
+};
+
 bool parseThermalPacketHeader(const unsigned char* data, size_t len, ThermalPacketHeader& out)
 {
     if (data == nullptr || len < kThermalHeaderBytes) {
@@ -309,6 +316,89 @@ bool parseThermalPacketHeader(const unsigned char* data, size_t len, ThermalPack
     out.minValue = readBe16(data + 6);
     out.maxValue = readBe16(data + 8);
     return true;
+}
+
+bool isReasonableThermalPacketHeader(const ThermalPacketHeader& header)
+{
+    return header.totalChunks > 0 &&
+           header.totalChunks <= 100 &&
+           header.chunkIndex < header.totalChunks;
+}
+
+bool looksLikeDtlsRecord(const unsigned char* data, size_t len)
+{
+    if (data == nullptr || len < kDtlsRecordHeaderBytes) {
+        return false;
+    }
+
+    const unsigned char contentType = data[0];
+    const bool validContentType =
+        contentType == 20 || // change_cipher_spec
+        contentType == 21 || // alert
+        contentType == 22 || // handshake
+        contentType == 23 || // application_data
+        contentType == 24;   // heartbeat
+    if (!validContentType) {
+        return false;
+    }
+
+    const bool validVersion =
+        (data[1] == 0xFE) &&
+        (data[2] == 0xFD || data[2] == 0xFF);
+    if (!validVersion) {
+        return false;
+    }
+
+    const size_t recordLen = (static_cast<size_t>(data[11]) << 8U) |
+                             static_cast<size_t>(data[12]);
+    return recordLen > 0;
+}
+
+bool looksLikeThermalChunk(const unsigned char* data, size_t len, ThermalPacketHeader* headerOut = nullptr)
+{
+    ThermalPacketHeader header{};
+    if (!parseThermalPacketHeader(data, len, header) || !isReasonableThermalPacketHeader(header)) {
+        return false;
+    }
+
+    if (headerOut != nullptr) {
+        *headerOut = header;
+    }
+    return true;
+}
+
+IncomingDatagramKind classifyIncomingDatagram(const unsigned char* data,
+                                              size_t len,
+                                              ThermalPacketHeader* thermalHeaderOut = nullptr)
+{
+    if (looksLikeDtlsRecord(data, len)) {
+        return IncomingDatagramKind::DtlsRecord;
+    }
+    if (looksLikeThermalChunk(data, len, thermalHeaderOut)) {
+        return IncomingDatagramKind::ThermalChunk;
+    }
+    return IncomingDatagramKind::Unknown;
+}
+
+std::string hexPreview(const unsigned char* data, size_t len, size_t maxBytes = 16)
+{
+    if (data == nullptr || len == 0) {
+        return "(empty)";
+    }
+
+    std::ostringstream oss;
+    const size_t previewLen = std::min(len, maxBytes);
+    oss << std::hex << std::setfill('0');
+    for (size_t i = 0; i < previewLen; ++i) {
+        if (i != 0) {
+            oss << ' ';
+        }
+        oss << std::setw(2) << static_cast<unsigned int>(data[i]);
+    }
+    if (len > previewLen) {
+        oss << " ...";
+    }
+    return oss.str();
 }
 
 void noteIncompleteFrame(ThermalPathStats& stats, const ThermalFrameTracker& tracker)
@@ -489,6 +579,7 @@ public:
         , statsLogIntervalMs_(envIntOrDefault("DTLS_STATS_LOG_INTERVAL_MS", kDefaultStatsLogIntervalMs))
         , frameTrackTimeoutMs_(envIntOrDefault("DTLS_FRAME_TRACK_TIMEOUT_MS", kDefaultFrameTrackTimeoutMs))
         , maxTrackedFrames_(envIntOrDefault("DTLS_MAX_TRACKED_FRAMES", kDefaultMaxTrackedFrames))
+        , allowPlainUdpFallback_(envBoolOrDefault("DTLS_ALLOW_PLAIN_UDP_FALLBACK", true))
         , useCookieExchange_(envBoolOrDefault("DTLS_USE_COOKIE_EXCHANGE", false))
         , pskIdentity_(requireEnv("DTLS_PSK_IDENTITY"))
         , pskKey_(parseHex(requireEnv("DTLS_PSK_KEY_HEX")))
@@ -563,6 +654,11 @@ public:
             std::cout << "[DTLS] Using DTLS cookie exchange via DTLSv1_listen\n";
         } else {
             std::cout << "[DTLS] Cookie exchange disabled for proxy-friendly DTLS handshakes\n";
+        }
+        if (allowPlainUdpFallback_) {
+            std::cout << "[DTLS] Plain UDP thermal fallback enabled\n";
+        } else {
+            std::cout << "[DTLS] Plain UDP thermal fallback disabled\n";
         }
     }
 
@@ -643,6 +739,59 @@ public:
 
             std::cout << "[DTLS] Peer accepted for handshake: " << sockaddrToString(peerSock) << '\n';
 
+            std::array<unsigned char, kMaxThermalPacketBytes> initialPacket{};
+            size_t initialPacketLen = 0;
+            const IncomingDatagramKind initialKind = inspectConnectedPeerDatagram(sessionFd,
+                                                                                  initialPacket.data(),
+                                                                                  initialPacket.size(),
+                                                                                  initialPacketLen);
+            if (initialKind == IncomingDatagramKind::ThermalChunk) {
+                ThermalPacketHeader header{};
+                (void)looksLikeThermalChunk(initialPacket.data(), initialPacketLen, &header);
+                std::cout << "[DTLS] Initial datagram looks like plain thermal UDP"
+                          << " peer=" << sockaddrToString(peerSock)
+                          << " frame=" << header.frameId
+                          << " chunk=" << header.chunkIndex << "/" << header.totalChunks
+                          << " bytes=" << initialPacketLen
+                          << '\n';
+
+                if (allowPlainUdpFallback_) {
+                    SSL_free(sessionSsl);
+                    sessionSsl = nullptr;
+
+                    if (workerMode) {
+                        try {
+                            std::thread(&DtlsGateway::runRawSessionWorker, this, sessionFd, peerSock).detach();
+                        } catch (const std::exception& ex) {
+                            std::cerr << "[DTLS] Failed to start raw UDP worker: " << ex.what()
+                                      << ". Falling back to inline session handling.\n";
+                            if (listenFd_ != sessionFd) {
+                                ::close(listenFd_);
+                                listenFd_ = sessionFd;
+                            }
+                            runRawSessionWorker(sessionFd, peerSock);
+                            listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+                            configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
+                        }
+                        continue;
+                    }
+
+                    runRawSessionWorker(sessionFd, peerSock);
+                    listenFd_ = bindUdpSocket(bindHost_, bindPort_);
+                    configureSocketBuffers(listenFd_, udpSocketRcvBufBytes_, udpSocketSndBufBytes_, "listen socket");
+                    continue;
+                }
+
+                std::cerr << "[DTLS] Plain thermal UDP packet received while fallback is disabled. preview="
+                          << hexPreview(initialPacket.data(), initialPacketLen) << '\n';
+            } else if (initialKind == IncomingDatagramKind::Unknown && initialPacketLen > 0) {
+                std::cout << "[DTLS] Initial datagram did not match DTLS or thermal chunk format"
+                          << " peer=" << sockaddrToString(peerSock)
+                          << " bytes=" << initialPacketLen
+                          << " preview=" << hexPreview(initialPacket.data(), initialPacketLen)
+                          << '\n';
+            }
+
             if (workerMode) {
                 try {
                     std::thread(&DtlsGateway::runSessionWorker, this, sessionSsl, sessionFd, peerSock).detach();
@@ -667,6 +816,71 @@ public:
     }
 
 private:
+    IncomingDatagramKind inspectConnectedPeerDatagram(int fd,
+                                                      unsigned char* buffer,
+                                                      size_t bufferLen,
+                                                      size_t& outLen)
+    {
+        outLen = 0;
+        if (fd < 0 || buffer == nullptr || bufferLen == 0) {
+            return IncomingDatagramKind::Unknown;
+        }
+
+        for (;;) {
+            const ssize_t peeked = ::recv(fd, buffer, bufferLen, MSG_PEEK);
+            if (peeked >= 0) {
+                outLen = static_cast<size_t>(peeked);
+                return classifyIncomingDatagram(buffer, outLen);
+            }
+
+            if (errno == EINTR) {
+                continue;
+            }
+            return IncomingDatagramKind::Unknown;
+        }
+    }
+
+    void runRawSessionWorker(int sessionFd, sockaddr_storage peerSock)
+    {
+        try {
+            const std::string peerText = sockaddrToString(peerSock);
+            configureSocketTimeout(sessionFd, kSessionIdleTimeoutSeconds);
+            std::cout << "[DTLS] Plain thermal UDP session active for peer " << peerText << '\n';
+
+            std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
+            for (;;) {
+                const int bytesRead = static_cast<int>(::recv(sessionFd, buffer.data(), buffer.size(), 0));
+                if (bytesRead < 0) {
+                    if (errno == EINTR) {
+                        continue;
+                    }
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        std::cout << "[DTLS] Plain thermal UDP session timed out for peer " << peerText << '\n';
+                    } else {
+                        std::cerr << "[DTLS] Plain thermal UDP recv failed errno="
+                                  << errno << " (" << std::strerror(errno) << ")\n";
+                    }
+                    break;
+                }
+
+                if (bytesRead == 0) {
+                    continue;
+                }
+
+                if (!forwardPayload(buffer.data(), static_cast<size_t>(bytesRead))) {
+                    std::cerr << "[DTLS] Failed to forward plain thermal UDP payload\n";
+                }
+            }
+
+            ::close(sessionFd);
+        } catch (const std::exception& ex) {
+            std::cerr << "[DTLS] Plain thermal UDP worker fatal error: " << ex.what() << '\n';
+            if (sessionFd >= 0) {
+                ::close(sessionFd);
+            }
+        }
+    }
+
     void runSessionWorker(SSL* sessionSsl, int sessionFd, sockaddr_storage peerSock)
     {
         try {
@@ -966,6 +1180,7 @@ private:
     int statsLogIntervalMs_ = kDefaultStatsLogIntervalMs;
     int frameTrackTimeoutMs_ = kDefaultFrameTrackTimeoutMs;
     int maxTrackedFrames_ = kDefaultMaxTrackedFrames;
+    bool allowPlainUdpFallback_ = true;
     bool useCookieExchange_ = false;
     std::string pskIdentity_;
     std::vector<unsigned char> pskKey_;
