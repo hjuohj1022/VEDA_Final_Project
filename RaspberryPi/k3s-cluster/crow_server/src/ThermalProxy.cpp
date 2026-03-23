@@ -1,4 +1,5 @@
 #include "../include/ThermalProxy.h"
+#include "../include/MqttManager.h"
 
 #include <algorithm>
 #include <arpa/inet.h>
@@ -9,8 +10,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -28,15 +32,29 @@ bool verifyJWT(const std::string& token);
 namespace {
 constexpr uint16_t kDefaultThermalUdpPort = 5005;
 constexpr size_t kThermalHeaderBytes = 10;
+constexpr size_t kThermalHeaderWithRangeBytes = 8;
+constexpr size_t kThermalHeaderLegacyBytes = 4;
+constexpr uint16_t kThermalChunkLimit = 100;
 constexpr int kThermalWidth = 160;
 constexpr int kThermalHeight = 120;
-constexpr int kThermalFrameBytes = kThermalWidth * kThermalHeight * 2;
+constexpr int kThermalPixelCount = kThermalWidth * kThermalHeight;
+constexpr int kThermalFrameBytes8 = kThermalPixelCount;
+constexpr int kThermalFrameBytes16 = kThermalPixelCount * 2;
+constexpr uint16_t kThermalValidMinRaw = 1000;
+constexpr uint16_t kThermalValidMaxRaw = 30000;
 constexpr size_t kMaxUdpPacketBytes = 64 * 1024;
 constexpr int kReceiveTimeoutUs = 250000;
 constexpr int kDefaultUdpSocketBufferBytes = 2 * 1024 * 1024;
 constexpr int kDefaultStatsLogIntervalMs = 5000;
 constexpr int kDefaultFrameTrackTimeoutMs = 2000;
 constexpr int kDefaultMaxTrackedFrames = 8;
+constexpr int kDefaultThermalEventThresholdMaxValue = 12000;
+constexpr int kDefaultThermalEventCooldownMs = 5000;
+constexpr int kDefaultThermalEventBaselineMargin = 1200;
+constexpr int kDefaultThermalEventBaselineWindowMs = 300000;
+constexpr int kDefaultThermalEventBaselineMinSamples = 30;
+constexpr int kDefaultThermalEventBaselineGuardDelta = 500;
+constexpr int kDefaultThermalEventConsecutiveFrames = 3;
 
 struct ThermalPacketHeader {
     uint16_t frameId = 0;
@@ -46,11 +64,56 @@ struct ThermalPacketHeader {
     uint16_t maxValue = 0;
 };
 
+struct ThermalChunkHeader {
+    uint16_t frameId = 0;
+    uint16_t chunkIndex = 0;
+    uint16_t totalChunks = 0;
+    uint16_t minValue = 0;
+    uint16_t maxValue = 0;
+    size_t headerBytes = 0;
+    bool hasFrameId = false;
+    bool hasRangeData = false;
+};
+
+struct ThermalNormalizedPacket {
+    ThermalPacketHeader header;
+    bool hasRangeData = false;
+    std::string wsPayload;
+};
+
+struct ThermalLegacyFrameState {
+    uint16_t frameId = 0;
+    uint16_t totalChunks = 0;
+    long long lastSeenAtMs = 0;
+    bool active = false;
+    std::set<uint16_t> receivedChunks;
+};
+
+struct ThermalNormalizerState {
+    std::map<std::string, ThermalLegacyFrameState> legacyFramesBySender;
+    uint16_t nextSyntheticFrameId = 1;
+};
+
 struct ThermalFrameTracker {
     uint16_t totalChunks = 0;
     long long firstSeenAtMs = 0;
     long long lastSeenAtMs = 0;
+    size_t payloadBytes = 0;
+    uint16_t headerMinValue = 0;
+    uint16_t headerMaxValue = 0;
+    uint16_t computedMinValue = std::numeric_limits<uint16_t>::max();
+    uint16_t computedMaxValue = 0;
+    bool headerHasRangeData = false;
+    bool computedRawRangeReady = false;
     std::set<uint16_t> uniqueChunks;
+};
+
+struct ThermalCompletedFrame {
+    ThermalPacketHeader header;
+    size_t payloadBytes = 0;
+    bool hasRangeData = false;
+    bool ready = false;
+    std::string encoding = "unknown";
 };
 
 struct ThermalProxyStats {
@@ -78,7 +141,78 @@ struct ThermalProxyStats {
     unsigned long long evicted_frames = 0;
     size_t in_flight_frames = 0;
     size_t max_in_flight_frames = 0;
+    size_t last_frame_payload_bytes = 0;
+    std::string last_frame_encoding = "unknown";
     std::string last_error;
+};
+
+struct ThermalEventStats {
+    bool monitor_always_on = true;
+    bool event_enabled = true;
+    bool actuation_enabled = false;
+    bool baseline_enabled = true;
+    bool broker_connected = false;
+    int hotspot_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
+    int cooldown_ms = kDefaultThermalEventCooldownMs;
+    int baseline_margin = kDefaultThermalEventBaselineMargin;
+    int baseline_window_ms = kDefaultThermalEventBaselineWindowMs;
+    int baseline_min_samples = kDefaultThermalEventBaselineMinSamples;
+    int baseline_guard_delta = kDefaultThermalEventBaselineGuardDelta;
+    int consecutive_frames_required = kDefaultThermalEventConsecutiveFrames;
+    int current_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
+    int current_clear_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
+    int baseline_normal_max_value = 0;
+    int baseline_sample_count = 0;
+    unsigned long long baseline_updates = 0;
+    std::string event_topic = "system/event";
+    unsigned long long event_attempts = 0;
+    unsigned long long events_published = 0;
+    unsigned long long actuation_requests = 0;
+    uint16_t last_frame_max_value = 0;
+    uint16_t last_event_attempt_frame_id = 0;
+    long long last_event_attempt_at_ms = 0;
+    uint16_t last_event_frame_id = 0;
+    uint16_t last_event_max_value = 0;
+    int last_event_threshold_max_value = 0;
+    long long last_event_at_ms = 0;
+    int consecutive_hits = 0;
+    bool baseline_ready = false;
+    bool hotspot_active = false;
+    bool last_publish_ok = false;
+    bool last_actuation_ok = false;
+    std::string last_event_message;
+};
+
+struct ThermalEventConfig {
+    bool monitor_always_on = true;
+    bool event_enabled = true;
+    bool actuation_enabled = false;
+    bool baseline_enabled = true;
+    int hotspot_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
+    int cooldown_ms = kDefaultThermalEventCooldownMs;
+    int baseline_margin = kDefaultThermalEventBaselineMargin;
+    int baseline_window_ms = kDefaultThermalEventBaselineWindowMs;
+    int baseline_min_samples = kDefaultThermalEventBaselineMinSamples;
+    int baseline_guard_delta = kDefaultThermalEventBaselineGuardDelta;
+    int consecutive_frames_required = kDefaultThermalEventConsecutiveFrames;
+    std::string event_topic = "system/event";
+    std::string source = "thermal";
+    std::string severity = "warning";
+    std::string title = "Thermal hotspot detected";
+    std::string mqtt_host = "mqtt-service";
+    int mqtt_port = 1883;
+    std::string mqtt_client_id = "crow_thermal_event_api";
+    std::string motor_control_topic = "motor/control";
+    std::string laser_control_topic = "laser/control";
+    int motor1_angle = 90;
+    int motor2_angle = 90;
+    int motor3_angle = 90;
+    bool laser_enabled = false;
+};
+
+struct ThermalBaselineSample {
+    long long observed_at_ms = 0;
+    uint16_t max_value = 0;
 };
 
 struct ThermalProxyState {
@@ -90,7 +224,10 @@ struct ThermalProxyState {
     std::atomic<bool> receiver_running{false};
     std::atomic<bool> receiver_thread_started{false};
     ThermalProxyStats stats;
+    ThermalEventStats event_stats;
     std::map<uint16_t, ThermalFrameTracker> in_flight_frames;
+    std::deque<ThermalBaselineSample> baseline_normal_samples;
+    std::unique_ptr<MqttManager> event_mqtt;
     long long last_stats_log_at_ms = 0;
 };
 
@@ -140,6 +277,11 @@ int envIntOrDefault(const char* key, int fallback)
     }
 }
 
+int clampServoAngle(int angle)
+{
+    return std::max(0, std::min(180, angle));
+}
+
 bool envBoolOrDefault(const char* key, bool fallback)
 {
     const char* value = std::getenv(key);
@@ -161,23 +303,315 @@ bool envBoolOrDefault(const char* key, bool fallback)
     return fallback;
 }
 
+ThermalEventConfig loadThermalEventConfig()
+{
+    ThermalEventConfig config;
+    config.monitor_always_on = envBoolOrDefault("THERMAL_MONITOR_ALWAYS_ON", true);
+    config.event_enabled = envBoolOrDefault("THERMAL_EVENT_ENABLED", true);
+    config.actuation_enabled = envBoolOrDefault("THERMAL_EVENT_ACTUATE", false);
+    config.baseline_enabled = envBoolOrDefault("THERMAL_EVENT_BASELINE_ENABLED", true);
+    config.hotspot_threshold_max_value = std::max(
+        0, envIntOrDefault("THERMAL_EVENT_THRESHOLD_MAX_VALUE", kDefaultThermalEventThresholdMaxValue));
+    config.cooldown_ms = std::max(0, envIntOrDefault("THERMAL_EVENT_COOLDOWN_MS", kDefaultThermalEventCooldownMs));
+    config.baseline_margin = std::max(
+        0, envIntOrDefault("THERMAL_EVENT_BASELINE_MARGIN", kDefaultThermalEventBaselineMargin));
+    config.baseline_window_ms = std::max(
+        0, envIntOrDefault("THERMAL_EVENT_BASELINE_WINDOW_MS", kDefaultThermalEventBaselineWindowMs));
+    config.baseline_min_samples = std::max(
+        1, envIntOrDefault("THERMAL_EVENT_BASELINE_MIN_SAMPLES", kDefaultThermalEventBaselineMinSamples));
+    config.baseline_guard_delta = std::max(
+        0, envIntOrDefault("THERMAL_EVENT_BASELINE_GUARD_DELTA", kDefaultThermalEventBaselineGuardDelta));
+    config.consecutive_frames_required = std::max(
+        1, envIntOrDefault("THERMAL_EVENT_CONSECUTIVE_FRAMES", kDefaultThermalEventConsecutiveFrames));
+    config.event_topic = envOrDefault("THERMAL_EVENT_TOPIC", "system/event");
+    if (config.event_topic.empty()) {
+        config.event_topic = "system/event";
+    }
+    config.source = envOrDefault("THERMAL_EVENT_SOURCE", "thermal");
+    config.severity = envOrDefault("THERMAL_EVENT_SEVERITY", "warning");
+    config.title = envOrDefault("THERMAL_EVENT_TITLE", "Thermal hotspot detected");
+    config.mqtt_host = envOrDefault("MQTT_HOST", "mqtt-service");
+    config.mqtt_port = envIntOrDefault("MQTT_PORT", 1883);
+    if (config.mqtt_port <= 0) {
+        config.mqtt_port = 1883;
+    }
+    config.mqtt_client_id = envOrDefault("THERMAL_EVENT_MQTT_CLIENT_ID", "crow_thermal_event_api");
+    config.motor_control_topic = envOrDefault("MOTOR_CONTROL_TOPIC", "motor/control");
+    config.laser_control_topic = envOrDefault("LASER_CONTROL_TOPIC", "laser/control");
+    config.motor1_angle = clampServoAngle(envIntOrDefault("THERMAL_EVENT_MOTOR1_ANGLE", 90));
+    config.motor2_angle = clampServoAngle(envIntOrDefault("THERMAL_EVENT_MOTOR2_ANGLE", 90));
+    config.motor3_angle = clampServoAngle(envIntOrDefault("THERMAL_EVENT_MOTOR3_ANGLE", 90));
+    config.laser_enabled = envBoolOrDefault("THERMAL_EVENT_LASER_ENABLED", false);
+    return config;
+}
+
 uint16_t readBe16(const unsigned char* p)
 {
     return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
 }
 
-bool parseThermalPacketHeader(const std::string& payload, ThermalPacketHeader& out)
+void writeBe16(char* p, uint16_t value)
 {
-    if (payload.size() < kThermalHeaderBytes) {
+    p[0] = static_cast<char>((value >> 8) & 0xFF);
+    p[1] = static_cast<char>(value & 0xFF);
+}
+
+bool isReasonableThermalChunkHeader(const ThermalChunkHeader& header)
+{
+    return header.totalChunks > 0
+        && header.totalChunks <= kThermalChunkLimit
+        && header.chunkIndex < header.totalChunks;
+}
+
+bool parseThermalChunkHeader(const std::string& payload, ThermalChunkHeader& out)
+{
+    if (payload.empty()) {
         return false;
     }
 
     const unsigned char* p = reinterpret_cast<const unsigned char*>(payload.data());
-    out.frameId = readBe16(p + 0);
-    out.chunkIndex = readBe16(p + 2);
-    out.totalChunks = readBe16(p + 4);
-    out.minValue = readBe16(p + 6);
-    out.maxValue = readBe16(p + 8);
+
+    if (payload.size() >= kThermalHeaderBytes) {
+        ThermalChunkHeader parsed;
+        parsed.hasFrameId = true;
+        parsed.hasRangeData = true;
+        parsed.headerBytes = kThermalHeaderBytes;
+        parsed.frameId = readBe16(p + 0);
+        parsed.chunkIndex = readBe16(p + 2);
+        parsed.totalChunks = readBe16(p + 4);
+        parsed.minValue = readBe16(p + 6);
+        parsed.maxValue = readBe16(p + 8);
+        if (isReasonableThermalChunkHeader(parsed)) {
+            out = parsed;
+            return true;
+        }
+    }
+
+    if (payload.size() >= kThermalHeaderWithRangeBytes) {
+        ThermalChunkHeader parsed;
+        parsed.hasRangeData = true;
+        parsed.headerBytes = kThermalHeaderWithRangeBytes;
+        parsed.chunkIndex = readBe16(p + 0);
+        parsed.totalChunks = readBe16(p + 2);
+        parsed.minValue = readBe16(p + 4);
+        parsed.maxValue = readBe16(p + 6);
+        if (isReasonableThermalChunkHeader(parsed)) {
+            out = parsed;
+            return true;
+        }
+    }
+
+    if (payload.size() >= kThermalHeaderLegacyBytes) {
+        ThermalChunkHeader parsed;
+        parsed.headerBytes = kThermalHeaderLegacyBytes;
+        parsed.chunkIndex = readBe16(p + 0);
+        parsed.totalChunks = readBe16(p + 2);
+        if (isReasonableThermalChunkHeader(parsed)) {
+            out = parsed;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+uint16_t nextSyntheticThermalFrameId(ThermalNormalizerState& state)
+{
+    if (state.nextSyntheticFrameId == 0) {
+        state.nextSyntheticFrameId = 1;
+    }
+
+    const uint16_t frameId = state.nextSyntheticFrameId;
+    if (state.nextSyntheticFrameId == std::numeric_limits<uint16_t>::max()) {
+        state.nextSyntheticFrameId = 1;
+    } else {
+        state.nextSyntheticFrameId = static_cast<uint16_t>(state.nextSyntheticFrameId + 1);
+    }
+    return frameId;
+}
+
+void pruneThermalLegacyFrames(ThermalNormalizerState& state, long long nowMs, int timeoutMs)
+{
+    for (auto it = state.legacyFramesBySender.begin(); it != state.legacyFramesBySender.end();) {
+        if (!it->second.active) {
+            it = state.legacyFramesBySender.erase(it);
+            continue;
+        }
+
+        if (timeoutMs > 0 && it->second.lastSeenAtMs > 0 && (nowMs - it->second.lastSeenAtMs) > timeoutMs) {
+            it = state.legacyFramesBySender.erase(it);
+            continue;
+        }
+
+        ++it;
+    }
+}
+
+uint16_t resolveThermalFrameId(ThermalNormalizerState& state,
+                               const std::string& senderKey,
+                               const ThermalChunkHeader& header,
+                               long long nowMs,
+                               int timeoutMs)
+{
+    if (header.hasFrameId) {
+        return header.frameId;
+    }
+
+    pruneThermalLegacyFrames(state, nowMs, timeoutMs);
+
+    ThermalLegacyFrameState& legacy = state.legacyFramesBySender[senderKey];
+    const bool expired =
+        timeoutMs > 0 && legacy.lastSeenAtMs > 0 && (nowMs - legacy.lastSeenAtMs) > timeoutMs;
+    const bool completed =
+        legacy.totalChunks > 0 && legacy.receivedChunks.size() >= legacy.totalChunks;
+    const bool startNewFrame =
+        !legacy.active
+        || expired
+        || completed
+        || legacy.totalChunks == 0
+        || header.chunkIndex == 0
+        || legacy.totalChunks != header.totalChunks;
+
+    if (startNewFrame) {
+        legacy.active = true;
+        legacy.frameId = nextSyntheticThermalFrameId(state);
+        legacy.totalChunks = header.totalChunks;
+        legacy.receivedChunks.clear();
+    }
+
+    legacy.lastSeenAtMs = nowMs;
+    if (header.totalChunks > legacy.totalChunks) {
+        legacy.totalChunks = header.totalChunks;
+    }
+    legacy.receivedChunks.insert(header.chunkIndex);
+
+    const uint16_t frameId = legacy.frameId;
+    if (legacy.totalChunks > 0 && legacy.receivedChunks.size() >= legacy.totalChunks) {
+        legacy.active = false;
+        legacy.totalChunks = 0;
+        legacy.receivedChunks.clear();
+    }
+
+    return frameId;
+}
+
+std::string buildCanonicalThermalPayload(const ThermalPacketHeader& header, const std::string& thermalPayload)
+{
+    std::string payload;
+    payload.resize(kThermalHeaderBytes + thermalPayload.size());
+
+    char* p = payload.data();
+    writeBe16(p + 0, header.frameId);
+    writeBe16(p + 2, header.chunkIndex);
+    writeBe16(p + 4, header.totalChunks);
+    writeBe16(p + 6, header.minValue);
+    writeBe16(p + 8, header.maxValue);
+
+    if (!thermalPayload.empty()) {
+        std::memcpy(p + kThermalHeaderBytes, thermalPayload.data(), thermalPayload.size());
+    }
+
+    return payload;
+}
+
+void updateThermalTrackerRawRange(ThermalFrameTracker& tracker, const std::string& chunkPayload)
+{
+    const size_t sampleBytes = chunkPayload.size() - (chunkPayload.size() % 2);
+    if (sampleBytes == 0) {
+        return;
+    }
+
+    const unsigned char* data = reinterpret_cast<const unsigned char*>(chunkPayload.data());
+    for (size_t i = 0; i < sampleBytes; i += 2) {
+        const uint16_t value = readBe16(data + i);
+        if (value <= kThermalValidMinRaw || value >= kThermalValidMaxRaw) {
+            continue;
+        }
+
+        tracker.computedMinValue = std::min(tracker.computedMinValue, value);
+        tracker.computedMaxValue = std::max(tracker.computedMaxValue, value);
+        tracker.computedRawRangeReady = true;
+    }
+}
+
+std::string thermalEncodingFromPayloadBytes(size_t payloadBytes)
+{
+    if (payloadBytes == static_cast<size_t>(kThermalFrameBytes16)) {
+        return "raw16";
+    }
+    if (payloadBytes == static_cast<size_t>(kThermalFrameBytes8)) {
+        return "scaled8";
+    }
+    return "unknown";
+}
+
+void finalizeCompletedThermalFrame(const ThermalPacketHeader& latestHeader,
+                                   const ThermalFrameTracker& tracker,
+                                   ThermalCompletedFrame& out)
+{
+    out.ready = false;
+    out.header = latestHeader;
+    out.payloadBytes = tracker.payloadBytes;
+    out.encoding = thermalEncodingFromPayloadBytes(tracker.payloadBytes);
+    out.hasRangeData = false;
+
+    if (out.encoding == "raw16" && tracker.computedRawRangeReady) {
+        out.header.minValue = tracker.computedMinValue;
+        out.header.maxValue = tracker.computedMaxValue;
+        out.hasRangeData = true;
+    } else if (out.encoding == "scaled8" && tracker.headerHasRangeData) {
+        out.header.minValue = tracker.headerMinValue;
+        out.header.maxValue = tracker.headerMaxValue;
+        out.hasRangeData = true;
+    } else if (tracker.headerHasRangeData) {
+        out.header.minValue = tracker.headerMinValue;
+        out.header.maxValue = tracker.headerMaxValue;
+        out.hasRangeData = true;
+    }
+
+    out.ready = true;
+}
+
+bool normalizeThermalPayload(const std::string& payload,
+                             const std::string& senderKey,
+                             long long nowMs,
+                             int frameTimeoutMs,
+                             ThermalNormalizerState& state,
+                             ThermalNormalizedPacket& out)
+{
+    ThermalChunkHeader chunkHeader{};
+    if (!parseThermalChunkHeader(payload, chunkHeader)) {
+        return false;
+    }
+
+    out.header.frameId = resolveThermalFrameId(state, senderKey, chunkHeader, nowMs, frameTimeoutMs);
+    out.header.chunkIndex = chunkHeader.chunkIndex;
+    out.header.totalChunks = chunkHeader.totalChunks;
+    out.header.minValue = chunkHeader.minValue;
+    out.header.maxValue = chunkHeader.maxValue;
+    out.hasRangeData = chunkHeader.hasRangeData;
+
+    if (chunkHeader.hasFrameId && chunkHeader.headerBytes == kThermalHeaderBytes) {
+        out.wsPayload = payload;
+        return true;
+    }
+
+    out.wsPayload = buildCanonicalThermalPayload(out.header, payload.substr(chunkHeader.headerBytes));
+    return true;
+}
+
+bool parseThermalPacketHeader(const std::string& payload, ThermalPacketHeader& out)
+{
+    ThermalChunkHeader chunkHeader{};
+    if (!parseThermalChunkHeader(payload, chunkHeader) || !chunkHeader.hasFrameId) {
+        return false;
+    }
+
+    out.frameId = chunkHeader.frameId;
+    out.chunkIndex = chunkHeader.chunkIndex;
+    out.totalChunks = chunkHeader.totalChunks;
+    out.minValue = chunkHeader.minValue;
+    out.maxValue = chunkHeader.maxValue;
     return true;
 }
 
@@ -225,6 +659,277 @@ bool isAuthorized(const crow::request& req)
 {
     const std::string token = extractBearerToken(req);
     return !token.empty() && verifyJWT(token);
+}
+
+void refreshThermalEventStatusLocked(const ThermalEventConfig& config)
+{
+    g_thermal.event_stats.monitor_always_on = config.monitor_always_on;
+    g_thermal.event_stats.event_enabled = config.event_enabled;
+    g_thermal.event_stats.actuation_enabled = config.actuation_enabled;
+    g_thermal.event_stats.baseline_enabled = config.baseline_enabled;
+    g_thermal.event_stats.hotspot_threshold_max_value = config.hotspot_threshold_max_value;
+    g_thermal.event_stats.cooldown_ms = config.cooldown_ms;
+    g_thermal.event_stats.baseline_margin = config.baseline_margin;
+    g_thermal.event_stats.baseline_window_ms = config.baseline_window_ms;
+    g_thermal.event_stats.baseline_min_samples = config.baseline_min_samples;
+    g_thermal.event_stats.baseline_guard_delta = config.baseline_guard_delta;
+    g_thermal.event_stats.consecutive_frames_required = config.consecutive_frames_required;
+    g_thermal.event_stats.event_topic = config.event_topic;
+    g_thermal.event_stats.broker_connected = g_thermal.event_mqtt ? g_thermal.event_mqtt->isConnected() : false;
+}
+
+void pruneThermalBaselineSamplesLocked(long long now_ms, int window_ms)
+{
+    if (window_ms <= 0) {
+        g_thermal.baseline_normal_samples.clear();
+        return;
+    }
+
+    while (!g_thermal.baseline_normal_samples.empty()) {
+        const long long age_ms = now_ms - g_thermal.baseline_normal_samples.front().observed_at_ms;
+        if (age_ms <= window_ms) {
+            break;
+        }
+        g_thermal.baseline_normal_samples.pop_front();
+    }
+}
+
+int computeThermalBaselineNormalMaxLocked()
+{
+    int baseline_max = 0;
+    for (const auto& sample : g_thermal.baseline_normal_samples) {
+        baseline_max = std::max(baseline_max, static_cast<int>(sample.max_value));
+    }
+    return baseline_max;
+}
+
+int computeThermalAdaptiveThresholdLocked(const ThermalEventConfig& config, int baseline_normal_max)
+{
+    if (!config.baseline_enabled) {
+        return config.hotspot_threshold_max_value;
+    }
+    if (static_cast<int>(g_thermal.baseline_normal_samples.size()) < config.baseline_min_samples) {
+        return config.hotspot_threshold_max_value;
+    }
+    return std::max(config.hotspot_threshold_max_value, baseline_normal_max + config.baseline_margin);
+}
+
+int computeThermalClearThreshold(const ThermalEventConfig& config, int active_threshold)
+{
+    return std::max(config.hotspot_threshold_max_value, active_threshold - config.baseline_guard_delta);
+}
+
+void updateThermalBaselineStatsLocked(const ThermalEventConfig& config, int baseline_normal_max, int active_threshold)
+{
+    g_thermal.event_stats.baseline_sample_count = static_cast<int>(g_thermal.baseline_normal_samples.size());
+    g_thermal.event_stats.baseline_normal_max_value = baseline_normal_max;
+    g_thermal.event_stats.baseline_ready =
+        config.baseline_enabled
+        && g_thermal.event_stats.baseline_sample_count >= config.baseline_min_samples;
+    g_thermal.event_stats.current_threshold_max_value = active_threshold;
+    g_thermal.event_stats.current_clear_threshold_max_value = computeThermalClearThreshold(config, active_threshold);
+}
+
+MqttManager* ensureThermalEventMqtt(const ThermalEventConfig& config)
+{
+    if (!config.event_enabled && !config.actuation_enabled) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+    if (!g_thermal.event_mqtt) {
+        g_thermal.event_mqtt = std::make_unique<MqttManager>(
+            config.mqtt_client_id.c_str(), config.mqtt_host.c_str(), config.mqtt_port);
+    }
+    g_thermal.event_stats.broker_connected = g_thermal.event_mqtt->isConnected();
+    return g_thermal.event_mqtt.get();
+}
+
+std::string makeThermalEventPayload(const ThermalEventConfig& config,
+                                    const ThermalPacketHeader& header,
+                                    int active_threshold,
+                                    int baseline_normal_max,
+                                    int consecutive_hits)
+{
+    crow::json::wvalue payload;
+    payload["source"] = config.source;
+    payload["severity"] = config.severity;
+    payload["title"] = config.title;
+    payload["message"] = "Thermal frame " + std::to_string(header.frameId)
+        + " reached max=" + std::to_string(header.maxValue)
+        + " (threshold=" + std::to_string(active_threshold) + ")";
+    payload["autoControl"] = false;
+    payload["serverAutoControl"] = config.actuation_enabled;
+    payload["thermal"]["frameId"] = static_cast<int>(header.frameId);
+    payload["thermal"]["maxValue"] = static_cast<int>(header.maxValue);
+    payload["thermal"]["minValue"] = static_cast<int>(header.minValue);
+    payload["thermal"]["totalChunks"] = static_cast<int>(header.totalChunks);
+    payload["thermal"]["baselineNormalMax"] = baseline_normal_max;
+    payload["thermal"]["activeThreshold"] = active_threshold;
+    payload["thermal"]["consecutiveHits"] = consecutive_hits;
+    if (config.actuation_enabled) {
+        payload["control"]["motor1Angle"] = config.motor1_angle;
+        payload["control"]["motor2Angle"] = config.motor2_angle;
+        payload["control"]["motor3Angle"] = config.motor3_angle;
+        payload["control"]["laserEnabled"] = config.laser_enabled;
+    }
+    return payload.dump();
+}
+
+bool publishThermalActuation(MqttManager* mqtt, const ThermalEventConfig& config)
+{
+    if (!mqtt || !config.actuation_enabled) {
+        return true;
+    }
+
+    const bool motor1_ok = mqtt->publishMessage(config.motor_control_topic, "motor1 set " + std::to_string(config.motor1_angle));
+    const bool motor2_ok = mqtt->publishMessage(config.motor_control_topic, "motor2 set " + std::to_string(config.motor2_angle));
+    const bool motor3_ok = mqtt->publishMessage(config.motor_control_topic, "motor3 set " + std::to_string(config.motor3_angle));
+    const bool laser_ok = mqtt->publishMessage(config.laser_control_topic, config.laser_enabled ? "laser on" : "laser off");
+    return motor1_ok && motor2_ok && motor3_ok && laser_ok;
+}
+
+void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
+{
+    if (!frame.ready) {
+        return;
+    }
+
+    const ThermalPacketHeader& header = frame.header;
+    const ThermalEventConfig config = loadThermalEventConfig();
+    const long long now_ms = currentTimeMs();
+    int baseline_normal_max = 0;
+    int active_threshold = config.hotspot_threshold_max_value;
+    int consecutive_hits = 0;
+    bool should_dispatch = false;
+
+    if (!config.event_enabled && !config.actuation_enabled) {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        refreshThermalEventStatusLocked(config);
+        if (frame.hasRangeData) {
+            g_thermal.event_stats.last_frame_max_value = header.maxValue;
+            g_thermal.event_stats.consecutive_hits = 0;
+            g_thermal.event_stats.hotspot_active = false;
+            pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
+            baseline_normal_max = computeThermalBaselineNormalMaxLocked();
+            updateThermalBaselineStatsLocked(config, baseline_normal_max, config.hotspot_threshold_max_value);
+        }
+        return;
+    }
+
+    if (!frame.hasRangeData) {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        refreshThermalEventStatusLocked(config);
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        refreshThermalEventStatusLocked(config);
+
+        g_thermal.event_stats.last_frame_max_value = header.maxValue;
+
+        pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
+        baseline_normal_max = computeThermalBaselineNormalMaxLocked();
+        active_threshold = computeThermalAdaptiveThresholdLocked(config, baseline_normal_max);
+        const int clear_threshold = computeThermalClearThreshold(config, active_threshold);
+        const bool can_learn_baseline =
+            config.baseline_enabled
+            && !g_thermal.event_stats.hotspot_active
+            && static_cast<int>(header.maxValue) < clear_threshold;
+
+        if (can_learn_baseline) {
+            g_thermal.baseline_normal_samples.push_back({now_ms, header.maxValue});
+            pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
+            baseline_normal_max = computeThermalBaselineNormalMaxLocked();
+            active_threshold = computeThermalAdaptiveThresholdLocked(config, baseline_normal_max);
+        }
+
+        updateThermalBaselineStatsLocked(config, baseline_normal_max, active_threshold);
+        if (can_learn_baseline) {
+            g_thermal.event_stats.baseline_updates += 1;
+        }
+
+        const int updated_clear_threshold = g_thermal.event_stats.current_clear_threshold_max_value;
+        const bool hit = static_cast<int>(header.maxValue) >= active_threshold;
+        if (hit) {
+            g_thermal.event_stats.consecutive_hits += 1;
+        } else {
+            g_thermal.event_stats.consecutive_hits = 0;
+            if (static_cast<int>(header.maxValue) < updated_clear_threshold) {
+                g_thermal.event_stats.hotspot_active = false;
+            }
+        }
+        consecutive_hits = g_thermal.event_stats.consecutive_hits;
+
+        if (!g_thermal.event_stats.hotspot_active
+            && hit
+            && consecutive_hits >= config.consecutive_frames_required
+            && g_thermal.event_stats.last_event_attempt_frame_id != header.frameId
+            && (config.cooldown_ms <= 0
+                || g_thermal.event_stats.last_event_attempt_at_ms == 0
+                || (now_ms - g_thermal.event_stats.last_event_attempt_at_ms) >= config.cooldown_ms)) {
+            should_dispatch = true;
+            g_thermal.event_stats.event_attempts += 1;
+            g_thermal.event_stats.last_event_attempt_frame_id = header.frameId;
+            g_thermal.event_stats.last_event_attempt_at_ms = now_ms;
+        }
+    }
+
+    if (!should_dispatch) {
+        return;
+    }
+
+    MqttManager* mqtt = ensureThermalEventMqtt(config);
+    const std::string payload = makeThermalEventPayload(config,
+                                                        header,
+                                                        active_threshold,
+                                                        baseline_normal_max,
+                                                        consecutive_hits);
+    const bool publish_ok = config.event_enabled && mqtt && mqtt->publishMessage(config.event_topic, payload);
+    const bool actuation_ok = config.actuation_enabled && mqtt && publishThermalActuation(mqtt, config);
+    const bool mark_hotspot_active =
+        (config.event_enabled && publish_ok) || (config.actuation_enabled && actuation_ok);
+
+    {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        g_thermal.event_stats.broker_connected = mqtt ? mqtt->isConnected() : false;
+        g_thermal.event_stats.last_publish_ok = config.event_enabled ? publish_ok : false;
+        g_thermal.event_stats.last_actuation_ok = config.actuation_enabled ? actuation_ok : false;
+        g_thermal.event_stats.last_event_message = payload;
+        if (publish_ok) {
+            g_thermal.event_stats.events_published += 1;
+            g_thermal.event_stats.last_event_frame_id = header.frameId;
+            g_thermal.event_stats.last_event_max_value = header.maxValue;
+            g_thermal.event_stats.last_event_threshold_max_value = active_threshold;
+            g_thermal.event_stats.last_event_at_ms = now_ms;
+        }
+        if (config.actuation_enabled) {
+            g_thermal.event_stats.actuation_requests += 1;
+        }
+        if (mark_hotspot_active) {
+            g_thermal.event_stats.hotspot_active = true;
+        }
+    }
+
+    if (config.event_enabled && !publish_ok) {
+        std::cerr << "[THERMAL][EVENT] failed to publish MQTT event for frame=" << header.frameId
+                  << " max=" << header.maxValue << std::endl;
+    }
+
+    if (publish_ok) {
+        std::cout << "[THERMAL][EVENT] published frame=" << header.frameId
+                  << " max=" << header.maxValue
+                  << " baseline=" << baseline_normal_max
+                  << " threshold=" << active_threshold
+                  << " hits=" << consecutive_hits
+                  << " topic=" << config.event_topic
+                  << std::endl;
+    }
+
+    if (config.actuation_enabled && !actuation_ok) {
+        std::cerr << "[THERMAL][EVENT] server-side actuation publish failed for frame=" << header.frameId << std::endl;
+    }
 }
 
 std::vector<crow::websocket::connection*> snapshotClients()
@@ -322,40 +1027,53 @@ void maybeLogThermalStatsLocked(long long nowMs, int statsLogIntervalMs)
               << std::endl;
 }
 
-void updatePacketStats(const std::string& payload,
-                       const std::string& senderText,
-                       bool enableFrameStats,
-                       int frameTimeoutMs,
-                       int maxTrackedFrames,
-                       int statsLogIntervalMs)
+void noteInvalidPacketStats(size_t packetBytes,
+                            const std::string& senderText,
+                            bool enableFrameStats,
+                            int statsLogIntervalMs)
 {
     std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
     const long long nowMs = currentTimeMs();
 
     g_thermal.stats.packets_received += 1;
-    g_thermal.stats.bytes_received += static_cast<unsigned long long>(payload.size());
-    g_thermal.stats.last_packet_bytes = payload.size();
+    g_thermal.stats.bytes_received += static_cast<unsigned long long>(packetBytes);
+    g_thermal.stats.last_packet_bytes = packetBytes;
     g_thermal.stats.last_packet_at_ms = nowMs;
-
-    ThermalPacketHeader header{};
-    if (!parseThermalPacketHeader(payload, header)) {
-        g_thermal.stats.invalid_packets += 1;
-        if (enableFrameStats) {
-            maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
-        }
-        return;
+    g_thermal.stats.invalid_packets += 1;
+    if (enableFrameStats) {
+        g_thermal.stats.last_sender = senderText;
+        maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
     }
+}
+
+void updatePacketStats(const ThermalNormalizedPacket& packet,
+                       size_t packetBytes,
+                       const std::string& senderText,
+                       bool enableFrameStats,
+                       int frameTimeoutMs,
+                       int maxTrackedFrames,
+                       int statsLogIntervalMs,
+                       ThermalCompletedFrame& completedFrame)
+{
+    const ThermalPacketHeader& header = packet.header;
+    completedFrame.ready = false;
+
+    std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+    const long long nowMs = currentTimeMs();
+
+    g_thermal.stats.packets_received += 1;
+    g_thermal.stats.bytes_received += static_cast<unsigned long long>(packetBytes);
+    g_thermal.stats.last_packet_bytes = packetBytes;
+    g_thermal.stats.last_packet_at_ms = nowMs;
 
     g_thermal.stats.last_frame_id = header.frameId;
     g_thermal.stats.last_chunk_index = header.chunkIndex;
     g_thermal.stats.last_total_chunks = header.totalChunks;
     g_thermal.stats.last_min_val = header.minValue;
     g_thermal.stats.last_max_val = header.maxValue;
-    if (!enableFrameStats) {
-        return;
+    if (enableFrameStats) {
+        g_thermal.stats.last_sender = senderText;
     }
-
-    g_thermal.stats.last_sender = senderText;
 
     pruneExpiredFramesLocked(nowMs, frameTimeoutMs);
     g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
@@ -370,18 +1088,33 @@ void updatePacketStats(const std::string& payload,
     if (header.totalChunks > tracker.totalChunks) {
         tracker.totalChunks = header.totalChunks;
     }
+    if (packet.hasRangeData) {
+        tracker.headerMinValue = header.minValue;
+        tracker.headerMaxValue = header.maxValue;
+        tracker.headerHasRangeData = true;
+    }
 
     const uint16_t minimumChunks = static_cast<uint16_t>(header.chunkIndex + 1);
     if (minimumChunks > tracker.totalChunks) {
         tracker.totalChunks = minimumChunks;
     }
 
-    if (!tracker.uniqueChunks.insert(header.chunkIndex).second) {
+    const bool inserted = tracker.uniqueChunks.insert(header.chunkIndex).second;
+    if (!inserted) {
         g_thermal.stats.duplicate_chunks += 1;
+    } else {
+        const std::string chunkPayload = packet.wsPayload.substr(kThermalHeaderBytes);
+        tracker.payloadBytes += chunkPayload.size();
+        updateThermalTrackerRawRange(tracker, chunkPayload);
     }
 
     if (tracker.totalChunks > 0 && tracker.uniqueChunks.size() >= tracker.totalChunks) {
         g_thermal.stats.completed_frames += 1;
+        finalizeCompletedThermalFrame(header, tracker, completedFrame);
+        g_thermal.stats.last_min_val = completedFrame.header.minValue;
+        g_thermal.stats.last_max_val = completedFrame.header.maxValue;
+        g_thermal.stats.last_frame_payload_bytes = completedFrame.payloadBytes;
+        g_thermal.stats.last_frame_encoding = completedFrame.encoding;
         g_thermal.in_flight_frames.erase(header.frameId);
     }
 
@@ -389,13 +1122,17 @@ void updatePacketStats(const std::string& payload,
     g_thermal.stats.in_flight_frames = g_thermal.in_flight_frames.size();
     g_thermal.stats.max_in_flight_frames = std::max(g_thermal.stats.max_in_flight_frames, g_thermal.stats.in_flight_frames);
 
-    maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+    if (enableFrameStats) {
+        maybeLogThermalStatsLocked(nowMs, statsLogIntervalMs);
+    }
 }
 
 void clearThermalFrameTrackers()
 {
     std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+    const ThermalEventConfig config = loadThermalEventConfig();
     g_thermal.in_flight_frames.clear();
+    g_thermal.baseline_normal_samples.clear();
     g_thermal.last_stats_log_at_ms = 0;
     g_thermal.stats.in_flight_frames = 0;
 
@@ -416,7 +1153,31 @@ void clearThermalFrameTrackers()
     g_thermal.stats.missing_chunks = 0;
     g_thermal.stats.evicted_frames = 0;
     g_thermal.stats.max_in_flight_frames = 0;
+    g_thermal.stats.last_frame_payload_bytes = 0;
+    g_thermal.stats.last_frame_encoding = "unknown";
     g_thermal.stats.udp_socket_rcvbuf_bytes = 0;
+    refreshThermalEventStatusLocked(config);
+    g_thermal.event_stats.current_threshold_max_value = config.hotspot_threshold_max_value;
+    g_thermal.event_stats.current_clear_threshold_max_value = config.hotspot_threshold_max_value;
+    g_thermal.event_stats.baseline_normal_max_value = 0;
+    g_thermal.event_stats.baseline_sample_count = 0;
+    g_thermal.event_stats.baseline_updates = 0;
+    g_thermal.event_stats.last_frame_max_value = 0;
+    g_thermal.event_stats.event_attempts = 0;
+    g_thermal.event_stats.events_published = 0;
+    g_thermal.event_stats.actuation_requests = 0;
+    g_thermal.event_stats.last_event_attempt_frame_id = 0;
+    g_thermal.event_stats.last_event_attempt_at_ms = 0;
+    g_thermal.event_stats.last_event_frame_id = 0;
+    g_thermal.event_stats.last_event_max_value = 0;
+    g_thermal.event_stats.last_event_threshold_max_value = 0;
+    g_thermal.event_stats.last_event_at_ms = 0;
+    g_thermal.event_stats.consecutive_hits = 0;
+    g_thermal.event_stats.baseline_ready = false;
+    g_thermal.event_stats.hotspot_active = false;
+    g_thermal.event_stats.last_publish_ok = false;
+    g_thermal.event_stats.last_actuation_ok = false;
+    g_thermal.event_stats.last_event_message.clear();
 }
 
 void broadcastThermalChunk(const std::string& payload)
@@ -461,12 +1222,50 @@ crow::json::wvalue makeThermalStatusJson()
     response["evicted_frames"] = static_cast<uint64_t>(g_thermal.stats.evicted_frames);
     response["in_flight_frames"] = static_cast<int>(g_thermal.stats.in_flight_frames);
     response["max_in_flight_frames"] = static_cast<int>(g_thermal.stats.max_in_flight_frames);
+    response["last_frame_payload_bytes"] = static_cast<int>(g_thermal.stats.last_frame_payload_bytes);
+    response["last_frame_encoding"] = g_thermal.stats.last_frame_encoding;
     response["last_error"] = g_thermal.stats.last_error;
+    response["monitor_always_on"] = g_thermal.event_stats.monitor_always_on;
+    response["event"]["enabled"] = g_thermal.event_stats.event_enabled;
+    response["event"]["actuation_enabled"] = g_thermal.event_stats.actuation_enabled;
+    response["event"]["baseline_enabled"] = g_thermal.event_stats.baseline_enabled;
+    response["event"]["broker_connected"] = g_thermal.event_stats.broker_connected;
+    response["event"]["topic"] = g_thermal.event_stats.event_topic;
+    response["event"]["hotspot_threshold_max_value"] = g_thermal.event_stats.hotspot_threshold_max_value;
+    response["event"]["cooldown_ms"] = g_thermal.event_stats.cooldown_ms;
+    response["event"]["baseline_margin"] = g_thermal.event_stats.baseline_margin;
+    response["event"]["baseline_window_ms"] = g_thermal.event_stats.baseline_window_ms;
+    response["event"]["baseline_min_samples"] = g_thermal.event_stats.baseline_min_samples;
+    response["event"]["baseline_guard_delta"] = g_thermal.event_stats.baseline_guard_delta;
+    response["event"]["consecutive_frames_required"] = g_thermal.event_stats.consecutive_frames_required;
+    response["event"]["current_threshold_max_value"] = g_thermal.event_stats.current_threshold_max_value;
+    response["event"]["current_clear_threshold_max_value"] = g_thermal.event_stats.current_clear_threshold_max_value;
+    response["event"]["baseline_normal_max_value"] = g_thermal.event_stats.baseline_normal_max_value;
+    response["event"]["baseline_sample_count"] = g_thermal.event_stats.baseline_sample_count;
+    response["event"]["baseline_updates"] = static_cast<uint64_t>(g_thermal.event_stats.baseline_updates);
+    response["event"]["attempts"] = static_cast<uint64_t>(g_thermal.event_stats.event_attempts);
+    response["event"]["published"] = static_cast<uint64_t>(g_thermal.event_stats.events_published);
+    response["event"]["actuation_requests"] = static_cast<uint64_t>(g_thermal.event_stats.actuation_requests);
+    response["event"]["last_frame_max_value"] = static_cast<int>(g_thermal.event_stats.last_frame_max_value);
+    response["event"]["last_event_attempt_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_attempt_frame_id);
+    response["event"]["last_event_attempt_at_ms"] = g_thermal.event_stats.last_event_attempt_at_ms;
+    response["event"]["last_event_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_frame_id);
+    response["event"]["last_event_max_value"] = static_cast<int>(g_thermal.event_stats.last_event_max_value);
+    response["event"]["last_event_threshold_max_value"] = g_thermal.event_stats.last_event_threshold_max_value;
+    response["event"]["last_event_at_ms"] = g_thermal.event_stats.last_event_at_ms;
+    response["event"]["consecutive_hits"] = g_thermal.event_stats.consecutive_hits;
+    response["event"]["baseline_ready"] = g_thermal.event_stats.baseline_ready;
+    response["event"]["hotspot_active"] = g_thermal.event_stats.hotspot_active;
+    response["event"]["last_publish_ok"] = g_thermal.event_stats.last_publish_ok;
+    response["event"]["last_actuation_ok"] = g_thermal.event_stats.last_actuation_ok;
+    response["event"]["last_message"] = g_thermal.event_stats.last_event_message;
     response["format"]["width"] = kThermalWidth;
     response["format"]["height"] = kThermalHeight;
-    response["format"]["pixel"] = "u16be";
+    response["format"]["pixel"] = "u16be|u8";
     response["format"]["header_bytes"] = static_cast<int>(kThermalHeaderBytes);
-    response["format"]["frame_bytes"] = kThermalFrameBytes;
+    response["format"]["frame_bytes"] = kThermalFrameBytes16;
+    response["format"]["frame_bytes_16"] = kThermalFrameBytes16;
+    response["format"]["frame_bytes_8"] = kThermalFrameBytes8;
     return response;
 }
 
@@ -540,6 +1339,7 @@ void thermalReceiverLoop()
         std::cout << "[THERMAL] UDP receiver bound to " << bind_host << ":" << bind_port << std::endl;
     }
 
+    ThermalNormalizerState normalizer;
     std::vector<char> buffer(kMaxUdpPacketBytes);
     while (true) {
         {
@@ -568,19 +1368,28 @@ void thermalReceiverLoop()
             continue;
         }
 
-        if (received < static_cast<ssize_t>(kThermalHeaderBytes)) {
+        const std::string sender_key = senderToString(sender);
+        const std::string sender_text = enable_frame_stats ? sender_key : std::string();
+        const std::string payload(buffer.data(), static_cast<size_t>(received));
+        const long long now_ms = currentTimeMs();
+
+        ThermalNormalizedPacket normalized{};
+        if (!normalizeThermalPayload(payload, sender_key, now_ms, frame_timeout_ms, normalizer, normalized)) {
+            noteInvalidPacketStats(payload.size(), sender_text, enable_frame_stats, stats_log_interval_ms);
             continue;
         }
 
-        const std::string payload(buffer.data(), static_cast<size_t>(received));
-        const std::string sender_text = enable_frame_stats ? senderToString(sender) : std::string();
-        updatePacketStats(payload,
+        ThermalCompletedFrame completedFrame{};
+        updatePacketStats(normalized,
+                          payload.size(),
                           sender_text,
                           enable_frame_stats,
                           frame_timeout_ms,
                           max_tracked_frames,
-                          stats_log_interval_ms);
-        broadcastThermalChunk(payload);
+                          stats_log_interval_ms,
+                          completedFrame);
+        maybePublishThermalEvent(completedFrame);
+        broadcastThermalChunk(normalized.wsPayload);
     }
 
     ::close(fd);
@@ -608,6 +1417,9 @@ void requestThermalReceiverStopIfIdle()
 {
     std::lock_guard<std::mutex> receiver_lock(g_thermal.receiver_mutex);
     std::lock_guard<std::mutex> state_lock(g_thermal.state_mutex);
+    if (g_thermal.event_stats.monitor_always_on) {
+        return;
+    }
     if (!g_thermal.clients.empty()) {
         return;
     }
@@ -617,6 +1429,18 @@ void requestThermalReceiverStopIfIdle()
 
 void registerThermalProxyRoutes(crow::SimpleApp& app)
 {
+    const ThermalEventConfig config = loadThermalEventConfig();
+    {
+        std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
+        refreshThermalEventStatusLocked(config);
+    }
+    if (config.event_enabled || config.actuation_enabled) {
+        (void)ensureThermalEventMqtt(config);
+    }
+    if (config.monitor_always_on) {
+        ensureThermalReceiverRunning();
+    }
+
     CROW_ROUTE(app, "/thermal/control/start").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req) {
         if (!isAuthorized(req)) {
@@ -630,13 +1454,16 @@ void registerThermalProxyRoutes(crow::SimpleApp& app)
         response["stream"] = "thermal16";
         response["transport"] = "websocket";
         response["ws_path"] = "/thermal/stream";
+        response["monitor_always_on"] = loadThermalEventConfig().monitor_always_on;
         response["udp_bind_host"] = envOrDefault("THERMAL_UDP_BIND_HOST", "0.0.0.0");
         response["udp_port"] = envPortOrDefault("THERMAL_UDP_PORT", kDefaultThermalUdpPort);
         response["format"]["width"] = kThermalWidth;
         response["format"]["height"] = kThermalHeight;
-        response["format"]["pixel"] = "u16be";
+        response["format"]["pixel"] = "u16be|u8";
         response["format"]["header_bytes"] = static_cast<int>(kThermalHeaderBytes);
-        response["format"]["frame_bytes"] = kThermalFrameBytes;
+        response["format"]["frame_bytes"] = kThermalFrameBytes16;
+        response["format"]["frame_bytes_16"] = kThermalFrameBytes16;
+        response["format"]["frame_bytes_8"] = kThermalFrameBytes8;
         return crow::response(202, response);
     });
 
@@ -650,7 +1477,10 @@ void registerThermalProxyRoutes(crow::SimpleApp& app)
 
         crow::json::wvalue response;
         response["status"] = "accepted";
-        response["note"] = "receiver stops when no WebSocket clients remain";
+        response["monitor_always_on"] = loadThermalEventConfig().monitor_always_on;
+        response["note"] = loadThermalEventConfig().monitor_always_on
+            ? "receiver remains active for server-side monitoring/events"
+            : "receiver stops when no WebSocket clients remain";
         return crow::response(202, response);
     });
 
@@ -698,4 +1528,5 @@ void shutdownThermalProxy()
         g_thermal.receiver_thread.join();
     }
     g_thermal.receiver_thread_started.store(false);
+    g_thermal.event_mqtt.reset();
 }
