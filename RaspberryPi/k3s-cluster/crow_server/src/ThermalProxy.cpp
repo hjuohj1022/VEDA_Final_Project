@@ -175,6 +175,7 @@ struct ThermalEventComponent {
     int minY = 0;
     int maxX = 0;
     int maxY = 0;
+    std::string rejectionReason;
     std::vector<uint8_t> mask;
 };
 
@@ -249,6 +250,8 @@ struct ThermalEventStats {
     double last_candidate_aspect_ratio = 0.0;
     int last_candidate_distance_to_tip_px = -1;
     int last_candidate_score = 0;
+    int last_component_count = 0;
+    std::string last_candidate_rejection_reason;
     int last_candidate_center_x = -1;
     int last_candidate_center_y = -1;
     int last_candidate_persist_frames = 0;
@@ -280,6 +283,7 @@ struct ThermalEventConfig {
     bool event_enabled = true;
     bool actuation_enabled = false;
     bool baseline_enabled = true;
+    bool debug_log = false;
     int hotspot_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
     int cooldown_ms = kDefaultThermalEventCooldownMs;
     int baseline_margin = kDefaultThermalEventBaselineMargin;
@@ -449,6 +453,7 @@ ThermalEventConfig loadThermalEventConfig()
     config.event_enabled = envBoolOrDefault("THERMAL_EVENT_ENABLED", true);
     config.actuation_enabled = envBoolOrDefault("THERMAL_EVENT_ACTUATE", false);
     config.baseline_enabled = envBoolOrDefault("THERMAL_EVENT_BASELINE_ENABLED", true);
+    config.debug_log = envBoolOrDefault("THERMAL_EVENT_DEBUG_LOG", false);
     config.hotspot_threshold_max_value = std::max(
         0, envIntOrDefault("THERMAL_EVENT_THRESHOLD_MAX_VALUE", kDefaultThermalEventThresholdMaxValue));
     config.cooldown_ms = std::max(0, envIntOrDefault("THERMAL_EVENT_COOLDOWN_MS", kDefaultThermalEventCooldownMs));
@@ -1094,6 +1099,31 @@ int computeThermalComponentScore(const ThermalEventComponent& component,
     return score;
 }
 
+bool selectDiagnosticThermalComponent(const std::vector<ThermalEventComponent>& components,
+                                      ThermalEventComponent& out)
+{
+    bool found = false;
+    long long bestScore = std::numeric_limits<long long>::min();
+    for (const auto& component : components) {
+        long long weightedScore = static_cast<long long>(component.score) * 1000LL
+            + static_cast<long long>(component.localContrast) * 6LL
+            + static_cast<long long>(component.seedArea) * 180LL
+            + static_cast<long long>(component.newPixels) * 80LL
+            + static_cast<long long>(component.peakValue)
+            - static_cast<long long>(component.area) * 4LL;
+        if (component.distanceToTipPx >= 0) {
+            weightedScore -= static_cast<long long>(component.distanceToTipPx) * 12LL;
+        }
+
+        if (!found || weightedScore > bestScore) {
+            bestScore = weightedScore;
+            out = component;
+            found = true;
+        }
+    }
+    return found;
+}
+
 std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEventFrameAnalysis& analysis,
                                                                  int seedThreshold,
                                                                  int growThreshold,
@@ -1192,11 +1222,43 @@ std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEv
         component.aspectRatio = computeThermalComponentAspectRatio(component);
         component.distanceToTipPx = computeThermalDistanceToTipPx(component, config);
         component.score = computeThermalComponentScore(component, analysis, config);
+        const bool areaTooSmall = component.area < config.component_area_min;
+        const bool areaTooLarge = component.area > config.component_area_max;
+        const bool lowContrast = component.localContrast < config.local_contrast_min;
+        const bool lowAspectRatio = component.aspectRatio < config.aspect_ratio_min;
+        const bool missingTipAnchor = !hasThermalEventTipAnchor(config);
+        const bool tipDistanceUnknown = hasThermalEventTipAnchor(config) && component.distanceToTipPx < 0;
+        const bool tooFarFromTip =
+            hasThermalEventTipAnchor(config)
+            && component.distanceToTipPx >= 0
+            && component.distanceToTipPx > config.tip_distance_max_px;
         component.valid =
-            component.area >= config.component_area_min
-            && component.area <= config.component_area_max
-            && component.localContrast >= config.local_contrast_min
-            && component.aspectRatio >= config.aspect_ratio_min;
+            !areaTooSmall
+            && !areaTooLarge
+            && !lowContrast
+            && !lowAspectRatio
+            && !missingTipAnchor
+            && !tipDistanceUnknown
+            && !tooFarFromTip;
+        if (component.valid) {
+            component.rejectionReason = "ok";
+        } else if (areaTooSmall) {
+            component.rejectionReason = "area_too_small";
+        } else if (areaTooLarge) {
+            component.rejectionReason = "area_too_large";
+        } else if (lowContrast) {
+            component.rejectionReason = "low_contrast";
+        } else if (lowAspectRatio) {
+            component.rejectionReason = "low_aspect_ratio";
+        } else if (missingTipAnchor) {
+            component.rejectionReason = "missing_tip_anchor";
+        } else if (tipDistanceUnknown) {
+            component.rejectionReason = "tip_distance_unknown";
+        } else if (tooFarFromTip) {
+            component.rejectionReason = "too_far_from_tip";
+        } else {
+            component.rejectionReason = "rejected";
+        }
         components.push_back(std::move(component));
     }
 
@@ -1526,7 +1588,11 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
     int consecutive_hits = 0;
     int candidate_persist_frames = 0;
     int candidate_miss_frames = 0;
+    int component_count = 0;
     ThermalEventComponent best_component{};
+    ThermalEventComponent diagnostic_component{};
+    bool diagnostic_component_available = false;
+    std::string candidate_rejection_reason = "analysis_unavailable";
     bool should_dispatch = false;
 
     if (!config.event_enabled && !config.actuation_enabled) {
@@ -1556,6 +1622,8 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             g_thermal.event_stats.last_candidate_aspect_ratio = 0.0;
             g_thermal.event_stats.last_candidate_distance_to_tip_px = -1;
             g_thermal.event_stats.last_candidate_score = 0;
+            g_thermal.event_stats.last_component_count = 0;
+            g_thermal.event_stats.last_candidate_rejection_reason = "event_disabled";
             g_thermal.event_stats.last_candidate_center_x = -1;
             g_thermal.event_stats.last_candidate_center_y = -1;
             g_thermal.event_stats.last_candidate_persist_frames = 0;
@@ -1616,7 +1684,20 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                     : std::vector<uint8_t>{};
             const auto components = extractThermalEventComponents(
                 analysis, seed_threshold, grow_threshold, prevMask, config);
+            component_count = static_cast<int>(components.size());
+            diagnostic_component_available = selectDiagnosticThermalComponent(components, diagnostic_component);
             (void)selectBestThermalEventComponent(components, config, best_component);
+            if (best_component.valid) {
+                candidate_rejection_reason = "ok";
+            } else if (!diagnostic_component_available) {
+                candidate_rejection_reason = "no_components";
+            } else if (!diagnostic_component.valid) {
+                candidate_rejection_reason = diagnostic_component.rejectionReason;
+            } else if (diagnostic_component.score < config.score_min) {
+                candidate_rejection_reason = "score_below_min";
+            } else {
+                candidate_rejection_reason = "not_selected";
+            }
             updateThermalEventTrackerState(
                 g_thermal.event_tracker,
                 config,
@@ -1628,6 +1709,7 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             hot_area_pixels = 0;
             candidate_persist_frames = 0;
             candidate_miss_frames = g_thermal.event_tracker.missFrames;
+            candidate_rejection_reason = "analysis_unavailable";
         }
 
         const int clear_threshold = computeThermalClearThreshold(config, active_threshold);
@@ -1665,22 +1747,36 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
         }
 
         updateThermalBaselineStatsLocked(config, baseline_normal_max, active_threshold);
+        const ThermalEventComponent& reported_component =
+            best_component.valid ? best_component : diagnostic_component;
         g_thermal.event_stats.last_hot_area_pixels = hot_area_pixels;
         g_thermal.event_stats.last_hot_area_threshold = analysis.valid ? grow_threshold : active_threshold;
         g_thermal.event_stats.last_seed_threshold = analysis.valid ? seed_threshold : 0;
         g_thermal.event_stats.last_grow_threshold = analysis.valid ? grow_threshold : 0;
-        g_thermal.event_stats.last_candidate_area = best_component.valid ? best_component.area : 0;
-        g_thermal.event_stats.last_candidate_seed_area = best_component.valid ? best_component.seedArea : 0;
-        g_thermal.event_stats.last_candidate_peak_value = best_component.valid ? best_component.peakValue : 0;
-        g_thermal.event_stats.last_candidate_p90_value = best_component.valid ? best_component.p90Value : 0;
-        g_thermal.event_stats.last_candidate_local_contrast = best_component.valid ? best_component.localContrast : 0;
-        g_thermal.event_stats.last_candidate_new_pixels = best_component.valid ? best_component.newPixels : 0;
-        g_thermal.event_stats.last_candidate_aspect_ratio = best_component.valid ? best_component.aspectRatio : 0.0;
+        g_thermal.event_stats.last_candidate_area =
+            (best_component.valid || diagnostic_component_available) ? reported_component.area : 0;
+        g_thermal.event_stats.last_candidate_seed_area =
+            (best_component.valid || diagnostic_component_available) ? reported_component.seedArea : 0;
+        g_thermal.event_stats.last_candidate_peak_value =
+            (best_component.valid || diagnostic_component_available) ? reported_component.peakValue : 0;
+        g_thermal.event_stats.last_candidate_p90_value =
+            (best_component.valid || diagnostic_component_available) ? reported_component.p90Value : 0;
+        g_thermal.event_stats.last_candidate_local_contrast =
+            (best_component.valid || diagnostic_component_available) ? reported_component.localContrast : 0;
+        g_thermal.event_stats.last_candidate_new_pixels =
+            (best_component.valid || diagnostic_component_available) ? reported_component.newPixels : 0;
+        g_thermal.event_stats.last_candidate_aspect_ratio =
+            (best_component.valid || diagnostic_component_available) ? reported_component.aspectRatio : 0.0;
         g_thermal.event_stats.last_candidate_distance_to_tip_px =
-            best_component.valid ? best_component.distanceToTipPx : -1;
-        g_thermal.event_stats.last_candidate_score = best_component.valid ? best_component.score : 0;
-        g_thermal.event_stats.last_candidate_center_x = best_component.valid ? best_component.centerX : -1;
-        g_thermal.event_stats.last_candidate_center_y = best_component.valid ? best_component.centerY : -1;
+            (best_component.valid || diagnostic_component_available) ? reported_component.distanceToTipPx : -1;
+        g_thermal.event_stats.last_candidate_score =
+            (best_component.valid || diagnostic_component_available) ? reported_component.score : 0;
+        g_thermal.event_stats.last_component_count = component_count;
+        g_thermal.event_stats.last_candidate_rejection_reason = candidate_rejection_reason;
+        g_thermal.event_stats.last_candidate_center_x =
+            (best_component.valid || diagnostic_component_available) ? reported_component.centerX : -1;
+        g_thermal.event_stats.last_candidate_center_y =
+            (best_component.valid || diagnostic_component_available) ? reported_component.centerY : -1;
         g_thermal.event_stats.last_candidate_persist_frames = candidate_persist_frames;
         g_thermal.event_stats.last_candidate_miss_frames = candidate_miss_frames;
         if (can_learn_baseline) {
@@ -1698,6 +1794,22 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                 && (best_component.newPixels >= config.new_pixels_min || candidate_persist_frames > 1);
             hit = signal_hit && area_hit && component_hit;
             g_thermal.event_stats.consecutive_hits = hit ? candidate_persist_frames : 0;
+            if (config.debug_log && (signal_hit || area_hit || diagnostic_component_available)) {
+                const ThermalEventComponent& debug_component =
+                    best_component.valid ? best_component : diagnostic_component;
+                std::cout << "[THERMAL][EVENT][DEBUG] frame=" << header.frameId
+                          << " signal_hit=" << signal_hit
+                          << " area_hit=" << area_hit
+                          << " component_hit=" << component_hit
+                          << " reason=" << candidate_rejection_reason
+                          << " area=" << ((best_component.valid || diagnostic_component_available) ? debug_component.area : 0)
+                          << " contrast=" << ((best_component.valid || diagnostic_component_available) ? debug_component.localContrast : 0)
+                          << " aspect=" << ((best_component.valid || diagnostic_component_available) ? debug_component.aspectRatio : 0.0)
+                          << " tip_dist=" << ((best_component.valid || diagnostic_component_available) ? debug_component.distanceToTipPx : -1)
+                          << " score=" << ((best_component.valid || diagnostic_component_available) ? debug_component.score : 0)
+                          << " persist=" << candidate_persist_frames
+                          << std::endl;
+            }
         } else {
             const bool signal_hit = observed_signal_value >= active_threshold;
             hit = signal_hit;
@@ -2081,6 +2193,8 @@ void clearThermalFrameTrackers()
     g_thermal.event_stats.last_candidate_aspect_ratio = 0.0;
     g_thermal.event_stats.last_candidate_distance_to_tip_px = -1;
     g_thermal.event_stats.last_candidate_score = 0;
+    g_thermal.event_stats.last_component_count = 0;
+    g_thermal.event_stats.last_candidate_rejection_reason.clear();
     g_thermal.event_stats.last_candidate_center_x = -1;
     g_thermal.event_stats.last_candidate_center_y = -1;
     g_thermal.event_stats.last_candidate_persist_frames = 0;
@@ -2161,6 +2275,7 @@ crow::json::wvalue makeThermalStatusJson()
     response["event"]["enabled"] = config.event_enabled;
     response["event"]["actuation_enabled"] = config.actuation_enabled;
     response["event"]["baseline_enabled"] = config.baseline_enabled;
+    response["event"]["debug_log"] = config.debug_log;
     response["event"]["broker_connected"] = g_thermal.event_stats.broker_connected;
     response["event"]["topic"] = config.event_topic;
     response["event"]["hotspot_threshold_max_value"] = config.hotspot_threshold_max_value;
@@ -2219,6 +2334,8 @@ crow::json::wvalue makeThermalStatusJson()
     response["event"]["last_candidate_aspect_ratio"] = g_thermal.event_stats.last_candidate_aspect_ratio;
     response["event"]["last_candidate_distance_to_tip_px"] = g_thermal.event_stats.last_candidate_distance_to_tip_px;
     response["event"]["last_candidate_score"] = g_thermal.event_stats.last_candidate_score;
+    response["event"]["last_component_count"] = g_thermal.event_stats.last_component_count;
+    response["event"]["last_candidate_rejection_reason"] = g_thermal.event_stats.last_candidate_rejection_reason;
     response["event"]["last_candidate_center_x"] = g_thermal.event_stats.last_candidate_center_x;
     response["event"]["last_candidate_center_y"] = g_thermal.event_stats.last_candidate_center_y;
     response["event"]["last_candidate_persist_frames"] = g_thermal.event_stats.last_candidate_persist_frames;
