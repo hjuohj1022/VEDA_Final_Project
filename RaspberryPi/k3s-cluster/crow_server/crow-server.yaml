@@ -18,12 +18,12 @@ spec:
       # 파일이 있는 노드(pi-worker1)에 고정
       nodeSelector:
         kubernetes.io/hostname: pi-worker1
-      
+
       containers:
       - name: crow-server
         image: docker.io/hjuohj/crow-server:latest
-        imagePullPolicy: Always 
-        
+        imagePullPolicy: Always
+
         ports:
         - containerPort: 8080
         # Internal-only thermal UDP input.
@@ -31,7 +31,7 @@ spec:
         # and only decrypted thermal UDP reaches crow-server on this port.
         - containerPort: 5005
           protocol: UDP
-        
+
         # DB 접속 정보
         env:
         - name: DB_HOST
@@ -43,6 +43,7 @@ spec:
             secretKeyRef:
               name: mariadb-secret
               key: user-password
+
         # SUNAPI 프록시 대상 정보 (Git에는 실값 미저장)
         - name: SUNAPI_BASE_URL
           valueFrom:
@@ -86,12 +87,14 @@ spec:
             configMapKeyRef:
               name: crow-cctv-ip-config
               key: CCTV_BACKEND_PORT
+
         # ThermalProxy keeps listening on the same internal UDP port.
         # The DTLS gateway forwards decrypted thermal payloads here.
         - name: THERMAL_UDP_BIND_HOST
           value: "0.0.0.0"
         - name: THERMAL_UDP_PORT
           value: "5005"
+
         - name: MAIL_APP_SCRIPT_URL
           valueFrom:
             secretKeyRef:
@@ -112,6 +115,14 @@ spec:
             secretKeyRef:
               name: crow-admin-secret
               key: ADMIN_UNLOCK_KEY
+
+        # Thermal event demo tuning
+        - name: THERMAL_EVENT_COMPONENT_AREA_MAX
+          value: "1024"
+        - name: THERMAL_EVENT_CONSECUTIVE_FRAMES
+          value: "1"
+        - name: THERMAL_EVENT_CLEAR_FRAMES
+          value: "2"
 
         # 마운트
         volumeMounts:
