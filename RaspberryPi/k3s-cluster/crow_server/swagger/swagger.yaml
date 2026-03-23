@@ -1893,7 +1893,11 @@ paths:
       summary: 열화상 스트림 수신 시작
       description: |
         서버 쪽 UDP 수신기를 준비하고 WebSocket 열화상 스트림 사용 정보를 반환합니다.
-        실제 열화상 프레임은 '/thermal/stream' WebSocket에서 binary message로 전달됩니다.
+        서버가 상시 모니터링 모드인 경우 이미 수신기가 실행 중일 수 있으며,
+        이 호출은 클라이언트 WebSocket 사용을 위한 준비 요청으로 동작합니다.
+        내부 UDP 입력은 10B/8B/4B thermal chunk header를 모두 허용하며,
+        실제 열화상 프레임은 '/thermal/stream' WebSocket에서 canonical 10B header 형식으로 전달됩니다.
+        payload 인코딩은 하드웨어 설정에 따라 raw 16-bit 또는 normalized 8-bit가 될 수 있습니다.
       security:
         - bearerAuth: []
       responses:
@@ -1916,6 +1920,8 @@ paths:
                   ws_path:
                     type: string
                     example: /thermal/stream
+                  monitor_always_on:
+                    type: boolean
                   udp_bind_host:
                     type: string
                     example: 0.0.0.0
@@ -1933,13 +1939,21 @@ paths:
                         example: 120
                       pixel:
                         type: string
-                        example: u16be
+                        example: u16be|u8
                       header_bytes:
                         type: integer
+                        description: WebSocket 출력용 canonical thermal header 크기
                         example: 10
                       frame_bytes:
                         type: integer
+                        description: raw 16-bit 전체 프레임 바이트 수
                         example: 38400
+                      frame_bytes_16:
+                        type: integer
+                        example: 38400
+                      frame_bytes_8:
+                        type: integer
+                        example: 19200
         '401':
           description: Unauthorized
 
@@ -1949,6 +1963,7 @@ paths:
       description: |
         WebSocket 클라이언트가 모두 빠진 상태라면 서버 UDP 수신기를 정리합니다.
         활성 클라이언트가 남아 있으면 수신기는 계속 유지됩니다.
+        서버가 상시 모니터링 모드이면 이벤트 생성을 위해 수신기가 유지될 수 있습니다.
       security:
         - bearerAuth: []
       responses:
@@ -1962,16 +1977,23 @@ paths:
                   status:
                     type: string
                     example: accepted
+                  monitor_always_on:
+                    type: boolean
                   note:
                     type: string
-                    example: receiver stops when no WebSocket clients remain
+                    example: receiver remains active for server-side monitoring/events
         '401':
           description: Unauthorized
 
   /thermal/status:
     get:
       summary: 열화상 수신 상태 조회
-      description: 현재 UDP bind 상태, WebSocket 클라이언트 수, 최근 수신 chunk 메타데이터를 조회합니다.
+      description: |
+        현재 UDP bind 상태, WebSocket 클라이언트 수, 최근 수신 chunk 메타데이터와 서버 측 이벤트 생성 상태를 조회합니다.
+        서버는 내부 UDP thermal chunk 입력에서 10B(frameId 포함), 8B(range 포함), 4B(legacy) 헤더를 모두 허용하고,
+        WebSocket 출력은 canonical 10B header 기준으로 정규화합니다.
+        하드웨어 payload는 raw 16-bit 또는 normalized 8-bit일 수 있으며, 서버는 완료된 프레임 크기로 인코딩을 판별합니다.
+        4B legacy 입력도 raw 16-bit 전체 프레임이면 서버가 직접 range를 계산해 이벤트 판정에 사용할 수 있습니다.
       security:
         - bearerAuth: []
       responses:
@@ -2000,6 +2022,8 @@ paths:
                     example: 5005
                   ws_clients:
                     type: integer
+                  monitor_always_on:
+                    type: boolean
                   last_frame_id:
                     type: integer
                   last_chunk_index:
@@ -2018,8 +2042,90 @@ paths:
                     type: integer
                   bytes_received:
                     type: integer
+                  last_frame_payload_bytes:
+                    type: integer
+                  last_frame_encoding:
+                    type: string
+                    example: scaled8
                   last_error:
                     type: string
+                  event:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      actuation_enabled:
+                        type: boolean
+                      baseline_enabled:
+                        type: boolean
+                      broker_connected:
+                        type: boolean
+                      topic:
+                        type: string
+                        example: system/event
+                      hotspot_threshold_max_value:
+                        type: integer
+                        example: 12000
+                      cooldown_ms:
+                        type: integer
+                        example: 5000
+                      baseline_margin:
+                        type: integer
+                        example: 1200
+                      baseline_window_ms:
+                        type: integer
+                        example: 300000
+                      baseline_min_samples:
+                        type: integer
+                        example: 30
+                      baseline_guard_delta:
+                        type: integer
+                        example: 500
+                      consecutive_frames_required:
+                        type: integer
+                        example: 3
+                      current_threshold_max_value:
+                        type: integer
+                      current_clear_threshold_max_value:
+                        type: integer
+                      baseline_normal_max_value:
+                        type: integer
+                      baseline_sample_count:
+                        type: integer
+                      baseline_updates:
+                        type: integer
+                      attempts:
+                        type: integer
+                      published:
+                        type: integer
+                      actuation_requests:
+                        type: integer
+                      last_frame_max_value:
+                        type: integer
+                      last_event_attempt_frame_id:
+                        type: integer
+                      last_event_attempt_at_ms:
+                        type: integer
+                      last_event_frame_id:
+                        type: integer
+                      last_event_max_value:
+                        type: integer
+                      last_event_threshold_max_value:
+                        type: integer
+                      last_event_at_ms:
+                        type: integer
+                      consecutive_hits:
+                        type: integer
+                      baseline_ready:
+                        type: boolean
+                      hotspot_active:
+                        type: boolean
+                      last_publish_ok:
+                        type: boolean
+                      last_actuation_ok:
+                        type: boolean
+                      last_message:
+                        type: string
                   format:
                     type: object
                     properties:
@@ -2031,13 +2137,21 @@ paths:
                         example: 120
                       pixel:
                         type: string
-                        example: u16be
+                        example: u16be|u8
                       header_bytes:
                         type: integer
+                        description: WebSocket 출력용 canonical thermal header 크기
                         example: 10
                       frame_bytes:
                         type: integer
+                        description: raw 16-bit 전체 프레임 바이트 수
                         example: 38400
+                      frame_bytes_16:
+                        type: integer
+                        example: 38400
+                      frame_bytes_8:
+                        type: integer
+                        example: 19200
         '401':
           description: Unauthorized
 
@@ -2046,8 +2160,14 @@ paths:
       summary: 열화상 스트림 WebSocket
       description: |
         Authorization Bearer JWT가 포함된 WebSocket handshake로 접속합니다.
-        서버는 ESP32가 보낸 UDP datagram 원본을 그대로 binary message로 재브로드캐스트합니다.
-        각 binary message 형식은 '10B header + thermal payload'이며 header는 big-endian입니다.
+        서버는 내부 UDP thermal chunk를 수신해 WebSocket binary message로 재브로드캐스트합니다.
+        내부 UDP 입력은 다음 big-endian 헤더 변형을 모두 허용합니다.
+        - `10B`: `frameId + chunkIndex + totalChunks + minValue + maxValue`
+        - `8B`: `chunkIndex + totalChunks + minValue + maxValue`
+        - `4B`: `chunkIndex + totalChunks`
+        4B legacy 입력도 WebSocket 출력은 가능하며, raw 16-bit 전체 프레임이면 서버가 직접 range를 계산해 이벤트 판정에 사용할 수 있습니다.
+        WebSocket 출력은 항상 `10B canonical header + thermal payload` 형식이며 header는 big-endian입니다.
+        thermal payload는 하드웨어 설정에 따라 raw 16-bit(`38400B`) 또는 normalized 8-bit(`19200B`)가 될 수 있습니다.
       security:
         - bearerAuth: []
       responses:
