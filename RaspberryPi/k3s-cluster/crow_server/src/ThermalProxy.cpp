@@ -48,23 +48,23 @@ constexpr int kDefaultUdpSocketBufferBytes = 2 * 1024 * 1024;
 constexpr int kDefaultStatsLogIntervalMs = 5000;
 constexpr int kDefaultFrameTrackTimeoutMs = 2000;
 constexpr int kDefaultMaxTrackedFrames = 8;
-constexpr int kDefaultThermalEventThresholdMaxValue = 12000;
+constexpr int kDefaultThermalEventThresholdMaxValue = 8500;
 constexpr int kDefaultThermalEventCooldownMs = 5000;
-constexpr int kDefaultThermalEventBaselineMargin = 1200;
+constexpr int kDefaultThermalEventBaselineMargin = 250;
 constexpr int kDefaultThermalEventBaselineWindowMs = 300000;
 constexpr int kDefaultThermalEventBaselineMinSamples = 30;
-constexpr int kDefaultThermalEventBaselineGuardDelta = 500;
-constexpr int kDefaultThermalEventConsecutiveFrames = 3;
-constexpr int kDefaultThermalEventSignalPercentile = 99;
-constexpr int kDefaultThermalEventHotAreaMinPixels = 12;
-constexpr int kDefaultThermalEventSeedDelta = 700;
-constexpr int kDefaultThermalEventGrowDelta = 350;
-constexpr int kDefaultThermalEventComponentAreaMin = 4;
-constexpr int kDefaultThermalEventComponentAreaMax = 80;
-constexpr int kDefaultThermalEventLocalContrastMin = 450;
-constexpr int kDefaultThermalEventNewPixelsMin = 3;
-constexpr int kDefaultThermalEventClearFrames = 6;
-constexpr int kDefaultThermalEventTrackMatchDistancePx = 12;
+constexpr int kDefaultThermalEventBaselineGuardDelta = 250;
+constexpr int kDefaultThermalEventConsecutiveFrames = 2;
+constexpr int kDefaultThermalEventSignalPercentile = 100;
+constexpr int kDefaultThermalEventHotAreaMinPixels = 4;
+constexpr int kDefaultThermalEventSeedDelta = 120;
+constexpr int kDefaultThermalEventGrowDelta = 60;
+constexpr int kDefaultThermalEventComponentAreaMin = 2;
+constexpr int kDefaultThermalEventComponentAreaMax = 48;
+constexpr int kDefaultThermalEventLocalContrastMin = 150;
+constexpr int kDefaultThermalEventNewPixelsMin = 1;
+constexpr int kDefaultThermalEventClearFrames = 4;
+constexpr int kDefaultThermalEventTrackMatchDistancePx = 18;
 constexpr int kDefaultThermalEventRingRadius = 2;
 
 struct ThermalPacketHeader {
@@ -1472,13 +1472,13 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             const int robustMad = std::max(1, analysis.madValue);
             grow_threshold = std::max({
                 active_threshold + config.grow_delta,
-                analysis.medianValue + (5 * robustMad),
+                analysis.medianValue + (3 * robustMad),
                 active_threshold
             });
             seed_threshold = std::max({
                 active_threshold + config.seed_delta,
                 analysis.p99Value,
-                analysis.medianValue + (8 * robustMad)
+                analysis.medianValue + (5 * robustMad)
             });
             if (grow_threshold > seed_threshold) {
                 grow_threshold = seed_threshold;
@@ -1524,13 +1524,13 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                 const int robustMad = std::max(1, analysis.madValue);
                 grow_threshold = std::max({
                     active_threshold + config.grow_delta,
-                    analysis.medianValue + (5 * robustMad),
+                    analysis.medianValue + (3 * robustMad),
                     active_threshold
                 });
                 seed_threshold = std::max({
                     active_threshold + config.seed_delta,
                     analysis.p99Value,
-                    analysis.medianValue + (8 * robustMad)
+                    analysis.medianValue + (5 * robustMad)
                 });
                 if (grow_threshold > seed_threshold) {
                     grow_threshold = seed_threshold;
