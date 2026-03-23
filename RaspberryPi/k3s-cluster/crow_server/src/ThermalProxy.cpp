@@ -55,6 +55,8 @@ constexpr int kDefaultThermalEventBaselineWindowMs = 300000;
 constexpr int kDefaultThermalEventBaselineMinSamples = 30;
 constexpr int kDefaultThermalEventBaselineGuardDelta = 500;
 constexpr int kDefaultThermalEventConsecutiveFrames = 3;
+constexpr int kDefaultThermalEventSignalPercentile = 99;
+constexpr int kDefaultThermalEventHotAreaMinPixels = 12;
 
 struct ThermalPacketHeader {
     uint16_t frameId = 0;
@@ -105,6 +107,7 @@ struct ThermalFrameTracker {
     uint16_t computedMaxValue = 0;
     bool headerHasRangeData = false;
     bool computedRawRangeReady = false;
+    std::map<uint16_t, std::string> chunkPayloads;
     std::set<uint16_t> uniqueChunks;
 };
 
@@ -114,6 +117,24 @@ struct ThermalCompletedFrame {
     bool hasRangeData = false;
     bool ready = false;
     std::string encoding = "unknown";
+    std::string framePayload;
+};
+
+struct ThermalEventRoi {
+    int x = 0;
+    int y = 0;
+    int width = kThermalWidth;
+    int height = kThermalHeight;
+};
+
+struct ThermalEventFrameAnalysis {
+    bool valid = false;
+    int percentile = kDefaultThermalEventSignalPercentile;
+    ThermalEventRoi roi;
+    int validPixels = 0;
+    int roiMinValue = 0;
+    int roiMaxValue = 0;
+    int signalValue = 0;
 };
 
 struct ThermalProxyStats {
@@ -159,6 +180,12 @@ struct ThermalEventStats {
     int baseline_min_samples = kDefaultThermalEventBaselineMinSamples;
     int baseline_guard_delta = kDefaultThermalEventBaselineGuardDelta;
     int consecutive_frames_required = kDefaultThermalEventConsecutiveFrames;
+    int signal_percentile = kDefaultThermalEventSignalPercentile;
+    int hot_area_min_pixels = kDefaultThermalEventHotAreaMinPixels;
+    int roi_x = 0;
+    int roi_y = 0;
+    int roi_width = kThermalWidth;
+    int roi_height = kThermalHeight;
     int current_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
     int current_clear_threshold_max_value = kDefaultThermalEventThresholdMaxValue;
     int baseline_normal_max_value = 0;
@@ -169,10 +196,18 @@ struct ThermalEventStats {
     unsigned long long events_published = 0;
     unsigned long long actuation_requests = 0;
     uint16_t last_frame_max_value = 0;
+    int last_signal_value = 0;
+    int last_hot_area_pixels = 0;
+    int last_hot_area_threshold = 0;
+    int last_valid_pixels = 0;
+    int last_roi_min_value = 0;
+    int last_roi_max_value = 0;
     uint16_t last_event_attempt_frame_id = 0;
     long long last_event_attempt_at_ms = 0;
     uint16_t last_event_frame_id = 0;
     uint16_t last_event_max_value = 0;
+    int last_event_signal_value = 0;
+    int last_event_hot_area_pixels = 0;
     int last_event_threshold_max_value = 0;
     long long last_event_at_ms = 0;
     int consecutive_hits = 0;
@@ -195,6 +230,12 @@ struct ThermalEventConfig {
     int baseline_min_samples = kDefaultThermalEventBaselineMinSamples;
     int baseline_guard_delta = kDefaultThermalEventBaselineGuardDelta;
     int consecutive_frames_required = kDefaultThermalEventConsecutiveFrames;
+    int signal_percentile = kDefaultThermalEventSignalPercentile;
+    int hot_area_min_pixels = kDefaultThermalEventHotAreaMinPixels;
+    int roi_x = 0;
+    int roi_y = 0;
+    int roi_width = kThermalWidth;
+    int roi_height = kThermalHeight;
     std::string event_topic = "system/event";
     std::string source = "thermal";
     std::string severity = "warning";
@@ -212,7 +253,7 @@ struct ThermalEventConfig {
 
 struct ThermalBaselineSample {
     long long observed_at_ms = 0;
-    uint16_t max_value = 0;
+    int signal_value = 0;
 };
 
 struct ThermalProxyState {
@@ -282,6 +323,19 @@ int clampServoAngle(int angle)
     return std::max(0, std::min(180, angle));
 }
 
+int clampPercentile(int value)
+{
+    return std::max(50, std::min(100, value));
+}
+
+int clampCoordinate(int value, int upperBoundInclusive)
+{
+    if (upperBoundInclusive <= 0) {
+        return 0;
+    }
+    return std::max(0, std::min(upperBoundInclusive, value));
+}
+
 bool envBoolOrDefault(const char* key, bool fallback)
 {
     const char* value = std::getenv(key);
@@ -323,6 +377,14 @@ ThermalEventConfig loadThermalEventConfig()
         0, envIntOrDefault("THERMAL_EVENT_BASELINE_GUARD_DELTA", kDefaultThermalEventBaselineGuardDelta));
     config.consecutive_frames_required = std::max(
         1, envIntOrDefault("THERMAL_EVENT_CONSECUTIVE_FRAMES", kDefaultThermalEventConsecutiveFrames));
+    config.signal_percentile = clampPercentile(
+        envIntOrDefault("THERMAL_EVENT_SIGNAL_PERCENTILE", kDefaultThermalEventSignalPercentile));
+    config.hot_area_min_pixels = std::max(
+        0, envIntOrDefault("THERMAL_EVENT_HOT_AREA_MIN_PIXELS", kDefaultThermalEventHotAreaMinPixels));
+    config.roi_x = envIntOrDefault("THERMAL_EVENT_ROI_X", 0);
+    config.roi_y = envIntOrDefault("THERMAL_EVENT_ROI_Y", 0);
+    config.roi_width = envIntOrDefault("THERMAL_EVENT_ROI_WIDTH", kThermalWidth);
+    config.roi_height = envIntOrDefault("THERMAL_EVENT_ROI_HEIGHT", kThermalHeight);
     config.event_topic = envOrDefault("THERMAL_EVENT_TOPIC", "system/event");
     if (config.event_topic.empty()) {
         config.event_topic = "system/event";
@@ -554,6 +616,11 @@ void finalizeCompletedThermalFrame(const ThermalPacketHeader& latestHeader,
     out.payloadBytes = tracker.payloadBytes;
     out.encoding = thermalEncodingFromPayloadBytes(tracker.payloadBytes);
     out.hasRangeData = false;
+    out.framePayload.clear();
+    out.framePayload.reserve(tracker.payloadBytes);
+    for (const auto& entry : tracker.chunkPayloads) {
+        out.framePayload.append(entry.second);
+    }
 
     if (out.encoding == "raw16" && tracker.computedRawRangeReady) {
         out.header.minValue = tracker.computedMinValue;
@@ -615,6 +682,135 @@ bool parseThermalPacketHeader(const std::string& payload, ThermalPacketHeader& o
     return true;
 }
 
+ThermalEventRoi normalizeThermalEventRoi(const ThermalEventConfig& config)
+{
+    ThermalEventRoi roi;
+    roi.x = clampCoordinate(config.roi_x, kThermalWidth - 1);
+    roi.y = clampCoordinate(config.roi_y, kThermalHeight - 1);
+
+    const int remainingWidth = std::max(1, kThermalWidth - roi.x);
+    const int remainingHeight = std::max(1, kThermalHeight - roi.y);
+    roi.width = config.roi_width <= 0 ? remainingWidth : std::min(config.roi_width, remainingWidth);
+    roi.height = config.roi_height <= 0 ? remainingHeight : std::min(config.roi_height, remainingHeight);
+    return roi;
+}
+
+bool decodeThermalFramePixelRaw(const ThermalCompletedFrame& frame, size_t pixelIndex, uint16_t* out)
+{
+    if (!out) {
+        return false;
+    }
+
+    if (frame.encoding == "raw16") {
+        const size_t offset = pixelIndex * 2;
+        if ((offset + 1) >= frame.framePayload.size()) {
+            return false;
+        }
+        *out = readBe16(reinterpret_cast<const unsigned char*>(frame.framePayload.data() + offset));
+        return true;
+    }
+
+    if (frame.encoding == "scaled8") {
+        if (pixelIndex >= frame.framePayload.size()) {
+            return false;
+        }
+
+        const uint16_t scaled = static_cast<uint8_t>(frame.framePayload[pixelIndex]);
+        const uint32_t range = frame.header.maxValue > frame.header.minValue
+            ? static_cast<uint32_t>(frame.header.maxValue - frame.header.minValue)
+            : 1U;
+        *out = static_cast<uint16_t>(
+            frame.header.minValue + static_cast<uint16_t>((scaled * range + 127U) / 255U));
+        return true;
+    }
+
+    return false;
+}
+
+bool analyzeThermalEventFrame(const ThermalCompletedFrame& frame,
+                              const ThermalEventConfig& config,
+                              ThermalEventFrameAnalysis& out)
+{
+    out = {};
+    out.percentile = config.signal_percentile;
+    out.roi = normalizeThermalEventRoi(config);
+
+    if (!frame.ready || !frame.hasRangeData || frame.framePayload.empty()) {
+        return false;
+    }
+    if (frame.encoding != "raw16" && frame.encoding != "scaled8") {
+        return false;
+    }
+
+    std::vector<uint16_t> roiValues;
+    roiValues.reserve(static_cast<size_t>(out.roi.width) * static_cast<size_t>(out.roi.height));
+
+    uint16_t roiMin = std::numeric_limits<uint16_t>::max();
+    uint16_t roiMax = 0;
+    for (int y = out.roi.y; y < out.roi.y + out.roi.height; ++y) {
+        for (int x = out.roi.x; x < out.roi.x + out.roi.width; ++x) {
+            const size_t pixelIndex = static_cast<size_t>(y * kThermalWidth + x);
+            uint16_t rawValue = 0;
+            if (!decodeThermalFramePixelRaw(frame, pixelIndex, &rawValue)) {
+                continue;
+            }
+            if (rawValue <= kThermalValidMinRaw || rawValue >= kThermalValidMaxRaw) {
+                continue;
+            }
+
+            roiValues.push_back(rawValue);
+            roiMin = std::min(roiMin, rawValue);
+            roiMax = std::max(roiMax, rawValue);
+        }
+    }
+
+    if (roiValues.empty()) {
+        return false;
+    }
+
+    size_t percentileRank = 0;
+    if (roiValues.size() > 1) {
+        const size_t rankCount =
+            (static_cast<size_t>(out.percentile) * roiValues.size() + 99U) / 100U;
+        percentileRank = rankCount > 0 ? std::min(roiValues.size() - 1, rankCount - 1) : 0;
+    }
+    std::nth_element(roiValues.begin(), roiValues.begin() + percentileRank, roiValues.end());
+
+    out.valid = true;
+    out.validPixels = static_cast<int>(roiValues.size());
+    out.roiMinValue = static_cast<int>(roiMin);
+    out.roiMaxValue = static_cast<int>(roiMax);
+    out.signalValue = static_cast<int>(roiValues[percentileRank]);
+    return true;
+}
+
+int countThermalPixelsAtOrAboveThreshold(const ThermalCompletedFrame& frame,
+                                         const ThermalEventFrameAnalysis& analysis,
+                                         int threshold)
+{
+    if (!analysis.valid || threshold <= 0) {
+        return 0;
+    }
+
+    int count = 0;
+    for (int y = analysis.roi.y; y < analysis.roi.y + analysis.roi.height; ++y) {
+        for (int x = analysis.roi.x; x < analysis.roi.x + analysis.roi.width; ++x) {
+            const size_t pixelIndex = static_cast<size_t>(y * kThermalWidth + x);
+            uint16_t rawValue = 0;
+            if (!decodeThermalFramePixelRaw(frame, pixelIndex, &rawValue)) {
+                continue;
+            }
+            if (rawValue <= kThermalValidMinRaw || rawValue >= kThermalValidMaxRaw) {
+                continue;
+            }
+            if (static_cast<int>(rawValue) >= threshold) {
+                count += 1;
+            }
+        }
+    }
+    return count;
+}
+
 std::string senderToString(const sockaddr_in& sender)
 {
     char host[INET_ADDRSTRLEN] = {0};
@@ -674,6 +870,13 @@ void refreshThermalEventStatusLocked(const ThermalEventConfig& config)
     g_thermal.event_stats.baseline_min_samples = config.baseline_min_samples;
     g_thermal.event_stats.baseline_guard_delta = config.baseline_guard_delta;
     g_thermal.event_stats.consecutive_frames_required = config.consecutive_frames_required;
+    g_thermal.event_stats.signal_percentile = config.signal_percentile;
+    g_thermal.event_stats.hot_area_min_pixels = config.hot_area_min_pixels;
+    const ThermalEventRoi roi = normalizeThermalEventRoi(config);
+    g_thermal.event_stats.roi_x = roi.x;
+    g_thermal.event_stats.roi_y = roi.y;
+    g_thermal.event_stats.roi_width = roi.width;
+    g_thermal.event_stats.roi_height = roi.height;
     g_thermal.event_stats.event_topic = config.event_topic;
     g_thermal.event_stats.broker_connected = g_thermal.event_mqtt ? g_thermal.event_mqtt->isConnected() : false;
 }
@@ -698,7 +901,7 @@ int computeThermalBaselineNormalMaxLocked()
 {
     int baseline_max = 0;
     for (const auto& sample : g_thermal.baseline_normal_samples) {
-        baseline_max = std::max(baseline_max, static_cast<int>(sample.max_value));
+        baseline_max = std::max(baseline_max, sample.signal_value);
     }
     return baseline_max;
 }
@@ -749,14 +952,19 @@ std::string makeThermalEventPayload(const ThermalEventConfig& config,
                                     const ThermalPacketHeader& header,
                                     int active_threshold,
                                     int baseline_normal_max,
-                                    int consecutive_hits)
+                                    int consecutive_hits,
+                                    const ThermalEventFrameAnalysis& analysis,
+                                    int hot_area_pixels,
+                                    int hot_area_threshold)
 {
     crow::json::wvalue payload;
     payload["source"] = config.source;
     payload["severity"] = config.severity;
     payload["title"] = config.title;
     payload["message"] = "Thermal frame " + std::to_string(header.frameId)
-        + " reached max=" + std::to_string(header.maxValue)
+        + " reached signal=" + std::to_string(analysis.signalValue)
+        + " hotArea=" + std::to_string(hot_area_pixels)
+        + " max=" + std::to_string(header.maxValue)
         + " (threshold=" + std::to_string(active_threshold) + ")";
     payload["autoControl"] = false;
     payload["serverAutoControl"] = config.actuation_enabled;
@@ -767,6 +975,18 @@ std::string makeThermalEventPayload(const ThermalEventConfig& config,
     payload["thermal"]["baselineNormalMax"] = baseline_normal_max;
     payload["thermal"]["activeThreshold"] = active_threshold;
     payload["thermal"]["consecutiveHits"] = consecutive_hits;
+    payload["thermal"]["analysisReady"] = analysis.valid;
+    payload["thermal"]["signalPercentile"] = analysis.percentile;
+    payload["thermal"]["signalValue"] = analysis.signalValue;
+    payload["thermal"]["hotAreaPixels"] = hot_area_pixels;
+    payload["thermal"]["hotAreaThreshold"] = hot_area_threshold;
+    payload["thermal"]["validPixels"] = analysis.validPixels;
+    payload["thermal"]["roiMinValue"] = analysis.roiMinValue;
+    payload["thermal"]["roiMaxValue"] = analysis.roiMaxValue;
+    payload["thermal"]["roi"]["x"] = analysis.roi.x;
+    payload["thermal"]["roi"]["y"] = analysis.roi.y;
+    payload["thermal"]["roi"]["width"] = analysis.roi.width;
+    payload["thermal"]["roi"]["height"] = analysis.roi.height;
     if (config.actuation_enabled) {
         payload["control"]["motor1Angle"] = config.motor1_angle;
         payload["control"]["motor2Angle"] = config.motor2_angle;
@@ -798,8 +1018,13 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
     const ThermalPacketHeader& header = frame.header;
     const ThermalEventConfig config = loadThermalEventConfig();
     const long long now_ms = currentTimeMs();
+    ThermalEventFrameAnalysis analysis{};
+    const bool analysis_ready = analyzeThermalEventFrame(frame, config, analysis);
+    const int observed_signal_value = analysis_ready ? analysis.signalValue : static_cast<int>(header.maxValue);
     int baseline_normal_max = 0;
     int active_threshold = config.hotspot_threshold_max_value;
+    int hot_area_threshold = config.hotspot_threshold_max_value;
+    int hot_area_pixels = 0;
     int consecutive_hits = 0;
     bool should_dispatch = false;
 
@@ -808,6 +1033,12 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
         refreshThermalEventStatusLocked(config);
         if (frame.hasRangeData) {
             g_thermal.event_stats.last_frame_max_value = header.maxValue;
+            g_thermal.event_stats.last_signal_value = observed_signal_value;
+            g_thermal.event_stats.last_hot_area_pixels = 0;
+            g_thermal.event_stats.last_hot_area_threshold = hot_area_threshold;
+            g_thermal.event_stats.last_valid_pixels = analysis_ready ? analysis.validPixels : 0;
+            g_thermal.event_stats.last_roi_min_value = analysis_ready ? analysis.roiMinValue : 0;
+            g_thermal.event_stats.last_roi_max_value = analysis_ready ? analysis.roiMaxValue : 0;
             g_thermal.event_stats.consecutive_hits = 0;
             g_thermal.event_stats.hotspot_active = false;
             pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
@@ -828,35 +1059,55 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
         refreshThermalEventStatusLocked(config);
 
         g_thermal.event_stats.last_frame_max_value = header.maxValue;
+        g_thermal.event_stats.last_signal_value = observed_signal_value;
+        g_thermal.event_stats.last_valid_pixels = analysis_ready ? analysis.validPixels : 0;
+        g_thermal.event_stats.last_roi_min_value = analysis_ready ? analysis.roiMinValue : 0;
+        g_thermal.event_stats.last_roi_max_value = analysis_ready ? analysis.roiMaxValue : 0;
 
         pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
         baseline_normal_max = computeThermalBaselineNormalMaxLocked();
         active_threshold = computeThermalAdaptiveThresholdLocked(config, baseline_normal_max);
+        hot_area_threshold = active_threshold;
+        hot_area_pixels = analysis_ready
+            ? countThermalPixelsAtOrAboveThreshold(frame, analysis, hot_area_threshold)
+            : 0;
         const int clear_threshold = computeThermalClearThreshold(config, active_threshold);
+        const bool area_below_threshold =
+            !analysis_ready || config.hot_area_min_pixels <= 0 || hot_area_pixels < config.hot_area_min_pixels;
         const bool can_learn_baseline =
             config.baseline_enabled
             && !g_thermal.event_stats.hotspot_active
-            && static_cast<int>(header.maxValue) < clear_threshold;
+            && observed_signal_value < clear_threshold
+            && area_below_threshold;
 
         if (can_learn_baseline) {
-            g_thermal.baseline_normal_samples.push_back({now_ms, header.maxValue});
+            g_thermal.baseline_normal_samples.push_back({now_ms, observed_signal_value});
             pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
             baseline_normal_max = computeThermalBaselineNormalMaxLocked();
             active_threshold = computeThermalAdaptiveThresholdLocked(config, baseline_normal_max);
+            hot_area_threshold = active_threshold;
+            hot_area_pixels = analysis_ready
+                ? countThermalPixelsAtOrAboveThreshold(frame, analysis, hot_area_threshold)
+                : 0;
         }
 
         updateThermalBaselineStatsLocked(config, baseline_normal_max, active_threshold);
+        g_thermal.event_stats.last_hot_area_pixels = hot_area_pixels;
+        g_thermal.event_stats.last_hot_area_threshold = hot_area_threshold;
         if (can_learn_baseline) {
             g_thermal.event_stats.baseline_updates += 1;
         }
 
         const int updated_clear_threshold = g_thermal.event_stats.current_clear_threshold_max_value;
-        const bool hit = static_cast<int>(header.maxValue) >= active_threshold;
+        const bool signal_hit = observed_signal_value >= active_threshold;
+        const bool area_hit =
+            !analysis_ready || config.hot_area_min_pixels <= 0 || hot_area_pixels >= config.hot_area_min_pixels;
+        const bool hit = signal_hit && area_hit;
         if (hit) {
             g_thermal.event_stats.consecutive_hits += 1;
         } else {
             g_thermal.event_stats.consecutive_hits = 0;
-            if (static_cast<int>(header.maxValue) < updated_clear_threshold) {
+            if (observed_signal_value < updated_clear_threshold) {
                 g_thermal.event_stats.hotspot_active = false;
             }
         }
@@ -881,11 +1132,20 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
     }
 
     MqttManager* mqtt = ensureThermalEventMqtt(config);
+    ThermalEventFrameAnalysis payload_analysis = analysis;
+    if (!analysis_ready) {
+        payload_analysis.percentile = config.signal_percentile;
+        payload_analysis.roi = normalizeThermalEventRoi(config);
+        payload_analysis.signalValue = observed_signal_value;
+    }
     const std::string payload = makeThermalEventPayload(config,
                                                         header,
                                                         active_threshold,
                                                         baseline_normal_max,
-                                                        consecutive_hits);
+                                                        consecutive_hits,
+                                                        payload_analysis,
+                                                        hot_area_pixels,
+                                                        hot_area_threshold);
     const bool publish_ok = config.event_enabled && mqtt && mqtt->publishMessage(config.event_topic, payload);
     const bool actuation_ok = config.actuation_enabled && mqtt && publishThermalActuation(mqtt, config);
     const bool mark_hotspot_active =
@@ -901,6 +1161,8 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             g_thermal.event_stats.events_published += 1;
             g_thermal.event_stats.last_event_frame_id = header.frameId;
             g_thermal.event_stats.last_event_max_value = header.maxValue;
+            g_thermal.event_stats.last_event_signal_value = observed_signal_value;
+            g_thermal.event_stats.last_event_hot_area_pixels = hot_area_pixels;
             g_thermal.event_stats.last_event_threshold_max_value = active_threshold;
             g_thermal.event_stats.last_event_at_ms = now_ms;
         }
@@ -914,14 +1176,19 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
 
     if (config.event_enabled && !publish_ok) {
         std::cerr << "[THERMAL][EVENT] failed to publish MQTT event for frame=" << header.frameId
-                  << " max=" << header.maxValue << std::endl;
+                  << " max=" << header.maxValue
+                  << " signal=" << observed_signal_value
+                  << " hot_area=" << hot_area_pixels
+                  << std::endl;
     }
 
     if (publish_ok) {
         std::cout << "[THERMAL][EVENT] published frame=" << header.frameId
                   << " max=" << header.maxValue
+                  << " signal=" << observed_signal_value
                   << " baseline=" << baseline_normal_max
                   << " threshold=" << active_threshold
+                  << " hot_area=" << hot_area_pixels
                   << " hits=" << consecutive_hits
                   << " topic=" << config.event_topic
                   << std::endl;
@@ -1105,6 +1372,7 @@ void updatePacketStats(const ThermalNormalizedPacket& packet,
     } else {
         const std::string chunkPayload = packet.wsPayload.substr(kThermalHeaderBytes);
         tracker.payloadBytes += chunkPayload.size();
+        tracker.chunkPayloads[header.chunkIndex] = chunkPayload;
         updateThermalTrackerRawRange(tracker, chunkPayload);
     }
 
@@ -1163,6 +1431,12 @@ void clearThermalFrameTrackers()
     g_thermal.event_stats.baseline_sample_count = 0;
     g_thermal.event_stats.baseline_updates = 0;
     g_thermal.event_stats.last_frame_max_value = 0;
+    g_thermal.event_stats.last_signal_value = 0;
+    g_thermal.event_stats.last_hot_area_pixels = 0;
+    g_thermal.event_stats.last_hot_area_threshold = 0;
+    g_thermal.event_stats.last_valid_pixels = 0;
+    g_thermal.event_stats.last_roi_min_value = 0;
+    g_thermal.event_stats.last_roi_max_value = 0;
     g_thermal.event_stats.event_attempts = 0;
     g_thermal.event_stats.events_published = 0;
     g_thermal.event_stats.actuation_requests = 0;
@@ -1170,6 +1444,8 @@ void clearThermalFrameTrackers()
     g_thermal.event_stats.last_event_attempt_at_ms = 0;
     g_thermal.event_stats.last_event_frame_id = 0;
     g_thermal.event_stats.last_event_max_value = 0;
+    g_thermal.event_stats.last_event_signal_value = 0;
+    g_thermal.event_stats.last_event_hot_area_pixels = 0;
     g_thermal.event_stats.last_event_threshold_max_value = 0;
     g_thermal.event_stats.last_event_at_ms = 0;
     g_thermal.event_stats.consecutive_hits = 0;
@@ -1238,6 +1514,12 @@ crow::json::wvalue makeThermalStatusJson()
     response["event"]["baseline_min_samples"] = g_thermal.event_stats.baseline_min_samples;
     response["event"]["baseline_guard_delta"] = g_thermal.event_stats.baseline_guard_delta;
     response["event"]["consecutive_frames_required"] = g_thermal.event_stats.consecutive_frames_required;
+    response["event"]["signal_percentile"] = g_thermal.event_stats.signal_percentile;
+    response["event"]["hot_area_min_pixels"] = g_thermal.event_stats.hot_area_min_pixels;
+    response["event"]["roi"]["x"] = g_thermal.event_stats.roi_x;
+    response["event"]["roi"]["y"] = g_thermal.event_stats.roi_y;
+    response["event"]["roi"]["width"] = g_thermal.event_stats.roi_width;
+    response["event"]["roi"]["height"] = g_thermal.event_stats.roi_height;
     response["event"]["current_threshold_max_value"] = g_thermal.event_stats.current_threshold_max_value;
     response["event"]["current_clear_threshold_max_value"] = g_thermal.event_stats.current_clear_threshold_max_value;
     response["event"]["baseline_normal_max_value"] = g_thermal.event_stats.baseline_normal_max_value;
@@ -1247,10 +1529,18 @@ crow::json::wvalue makeThermalStatusJson()
     response["event"]["published"] = static_cast<uint64_t>(g_thermal.event_stats.events_published);
     response["event"]["actuation_requests"] = static_cast<uint64_t>(g_thermal.event_stats.actuation_requests);
     response["event"]["last_frame_max_value"] = static_cast<int>(g_thermal.event_stats.last_frame_max_value);
+    response["event"]["last_signal_value"] = g_thermal.event_stats.last_signal_value;
+    response["event"]["last_hot_area_pixels"] = g_thermal.event_stats.last_hot_area_pixels;
+    response["event"]["last_hot_area_threshold"] = g_thermal.event_stats.last_hot_area_threshold;
+    response["event"]["last_valid_pixels"] = g_thermal.event_stats.last_valid_pixels;
+    response["event"]["last_roi_min_value"] = g_thermal.event_stats.last_roi_min_value;
+    response["event"]["last_roi_max_value"] = g_thermal.event_stats.last_roi_max_value;
     response["event"]["last_event_attempt_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_attempt_frame_id);
     response["event"]["last_event_attempt_at_ms"] = g_thermal.event_stats.last_event_attempt_at_ms;
     response["event"]["last_event_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_frame_id);
     response["event"]["last_event_max_value"] = static_cast<int>(g_thermal.event_stats.last_event_max_value);
+    response["event"]["last_event_signal_value"] = g_thermal.event_stats.last_event_signal_value;
+    response["event"]["last_event_hot_area_pixels"] = g_thermal.event_stats.last_event_hot_area_pixels;
     response["event"]["last_event_threshold_max_value"] = g_thermal.event_stats.last_event_threshold_max_value;
     response["event"]["last_event_at_ms"] = g_thermal.event_stats.last_event_at_ms;
     response["event"]["consecutive_hits"] = g_thermal.event_stats.consecutive_hits;
