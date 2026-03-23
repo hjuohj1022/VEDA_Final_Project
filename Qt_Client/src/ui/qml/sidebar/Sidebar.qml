@@ -169,7 +169,7 @@ Rectangle {
                 Repeater {
                     model: [
                         { label: "System Metrics", index: 0 },
-                        { label: "Motor Control", index: 1 }
+                        { label: "H/W Control", index: 1 }
                     ]
 
                     delegate: Button {
@@ -207,7 +207,7 @@ Rectangle {
                 Repeater {
                     model: [
                         { label: "Camera Controls", index: 0 },
-                        { label: "Motor Control", index: 1 }
+                        { label: "H/W Control", index: 1 }
                     ]
 
                     delegate: Button {

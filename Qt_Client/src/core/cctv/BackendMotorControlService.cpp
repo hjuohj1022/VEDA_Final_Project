@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QStringList>
 
 namespace {
 
@@ -72,11 +73,12 @@ bool parseMotorApiOk(const QString &body, QString *statusText, QString *response
     return ok;
 }
 
-bool sendMotorPost(Backend *backend,
-                   BackendPrivate *state,
-                   const QString &path,
-                   const QJsonObject &payload,
-                   const QString &actionLabel) // 공통 POST 호출 처리
+bool sendControlPost(Backend *backend,
+                     BackendPrivate *state,
+                     const QString &path,
+                     const QJsonObject &payload,
+                     const QString &actionLabel,
+                     const char *logTag) // 공통 POST 호출 처리
 {
     if (!checkAuthReady(backend, state, actionLabel)) {
         return false;
@@ -89,13 +91,13 @@ bool sendMotorPost(Backend *backend,
                                 ? QByteArray()
                                 : QJsonDocument(payload).toJson(QJsonDocument::Compact);
 
-    qInfo() << "[MOTOR] request:" << actionLabel
+    qInfo() << "[" << logTag << "] request:" << actionLabel
             << "url=" << request.url().toString()
             << "body=" << QString::fromUtf8(body);
 
     QNetworkReply *reply = state->m_manager->post(request, body);
-    backend->attachIgnoreSslErrors(reply, "MOTOR");
-    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, reply, actionLabel]() {
+    backend->attachIgnoreSslErrors(reply, logTag);
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, reply, actionLabel, logTag]() {
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString bodyText = QString::fromUtf8(reply->readAll()).trimmed();
 
@@ -114,7 +116,7 @@ bool sendMotorPost(Backend *backend,
                                         .arg(actionLabel,
                                              status.isEmpty() ? QStringLiteral("API error") : status,
                                              detail);
-                qWarning() << "[MOTOR]" << msg << "url=" << reply->request().url();
+                qWarning() << "[" << logTag << "]" << msg << "url=" << reply->request().url();
                 emit backend->cameraControlMessage(msg, true);
             }
         } else {
@@ -122,7 +124,115 @@ bool sendMotorPost(Backend *backend,
                                     .arg(actionLabel)
                                     .arg(statusCode)
                                     .arg(reply->errorString());
-            qWarning() << "[MOTOR]" << msg << "url=" << reply->request().url() << "body=" << bodyText.left(200);
+            qWarning() << "[" << logTag << "]" << msg << "url=" << reply->request().url() << "body=" << bodyText.left(200);
+            emit backend->cameraControlMessage(msg, true);
+        }
+
+        reply->deleteLater();
+    });
+
+    return true;
+}
+
+bool parseLaserStatusBody(const QString &body, QString *summaryText, bool *summaryError)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+    if (!doc.isObject()) {
+        return false;
+    }
+
+    const QJsonObject obj = doc.object();
+    QStringList parts;
+    bool isError = false;
+
+    if (obj.contains("broker_connected") && obj.value("broker_connected").isBool()) {
+        const bool connected = obj.value("broker_connected").toBool();
+        parts << QString("broker=%1").arg(connected ? "connected" : "disconnected");
+        if (!connected) {
+            isError = true;
+        }
+    }
+
+    if (obj.contains("awaiting_response") && obj.value("awaiting_response").isBool()) {
+        if (obj.value("awaiting_response").toBool()) {
+            parts << "awaiting response";
+        }
+    }
+
+    if (obj.contains("control_topic") && obj.value("control_topic").isString()) {
+        const QString topic = obj.value("control_topic").toString().trimmed();
+        if (!topic.isEmpty()) {
+            parts << QString("topic=%1").arg(topic);
+        }
+    }
+
+    if (obj.contains("last_command") && obj.value("last_command").isString()) {
+        const QString lastCommand = obj.value("last_command").toString().trimmed();
+        if (!lastCommand.isEmpty()) {
+            parts << QString("last=%1").arg(lastCommand);
+        }
+    }
+
+    if (obj.contains("last_response") && obj.value("last_response").isString()) {
+        const QString lastResponse = obj.value("last_response").toString().trimmed();
+        if (!lastResponse.isEmpty()) {
+            parts << QString("response=%1").arg(lastResponse);
+        }
+    }
+
+    if (obj.contains("last_response_is_error") && obj.value("last_response_is_error").isBool()) {
+        if (obj.value("last_response_is_error").toBool()) {
+            isError = true;
+        }
+    }
+
+    if (parts.isEmpty()) {
+        return false;
+    }
+
+    if (summaryText) {
+        *summaryText = QString("Laser bridge: %1").arg(parts.join(" | "));
+    }
+    if (summaryError) {
+        *summaryError = isError;
+    }
+    return true;
+}
+
+bool sendLaserStatusGet(Backend *backend, BackendPrivate *state)
+{
+    const QString actionLabel = "Laser bridge";
+    if (!checkAuthReady(backend, state, actionLabel)) {
+        return false;
+    }
+
+    QNetworkRequest request = backend->makeApiJsonRequest("/laser/status");
+    backend->applyAuthIfNeeded(request);
+
+    qInfo() << "[LASER] request:" << actionLabel
+            << "url=" << request.url().toString();
+
+    QNetworkReply *reply = state->m_manager->get(request);
+    backend->attachIgnoreSslErrors(reply, "LASER");
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, reply, actionLabel]() {
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString bodyText = QString::fromUtf8(reply->readAll()).trimmed();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            QString summary;
+            bool isError = false;
+            if (!parseLaserStatusBody(bodyText, &summary, &isError)) {
+                summary = bodyText.isEmpty()
+                              ? QString("%1 status loaded").arg(actionLabel)
+                              : QString("%1: %2").arg(actionLabel, bodyText);
+            }
+            emit backend->cameraControlMessage(summary, isError);
+        } else {
+            const QString msg = QString("%1 failed (HTTP %2): %3")
+                                    .arg(actionLabel)
+                                    .arg(statusCode)
+                                    .arg(reply->errorString());
+            qWarning() << "[LASER]" << msg << "url=" << reply->request().url() << "body=" << bodyText.left(200);
             emit backend->cameraControlMessage(msg, true);
         }
 
@@ -146,14 +256,15 @@ bool BackendMotorControlService::motorPress(Backend *backend, BackendPrivate *st
         return false;
     }
 
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/press",
-                         QJsonObject{
-                             { "motor", motor },
-                             { "direction", dir },
-                         },
-                         QString("Motor press m%1 %2").arg(motor).arg(dir));
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/press",
+                           QJsonObject{
+                               { "motor", motor },
+                               { "direction", dir },
+                           },
+                           QString("Motor press m%1 %2").arg(motor).arg(dir),
+                           "MOTOR");
 }
 
 bool BackendMotorControlService::motorRelease(Backend *backend, BackendPrivate *state, int motor) // 모터 press 상태 release 해제 처리
@@ -163,13 +274,14 @@ bool BackendMotorControlService::motorRelease(Backend *backend, BackendPrivate *
         return false;
     }
 
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/release",
-                         QJsonObject{
-                             { "motor", motor },
-                         },
-                         QString("Motor release m%1").arg(motor));
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/release",
+                           QJsonObject{
+                               { "motor", motor },
+                           },
+                           QString("Motor release m%1").arg(motor),
+                           "MOTOR");
 }
 
 bool BackendMotorControlService::motorStop(Backend *backend, BackendPrivate *state, int motor) // 단일 모터 정지 처리
@@ -179,13 +291,14 @@ bool BackendMotorControlService::motorStop(Backend *backend, BackendPrivate *sta
         return false;
     }
 
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/stop",
-                         QJsonObject{
-                             { "motor", motor },
-                         },
-                         QString("Motor stop m%1").arg(motor));
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/stop",
+                           QJsonObject{
+                               { "motor", motor },
+                           },
+                           QString("Motor stop m%1").arg(motor),
+                           "MOTOR");
 }
 
 bool BackendMotorControlService::motorSetAngle(Backend *backend, BackendPrivate *state, int motor, int angle) // 단일 모터 지정 각도 이동 처리
@@ -195,32 +308,60 @@ bool BackendMotorControlService::motorSetAngle(Backend *backend, BackendPrivate 
         return false;
     }
 
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/set",
-                         QJsonObject{
-                             { "motor", motor },
-                             { "angle", angle },
-                         },
-                         QString("Motor set m%1 angle=%2").arg(motor).arg(angle));
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/set",
+                           QJsonObject{
+                               { "motor", motor },
+                               { "angle", angle },
+                           },
+                           QString("Motor set m%1 angle=%2").arg(motor).arg(angle),
+                           "MOTOR");
 }
 
 bool BackendMotorControlService::motorCenter(Backend *backend, BackendPrivate *state, int angle) // 전체 모터 동일 각도 센터 정렬 처리
 {
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/center",
-                         QJsonObject{
-                             { "angle", angle },
-                         },
-                         QString("Motor center angle=%1").arg(angle));
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/center",
+                           QJsonObject{
+                               { "angle", angle },
+                           },
+                           QString("Motor center angle=%1").arg(angle),
+                           "MOTOR");
 }
 
 bool BackendMotorControlService::motorStopAll(Backend *backend, BackendPrivate *state) // 전체 모터 일괄 정지 처리
 {
-    return sendMotorPost(backend,
-                         state,
-                         "/motor/control/stopall",
-                         QJsonObject(),
-                         "Motor stop all");
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/stopall",
+                           QJsonObject(),
+                           "Motor stop all",
+                           "MOTOR");
+}
+
+bool BackendMotorControlService::laserOn(Backend *backend, BackendPrivate *state)
+{
+    return sendControlPost(backend,
+                           state,
+                           "/laser/control/on",
+                           QJsonObject(),
+                           "Laser on",
+                           "LASER");
+}
+
+bool BackendMotorControlService::laserOff(Backend *backend, BackendPrivate *state)
+{
+    return sendControlPost(backend,
+                           state,
+                           "/laser/control/off",
+                           QJsonObject(),
+                           "Laser off",
+                           "LASER");
+}
+
+bool BackendMotorControlService::laserStatus(Backend *backend, BackendPrivate *state)
+{
+    return sendLaserStatusGet(backend, state);
 }

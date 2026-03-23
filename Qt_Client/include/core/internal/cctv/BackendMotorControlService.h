@@ -14,6 +14,9 @@ public:
     static bool motorSetAngle(Backend *backend, BackendPrivate *state, int motor, int angle);
     static bool motorCenter(Backend *backend, BackendPrivate *state, int angle);
     static bool motorStopAll(Backend *backend, BackendPrivate *state);
+    static bool laserOn(Backend *backend, BackendPrivate *state);
+    static bool laserOff(Backend *backend, BackendPrivate *state);
+    static bool laserStatus(Backend *backend, BackendPrivate *state);
 };
 
 #endif // BACKEND_MOTOR_CONTROL_SERVICE_H

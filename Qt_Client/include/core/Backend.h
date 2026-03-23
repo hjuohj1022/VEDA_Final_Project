@@ -202,6 +202,9 @@ public:
     Q_INVOKABLE bool motorSetAngle(int motor, int angle);             // 단일 모터 지정 각도 이동
     Q_INVOKABLE bool motorCenter(int angle = 90);                     // 전체 모터 동일 각도 센터 정렬
     Q_INVOKABLE bool motorStopAll();                                  // 전체 모터 일괄 정지
+    Q_INVOKABLE bool laserOn();                                       // 레이저 켜기
+    Q_INVOKABLE bool laserOff();                                      // 레이저 끄기
+    Q_INVOKABLE bool laserStatus();                                   // 레이저 브리지 상태 조회
 
 signals:
     // Property notify

@@ -36,3 +36,18 @@ bool Backend::motorStopAll()
 {
     return BackendMotorControlService::motorStopAll(this, d_ptr.get());
 }
+
+bool Backend::laserOn()
+{
+    return BackendMotorControlService::laserOn(this, d_ptr.get());
+}
+
+bool Backend::laserOff()
+{
+    return BackendMotorControlService::laserOff(this, d_ptr.get());
+}
+
+bool Backend::laserStatus()
+{
+    return BackendMotorControlService::laserStatus(this, d_ptr.get());
+}
