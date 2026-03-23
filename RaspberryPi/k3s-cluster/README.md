@@ -20,7 +20,7 @@ Raspberry Pi K3s Cluster는 VEDA 시스템의 백엔드 서비스를 Raspberry P
 | --- | --- | --- |
 | Crow Server | REST API, WebSocket 스트림, MQTT 브리지, SUNAPI/CCTV/Thermal 통합 | `crow_server/README.md` |
 | Nginx Gateway | HTTPS, RTSPS, MQTTS, DTLS/UDP 외부 진입점 | `nginx/README.md` |
-| Thermal DTLS Gateway | DTLS PSK 종료 후 Crow Server로 UDP 전달 | `thermal_dtls_gateway/README.md` |
+| Thermal DTLS Gateway | DTLS PSK 종료 또는 plain UDP fallback 후 Crow Server로 UDP 전달 | `thermal_dtls_gateway/README.md` |
 | MediaMTX | CCTV RTSP 수집, HLS/RTSP 제공, 녹화 저장 | `mediamtx/README.md` |
 | Mosquitto | 내부 MQTT 브로커 | `mosquitto/README.md` |
 | MariaDB | 계정, 인증, 복구 정보 저장소 | `mariadb/README.md` |
@@ -33,7 +33,7 @@ Raspberry Pi K3s Cluster는 VEDA 시스템의 백엔드 서비스를 Raspberry P
 | --- | --- |
 | `crow_server/` | Crow 기반 API 서버 코드, Swagger 문서, K8s 배포 정의 |
 | `nginx/` | 외부 포트 수신, mTLS 종료, HTTP/stream 프록시 |
-| `thermal_dtls_gateway/` | OpenSSL 기반 DTLS 서버, UDP 포워딩 바이너리 |
+| `thermal_dtls_gateway/` | OpenSSL 기반 DTLS 서버이자 plain UDP thermal chunk fallback 포워더 |
 | `mediamtx/` | 카메라 RTSP ingest, HLS/RTSP 서비스, 녹화 경로 정의 |
 | `mosquitto/` | MQTT 브로커 설정, TLS 인증서 마운트 |
 | `mariadb/` | DB 초기화 SQL, PVC, 시크릿 기반 계정 구성 |
@@ -47,7 +47,7 @@ Raspberry Pi K3s Cluster는 VEDA 시스템의 백엔드 서비스를 Raspberry P
 ```text
 External Client / Device
         |
-        | 443 HTTPS/WSS, 8555 RTSPS, 8883 MQTTS, 5005 DTLS/UDP
+        | 443 HTTPS/WSS, 8555 RTSPS, 8883 MQTTS, 5005 thermal UDP/DTLS
         v
    [ Nginx Gateway / LoadBalancer ]
         |
@@ -69,7 +69,7 @@ Internal Backends
 - **기능 1:** 외부 트래픽을 Nginx Gateway 한 곳으로 집중시켜 TLS/mTLS와 라우팅 정책을 일관되게 적용합니다.
 - **기능 2:** Crow Server가 계정, CCTV, 열화상, MQTT 제어를 단일 API 계층으로 통합합니다.
 - **기능 3:** MediaMTX가 RTSP ingest와 녹화 저장을 담당하고, Nginx가 이를 RTSPS/HLS로 외부에 노출합니다.
-- **기능 4:** Thermal DTLS Gateway가 DTLS PSK 기반 센서 통신을 복호화해 Crow Server로 전달합니다.
+- **기능 4:** Thermal DTLS Gateway가 DTLS PSK 기반 센서 통신을 복호화하고, 필요 시 plain UDP thermal chunk도 Crow Server로 전달합니다.
 - **기능 5:** Mosquitto가 모터, 레이저, ESP32 상태 제어를 위한 MQTT 허브 역할을 합니다.
 - **기능 6:** MetalLB와 Security 자산이 외부 접속성과 인증서 신뢰 체인을 지원합니다.
 
@@ -128,7 +128,7 @@ chmod +x generate_certs.sh
 - `mosquitto/mqtt.yaml`: ConfigMap, Deployment, Service
 - `mediamtx/mediamtx.yaml`: ConfigMap, Deployment, Service
 - `crow_server/crow-server.yaml`: Crow Server Deployment, Service
-- `thermal_dtls_gateway/thermal-dtls-gateway.yaml`: DTLS Gateway Deployment, Service
+- `thermal_dtls_gateway/thermal-dtls-gateway.yaml`: Thermal Gateway Deployment, Service
 - `nginx/nginx-deployment.yaml`: Nginx Deployment, `LoadBalancer` Service
 
 ###### 보안 및 통신 설정
@@ -199,9 +199,9 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 ###### Control Lifecycle
 
 - **Start:** MetalLB와 인증서 준비 후 DB, MQTT, MediaMTX, Crow, Thermal Gateway, Nginx 순으로 올립니다.
-- **Steady State:** 외부 HTTPS/WSS, RTSPS, MQTTS, DTLS/UDP 요청이 Nginx를 통해 내부 서비스로 분기됩니다.
+- **Steady State:** 외부 HTTPS/WSS, RTSPS, MQTTS, DTLS/UDP 또는 plain UDP thermal traffic이 Nginx를 통해 내부 서비스로 분기됩니다.
 - **Device Control:** Crow Server가 `motor/control`, `laser/control`, `system/control` 등 MQTT 토픽에 명령을 publish합니다.
-- **Streaming:** 열화상은 DTLS/UDP -> Thermal Gateway -> Crow Server -> WebSocket으로, CCTV는 RTSP -> MediaMTX -> RTSPS/HLS로 전달됩니다.
+- **Streaming:** 열화상은 DTLS/UDP 또는 plain UDP thermal chunk -> Thermal Gateway -> Crow Server -> WebSocket으로, CCTV는 RTSP -> MediaMTX -> RTSPS/HLS로 전달됩니다.
 
 ###### Command Reference
 
@@ -221,7 +221,7 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 | REST/API | HTTPS | JSON |
 | 장치 제어 | MQTT/MQTTS | ASCII 명령 문자열 |
 | CCTV 스트림 | RTSP, RTSPS, HLS | 영상 스트림 |
-| 열화상 센서 | DTLS/UDP | 바이너리 thermal frame payload |
+| 열화상 센서 | DTLS/UDP 또는 plain UDP thermal chunk | 바이너리 thermal frame payload |
 
 ##### 8. 문제 해결 및 운영 체크리스트 (Troubleshooting & Checklist)
 
