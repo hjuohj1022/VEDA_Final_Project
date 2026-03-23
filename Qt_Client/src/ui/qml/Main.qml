@@ -551,6 +551,8 @@ ApplicationWindow {
             exportProgressVisible: window.exportProgressVisible
             exportProgressPercent: window.exportProgressPercent
             exportProgressText: window.exportProgressText
+            eventAlertActive: backend.eventAlertActive
+            eventAlertUnread: backend.eventAlertUnread
             onToggleTheme: window.isDarkMode = !window.isDarkMode
             onRequestLogin: stackLayout.currentIndex = 1
             onRequestLogout: {
@@ -576,6 +578,9 @@ ApplicationWindow {
             }
             onRequestRtspSettings: {
                 rtspSettingsPopup.prepareAndShow()
+            }
+            onRequestEventAlert: {
+                eventAlertDialog.openDialog()
             }
             onRequestExportCancel: {
                 backend.cancelPlaybackExport()
@@ -978,6 +983,7 @@ ApplicationWindow {
                 twoFactorDialog.close()
                 accountDeleteDialog.close()
                 changePasswordDialog.close()
+                eventAlertDialog.closeDialog()
             }
             stackLayout.currentIndex = backend.isLoggedIn
                                      ? (inlineMainViewVisible ? 3 : 0)
@@ -1012,6 +1018,7 @@ ApplicationWindow {
             twoFactorDialog.close()
             accountDeleteDialog.close()
             changePasswordDialog.close()
+            eventAlertDialog.closeDialog()
             stackLayout.currentIndex = 1
         }
         function onRtspProbeFinished(success, error) {
@@ -1214,6 +1221,12 @@ ApplicationWindow {
     }
     RtspSettingsDialog {
         id: rtspSettingsPopup
+        theme: window.appTheme
+        hostWindow: window
+    }
+
+    EventAlertDialog {
+        id: eventAlertDialog
         theme: window.appTheme
         hostWindow: window
     }

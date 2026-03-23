@@ -61,6 +61,22 @@ class Backend : public QObject
     Q_PROPERTY(int displaySharpnessLevel READ displaySharpnessLevel NOTIFY displaySettingsChanged)
     Q_PROPERTY(bool displaySharpnessEnabled READ displaySharpnessEnabled NOTIFY displaySettingsChanged)
     Q_PROPERTY(int displayColorLevel READ displayColorLevel NOTIFY displaySettingsChanged)
+    Q_PROPERTY(bool eventAlertActive READ eventAlertActive NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(bool eventAlertUnread READ eventAlertUnread NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QString eventAlertSource READ eventAlertSource NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QString eventAlertSeverity READ eventAlertSeverity NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QString eventAlertTitle READ eventAlertTitle NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QString eventAlertMessage READ eventAlertMessage NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(bool eventAlertAutoControl READ eventAlertAutoControl NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(bool eventAlertHasControlOverride READ eventAlertHasControlOverride NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(int eventAlertMotor1Angle READ eventAlertMotor1Angle NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(int eventAlertMotor2Angle READ eventAlertMotor2Angle NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(int eventAlertMotor3Angle READ eventAlertMotor3Angle NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(bool eventAlertLaserEnabled READ eventAlertLaserEnabled NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(int eventAlertPresetMotor1Angle READ eventAlertPresetMotor1Angle NOTIFY eventAlertPresetChanged)
+    Q_PROPERTY(int eventAlertPresetMotor2Angle READ eventAlertPresetMotor2Angle NOTIFY eventAlertPresetChanged)
+    Q_PROPERTY(int eventAlertPresetMotor3Angle READ eventAlertPresetMotor3Angle NOTIFY eventAlertPresetChanged)
+    Q_PROPERTY(bool eventAlertPresetLaserEnabled READ eventAlertPresetLaserEnabled NOTIFY eventAlertPresetChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -110,6 +126,22 @@ public:
     int displaySharpnessLevel() const;
     bool displaySharpnessEnabled() const;
     int displayColorLevel() const;
+    bool eventAlertActive() const;
+    bool eventAlertUnread() const;
+    QString eventAlertSource() const;
+    QString eventAlertSeverity() const;
+    QString eventAlertTitle() const;
+    QString eventAlertMessage() const;
+    bool eventAlertAutoControl() const;
+    bool eventAlertHasControlOverride() const;
+    int eventAlertMotor1Angle() const;
+    int eventAlertMotor2Angle() const;
+    int eventAlertMotor3Angle() const;
+    bool eventAlertLaserEnabled() const;
+    int eventAlertPresetMotor1Angle() const;
+    int eventAlertPresetMotor2Angle() const;
+    int eventAlertPresetMotor3Angle() const;
+    bool eventAlertPresetLaserEnabled() const;
 
     // Auth/session
     Q_INVOKABLE void login(QString id, QString pw);
@@ -205,6 +237,13 @@ public:
     Q_INVOKABLE bool laserOn();                                       // 레이저 켜기
     Q_INVOKABLE bool laserOff();                                      // 레이저 끄기
     Q_INVOKABLE bool laserStatus();                                   // 레이저 브리지 상태 조회
+    Q_INVOKABLE bool laserSetEnabled(bool enabled);                   // 레이저 on/off 제어
+
+    // Event alert
+    Q_INVOKABLE void markEventAlertRead();
+    Q_INVOKABLE void clearEventAlert();
+    Q_INVOKABLE void updateEventAlertPreset(int motor1Angle, int motor2Angle, int motor3Angle, bool laserEnabled);
+    Q_INVOKABLE bool applyEventAlertControl();
 
 signals:
     // Property notify
@@ -280,6 +319,8 @@ signals:
     void thermalAutoRangeWindowPercentChanged();
     void thermalManualRangeChanged();
     void displaySettingsChanged();
+    void eventAlertStateChanged();
+    void eventAlertPresetChanged();
 
 public slots:
     void checkStorage();
@@ -402,6 +443,7 @@ public:
 
     // Thermal pipeline helpers
     void handleThermalChunkMessage(const QByteArray &message);
+    void handleEventAlertMessage(const QByteArray &message);
     void processThermalFrame(const QMap<int, QByteArray> &chunks,
                              int totalChunks,
                              quint16 minVal,

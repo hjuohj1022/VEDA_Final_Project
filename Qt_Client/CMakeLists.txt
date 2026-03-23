@@ -51,6 +51,8 @@ qt_add_executable(Team3VideoReceiver
     src/core/core/BackendCoreApiService.cpp
     src/core/core/BackendCoreState.cpp
     src/core/core/BackendCoreStateService.cpp
+    src/core/core/BackendCoreEvent.cpp
+    src/core/core/BackendCoreEventService.cpp
     src/core/core/BackendCoreSystemInfo.cpp
     src/core/core/BackendCoreSystemInfoService.cpp
     src/core/auth/BackendAuthLogin.cpp
@@ -141,6 +143,7 @@ qt_add_qml_module(Team3VideoReceiver
         src/ui/qml/sidebar/SidebarMotorControlPanel.qml
         src/ui/qml/dialogs/PlaybackExportSaveDialog.qml
         src/ui/qml/dialogs/RtspSettingsDialog.qml
+        src/ui/qml/dialogs/EventAlertDialog.qml
         src/ui/qml/dialogs/StatusDialog.qml
         src/ui/qml/dialogs/SystemSpecsDialog.qml
         src/ui/qml/dialogs/TwoFactorDialog.qml

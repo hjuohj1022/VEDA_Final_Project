@@ -51,3 +51,8 @@ bool Backend::laserStatus()
 {
     return BackendMotorControlService::laserStatus(this, d_ptr.get());
 }
+
+bool Backend::laserSetEnabled(bool enabled)
+{
+    return BackendMotorControlService::laserSetEnabled(this, d_ptr.get(), enabled);
+}

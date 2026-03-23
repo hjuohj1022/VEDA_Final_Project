@@ -38,6 +38,7 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
     const QString pass = state->m_env.value("MQTT_PASSWORD").trimmed();
     const QString statusTopic = state->m_env.value("MQTT_STATUS_TOPIC", "system/status").trimmed();
     const QString detectTopic = state->m_env.value("MQTT_DETECTED_TOPIC", "system/detected").trimmed();
+    const QString eventTopic = state->m_env.value("MQTT_EVENT_ALERT_TOPIC", "system/event").trimmed();
     const QString thermalTopic = state->m_env.value("MQTT_THERMAL_TOPIC", "lepton/frame/chunk").trimmed();
     const QString thermalTransport = state->m_env.value("THERMAL_TRANSPORT", "ws").trimmed().toLower();
     const bool thermalViaWs = (thermalTransport != "mqtt");
@@ -67,6 +68,7 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
     qInfo() << "[MQTT] topics:"
             << "status=" << statusTopic
             << "detected=" << detectTopic
+            << "event=" << eventTopic
             << "thermal=" << thermalTopic;
 
     auto resolvePath = [](const QString &rawPath) {
@@ -238,6 +240,11 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
             return;
         }
 
+        if (topicName == eventTopic) {
+            backend->handleEventAlertMessage(message);
+            return;
+        }
+
         if (topicName == thermalTopic) {
             if (thermalViaWs) {
                 if (debugRx) {
@@ -282,11 +289,12 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
         }
         subscribeTopic(statusTopic);
         subscribeTopic(detectTopic);
+        subscribeTopic(eventTopic);
         if (!thermalViaWs) {
             subscribeTopic(thermalTopic);
-            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << thermalTopic;
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << eventTopic << "," << thermalTopic;
         } else {
-            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic
+            qInfo() << "[MQTT] subscribed:" << statusTopic << "," << detectTopic << "," << eventTopic
                     << "(thermal via websocket)";
         }
     });

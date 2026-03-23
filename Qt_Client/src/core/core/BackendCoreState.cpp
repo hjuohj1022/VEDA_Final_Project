@@ -32,6 +32,22 @@ int Backend::displayBrightness() const { return BackendCoreStateService::display
 int Backend::displaySharpnessLevel() const { return BackendCoreStateService::displaySharpnessLevel(d_ptr.get()); }
 bool Backend::displaySharpnessEnabled() const { return BackendCoreStateService::displaySharpnessEnabled(d_ptr.get()); }
 int Backend::displayColorLevel() const { return BackendCoreStateService::displayColorLevel(d_ptr.get()); }
+bool Backend::eventAlertActive() const { return BackendCoreStateService::eventAlertActive(d_ptr.get()); }
+bool Backend::eventAlertUnread() const { return BackendCoreStateService::eventAlertUnread(d_ptr.get()); }
+QString Backend::eventAlertSource() const { return BackendCoreStateService::eventAlertSource(d_ptr.get()); }
+QString Backend::eventAlertSeverity() const { return BackendCoreStateService::eventAlertSeverity(d_ptr.get()); }
+QString Backend::eventAlertTitle() const { return BackendCoreStateService::eventAlertTitle(d_ptr.get()); }
+QString Backend::eventAlertMessage() const { return BackendCoreStateService::eventAlertMessage(d_ptr.get()); }
+bool Backend::eventAlertAutoControl() const { return BackendCoreStateService::eventAlertAutoControl(d_ptr.get()); }
+bool Backend::eventAlertHasControlOverride() const { return BackendCoreStateService::eventAlertHasControlOverride(d_ptr.get()); }
+int Backend::eventAlertMotor1Angle() const { return BackendCoreStateService::eventAlertMotor1Angle(d_ptr.get()); }
+int Backend::eventAlertMotor2Angle() const { return BackendCoreStateService::eventAlertMotor2Angle(d_ptr.get()); }
+int Backend::eventAlertMotor3Angle() const { return BackendCoreStateService::eventAlertMotor3Angle(d_ptr.get()); }
+bool Backend::eventAlertLaserEnabled() const { return BackendCoreStateService::eventAlertLaserEnabled(d_ptr.get()); }
+int Backend::eventAlertPresetMotor1Angle() const { return BackendCoreStateService::eventAlertPresetMotor1Angle(d_ptr.get()); }
+int Backend::eventAlertPresetMotor2Angle() const { return BackendCoreStateService::eventAlertPresetMotor2Angle(d_ptr.get()); }
+int Backend::eventAlertPresetMotor3Angle() const { return BackendCoreStateService::eventAlertPresetMotor3Angle(d_ptr.get()); }
+bool Backend::eventAlertPresetLaserEnabled() const { return BackendCoreStateService::eventAlertPresetLaserEnabled(d_ptr.get()); }
 
 void Backend::setActiveCameras(int count)
 {

@@ -961,7 +961,6 @@ Item {
         
         function onLoginSuccess() {
             otpField.text = ""
-            backend.startThermalStream()
         }
 
         function onRegisterSuccess(message) {
