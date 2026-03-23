@@ -9,7 +9,7 @@
 - 2x2 그리드 4채널 동시 표시
 - MediaMTX 경유 RTSP/RTSPS 재생
 - 우측 사이드 패널 제공
-  - 기본 Live 화면: `System Metrics` / `Motor Control` 탭 전환
+  - 기본 Live 화면: `System Metrics` / `H/W Control` 탭 전환
   - 상단: `FPS`, `LATENCY` 차트
   - 하단: `ACTIVE`, `STORAGE`, `CLIENT`, `SERVER` 4개 카드 세로 배치(패널 높이 전체 사용)
   - `CLIENT`는 실시간 CPU 사용률/메모리 사용률/GPU 정보 표시
@@ -43,7 +43,7 @@
 
 ### 3-1. 카메라 표시(Image Enhancements) 제어
 - Camera Controls 패널에서 채널별 표시값 제어
-  - 확대 화면 우측 패널에서 `Camera Controls` / `Motor Control` 탭 전환 가능
+  - 확대 화면 우측 패널에서 `Camera Controls` / `H/W Control` 탭 전환 가능
   - 대비(1~100), 밝기(1~100), 윤곽 조정(Enable + Level 1~32), 컬러 레벨(1~100)
   - 각 항목 값은 3자리 입력칸으로 직접 수정 가능(예: `100`)
   - 윤곽 활성화(SharpnessEnable) on/off
@@ -53,15 +53,24 @@
   - `POST /api/sunapi/display/settings`
   - `POST /api/sunapi/display/reset`
 
-### 3-2. 모터 제어
-- 헤더 버튼 대신 우측 사이드 패널 탭에서 모터 제어 제공
-  - 기본 Live 화면: `System Metrics` / `Motor Control`
-  - 확대 화면: `Camera Controls` / `Motor Control`
-- 패널에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
-- 지원 동작
-  - `Hold` / `Stop` / `Set` / `Center All` / `Stop All`
-  - `Hold` 버튼: 누르는 동안 `press`, 손을 떼면 자동 `release`
-  - `Stop` 버튼: 선택한 `Target` 모터 즉시 정지
+### 3-2. H/W Control (모터 + 레이저)
+- 헤더 버튼 대신 우측 사이드 패널 탭에서 H/W 제어 제공
+  - 기본 Live 화면: `System Metrics` / `H/W Control`
+  - 확대 화면: `Camera Controls` / `H/W Control`
+- 모터 제어
+  - 패널에서 `Target motor(1~3)`, `Direction(Left/Right)`, `angle(0~180)` 선택 후 제어
+  - 지원 동작
+    - `Hold` / `Stop` / `Set` / `Center All` / `Stop All`
+    - `Hold` 버튼: 누르는 동안 `press`, 손을 떼면 자동 `release`
+    - 선택된 모터에 실제 hold가 걸려 있는 동안에만 버튼이 주황색으로 표시
+    - `Stop` 버튼: 선택한 `Target` 모터 즉시 정지
+- 레이저 제어
+  - 같은 패널 안에서 `On` / `Off` / `Status` 버튼 제공
+  - `On`: Crow `POST /laser/control/on`
+  - `Off`: Crow `POST /laser/control/off`
+  - `Status`: Crow `GET /laser/status`
+  - `On` 버튼은 레이저가 켜진 상태일 때만 주황색으로 유지
+  - `Status` 응답의 최근 명령/응답(`last=laser on/off`, `response=LED ON/OFF`)을 기준으로 레이저 상태를 동기화
 - 관련 구현:
   - `src/ui/qml/sidebar/Sidebar.qml`
   - `src/ui/qml/sidebar/SidebarMotorControlPanel.qml`
@@ -408,6 +417,9 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/motor/control/set` | 단일 모터 각도 설정 (`motor`, `angle`) |
 | `POST` | `/motor/control/center` | 전체 모터 동일 각도 센터 정렬 (`angle`, optional) |
 | `POST` | `/motor/control/stopall` | 전체 모터 일괄 정지 |
+| `POST` | `/laser/control/on` | 레이저 켜기 |
+| `POST` | `/laser/control/off` | 레이저 끄기 |
+| `GET` | `/laser/status` | 레이저 MQTT 브리지 상태 조회 |
 | `POST` | `/cctv/control/start` | 3D Map 처리 시작 (channel/mode) |
 | `POST` | `/cctv/control/stream` | 3D Map 스트림 모드 요청 (`rgbd_stream`) |
 | `POST` | `/cctv/control/pause` | 3D Map 처리 일시정지 |
@@ -433,6 +445,7 @@ ffmpeg 배치/버전 관리:
   - PTZ/Focus: Qt direct CGI -> Crow `/api/sunapi/ptz/focus`
   - 표시 설정(대비/밝기/윤곽/컬러): Qt direct CGI -> Crow `/api/sunapi/display/*`
   - 관리자 잠금 해제: Qt local `.env` 비교 -> Crow `/auth/admin/unlock`
+  - H/W Control 레이저 제어: Qt -> Crow `/laser/control/on`, `/laser/control/off`, `/laser/status`
   - 3D Map 1차: Qt ON/OFF/Pause/Resume -> Crow `/cctv/control/*` + `/cctv/stream` WS 수신 + 클라이언트 로컬 렌더
   - Export HTTP(create/status/download): Qt direct CGI -> Crow `/api/sunapi/export/*`
   - Error 608 장비에서 기본 경로를 WS export로 우선 전환 (`PLAYBACK_EXPORT_USE_FFMPEG_BACKUP=0`)
