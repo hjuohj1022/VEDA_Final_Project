@@ -43,9 +43,6 @@ extern "C" {
 #define PULSE_US_TO_TICK(us)   ((uint16_t)((uint32_t)(us) * 330 * 4096 / 1000000))
 
 /* 서보 펄스 범위 (기본값) */
-#define MOTOR_PULSE_MIN_US     500u
-#define MOTOR_PULSE_MAX_US     2500u
-#define MOTOR_PULSE_CENTER_US  1520u
 #define MOTOR_ANGLE_MIN        0
 #define MOTOR_ANGLE_MAX        180
 

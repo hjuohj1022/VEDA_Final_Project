@@ -24,12 +24,12 @@
 #include "../app_secrets.defaults.h"
 #endif
 
-#ifndef APP_DTLS_TARGET_HOST
-#define APP_DTLS_TARGET_HOST ""
+#ifndef APP_UDP_TARGET_HOST
+#define APP_UDP_TARGET_HOST ""
 #endif
 
-#ifndef APP_DTLS_TARGET_PORT
-#define APP_DTLS_TARGET_PORT 5005
+#ifndef APP_UDP_TARGET_PORT
+#define APP_UDP_TARGET_PORT 5005
 #endif
 
 static const char *TAG = "udp_stream";
@@ -155,8 +155,8 @@ static bool udpWaitUntilLocked(int64_t wait_until_us)
 
 static bool udpStreamConfigValid(void)
 {
-    return (strlen(APP_DTLS_TARGET_HOST) > 0U) &&
-           (APP_DTLS_TARGET_PORT > 0);
+    return (strlen(APP_UDP_TARGET_HOST) > 0U) &&
+           (APP_UDP_TARGET_PORT > 0);
 }
 
 bool udpStreamIsEnabled(void)
@@ -254,10 +254,10 @@ static int udpConnectSocketLocked(void)
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_protocol = IPPROTO_UDP;
 
-    (void)snprintf(port_str, sizeof(port_str), "%d", (int)APP_DTLS_TARGET_PORT);
+    (void)snprintf(port_str, sizeof(port_str), "%d", (int)APP_UDP_TARGET_PORT);
 
-    if (lwip_getaddrinfo(APP_DTLS_TARGET_HOST, port_str, &hints, &res) != 0) {
-        ESP_LOGW(TAG, "lwip_getaddrinfo() failed host=%s port=%s", APP_DTLS_TARGET_HOST, port_str);
+    if (lwip_getaddrinfo(APP_UDP_TARGET_HOST, port_str, &hints, &res) != 0) {
+        ESP_LOGW(TAG, "lwip_getaddrinfo() failed host=%s port=%s", APP_UDP_TARGET_HOST, port_str);
         return -1;
     }
 
@@ -325,7 +325,7 @@ bool udpStreamInit(void)
                                 ((int64_t)UDP_SEND_POST_CONNECT_DELAY_TICKS * 1000LL *
                                  portTICK_PERIOD_MS);
     udpLogHeap("UDP init OK");
-    ESP_LOGI(TAG, "UDP stream target=%s:%d", APP_DTLS_TARGET_HOST, (int)APP_DTLS_TARGET_PORT);
+    ESP_LOGI(TAG, "UDP stream target=%s:%d", APP_UDP_TARGET_HOST, (int)APP_UDP_TARGET_PORT);
     ok = true;
     udpUnlock();
     return ok;
