@@ -45,6 +45,9 @@ extern "C" {
 /* 서보 펄스 범위 (기본값) */
 #define MOTOR_ANGLE_MIN        0
 #define MOTOR_ANGLE_MAX        180
+#define MOTOR_SPEED_MIN        1
+#define MOTOR_SPEED_MAX        10
+#define MOTOR_SPEED_DEFAULT    1
 
 /* ── 모터별 캘리브레이션 값 (µs) ──────────────
  *   motor1: min=540  center=1530  max=2600
@@ -78,6 +81,8 @@ int32_t Motor_Init(I2C_HandleTypeDef *hi2c);
  * @param  angle     0 ~ 180 (°)
  */
 void    Motor_SetAngle(uint8_t motor_id, int16_t angle);
+void    Motor_SetAllAngles(const int16_t *angles);
+void    Motor_SetSpeed(uint8_t motor_id, uint8_t speed);
 
 /**
  * @brief  특정 모터 상대 이동
@@ -90,6 +95,7 @@ void    Motor_MoveRelative(uint8_t motor_id, int16_t delta);
  * @brief  특정 모터 현재 각도 반환
  */
 int16_t Motor_GetAngle(uint8_t motor_id);
+uint8_t Motor_GetSpeed(uint8_t motor_id);
 
 /**
  * @brief  모터 상태 업데이트 (메인 루프에서 주기적 호출)
@@ -117,6 +123,8 @@ void    Motor_StopAll(void);
  *        "motor<N> right press"   → 오른쪽으로 계속 이동 시작
  *        "motor<N> release"       → 이동 정지
  *        "motor<N> set <deg>"     → 특정 각도로 이동
+ *        "motor<N> speed <val>"   → 이동 속도 설정
+ *        "setall <deg1> <deg2> <deg3>" → 3개 모터 목표각 동시 반영
  *
  * @return 0=성공, -1=파싱 실패
  */

@@ -21,13 +21,15 @@ I2C_HandleTypeDef  hi2c1;
 
 /* USER CODE BEGIN PV */
 #define UART_RX_BUF_SIZE  64U
+#define UART_CMD_QUEUE_LEN 4U
 
 static uint8_t uart_rx_byte;
 static char uart_cmd_buf[UART_RX_BUF_SIZE];
-static char uart_ready_buf[UART_RX_BUF_SIZE];
 static uint8_t uart_cmd_len;
-static volatile uint8_t uart_ready_len;
-static volatile bool uart_cmd_ready;
+static char uart_cmd_queue[UART_CMD_QUEUE_LEN][UART_RX_BUF_SIZE];
+static volatile uint8_t uart_queue_head;
+static volatile uint8_t uart_queue_tail;
+static volatile uint8_t uart_queue_count;
 static volatile bool uart_cmd_overflow;
 /* USER CODE END PV */
 
@@ -45,6 +47,7 @@ static void uartSendOkWithAngles(void);
 static char *trimCommand(char *text);
 static void laserInit(void);
 static void laserSet(bool enabled);
+static bool uartPopCommand(char *out_buf, uint8_t *out_len);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -88,7 +91,7 @@ int main(void)
         /* USER CODE BEGIN WHILE */
         Motor_Update();
 
-        if (uart_cmd_ready || uart_cmd_overflow)
+        if ((uart_queue_count > 0U) || uart_cmd_overflow)
         {
             processUartCommand();
         }
@@ -206,20 +209,10 @@ static void processUartCommand(void)
     char *cmd;
     uint8_t local_len = 0U;
 
-    __disable_irq();
-    if (uart_cmd_ready)
+    if (!uartPopCommand(local_buf, &local_len))
     {
-        local_len = uart_ready_len;
-        if (local_len >= UART_RX_BUF_SIZE)
-        {
-            local_len = UART_RX_BUF_SIZE - 1U;
-        }
-        (void)memcpy(local_buf, uart_ready_buf, local_len);
-        local_buf[local_len] = '\0';
-        uart_ready_len = 0U;
-        uart_cmd_ready = false;
+        local_len = 0U;
     }
-    __enable_irq();
 
     if (local_len == 0U)
     {
@@ -263,7 +256,9 @@ static void processUartCommand(void)
         uartSendText("CMD motor<N> left press\r\n");
         uartSendText("CMD motor<N> right press\r\n");
         uartSendText("CMD motor<N> release\r\n");
-        uartSendText("CMD motor<N> set <deg>\r\n");
+        uartSendText("CMD motor<N> set <deg>  (queued)\r\n");
+        uartSendText("CMD motor<N> speed <1-10>\r\n");
+        uartSendText("CMD setall <deg1> <deg2> <deg3>  (queued)\r\n");
         uartSendText("CMD read | ping | stopall | LED ON | LED OFF\r\n");
     }
     else
@@ -286,7 +281,41 @@ static void processUartCommand(void)
     }
 
     uart_cmd_len = 0U;
-    (void)memset(uart_ready_buf, 0, sizeof(uart_ready_buf));
+}
+
+static bool uartPopCommand(char *out_buf, uint8_t *out_len)
+{
+    bool ret = false;
+
+    if ((out_buf != NULL) && (out_len != NULL))
+    {
+        __disable_irq();
+        if (uart_queue_count > 0U)
+        {
+            uint8_t local_len = (uint8_t)strnlen(uart_cmd_queue[uart_queue_head], UART_RX_BUF_SIZE);
+
+            if (local_len >= UART_RX_BUF_SIZE)
+            {
+                local_len = UART_RX_BUF_SIZE - 1U;
+            }
+
+            (void)memcpy(out_buf, uart_cmd_queue[uart_queue_head], local_len);
+            out_buf[local_len] = '\0';
+            (void)memset(uart_cmd_queue[uart_queue_head], 0, UART_RX_BUF_SIZE);
+
+            uart_queue_head++;
+            if (uart_queue_head >= UART_CMD_QUEUE_LEN)
+            {
+                uart_queue_head = 0U;
+            }
+            uart_queue_count--;
+            *out_len = local_len;
+            ret = true;
+        }
+        __enable_irq();
+    }
+
+    return ret;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -298,11 +327,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             if (uart_cmd_len > 0U)
             {
                 uart_cmd_buf[uart_cmd_len] = '\0';
-                if (!uart_cmd_ready)
+                if (uart_queue_count < UART_CMD_QUEUE_LEN)
                 {
-                    (void)memcpy(uart_ready_buf, uart_cmd_buf, uart_cmd_len + 1U);
-                    uart_ready_len = uart_cmd_len;
-                    uart_cmd_ready = true;
+                    (void)memcpy(uart_cmd_queue[uart_queue_tail], uart_cmd_buf, uart_cmd_len + 1U);
+                    uart_queue_tail++;
+                    if (uart_queue_tail >= UART_CMD_QUEUE_LEN)
+                    {
+                        uart_queue_tail = 0U;
+                    }
+                    uart_queue_count++;
                 }
                 else
                 {
