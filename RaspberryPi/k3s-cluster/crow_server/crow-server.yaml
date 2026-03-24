@@ -118,7 +118,7 @@ spec:
 
         # Thermal event demo tuning
         - name: THERMAL_EVENT_COMPONENT_AREA_MAX
-          value: "1024"
+          value: "1400"
         - name: THERMAL_EVENT_CONSECUTIVE_FRAMES
           value: "1"
         - name: THERMAL_EVENT_CLEAR_FRAMES
