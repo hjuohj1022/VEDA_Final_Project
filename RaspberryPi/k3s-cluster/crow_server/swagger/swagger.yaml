@@ -1421,6 +1421,34 @@ paths:
         '504':
           description: 모터 응답 대기 시간 초과
 
+  /motor/emergency:
+    post:
+      summary: 비상 대피 유도 모터 시퀀스 실행
+      description: |
+        비상 상황용 고정 대피 시퀀스를 실행합니다.
+        서버는 `MOTOR_EMERGENCY_SCRIPT` 환경변수 또는 기본 스크립트를 읽어 `;` 기준으로 분리한 뒤,
+        각 명령을 `motor/control` 토픽으로 순차 publish 하고 단계별 `motor/response` 응답을 기다립니다.
+        기본 스크립트:
+        - `motor2 set 30`
+        - `motor2 set 47`
+        - `motor3 set 104`
+        - `motor2 set 55`
+        - `motor3 set 77`
+        - `motor2 set 65`
+        - `motor3 set 90`
+        - `motor2 set 70`
+      responses:
+        '200':
+          description: 전체 비상 시퀀스 실행 성공
+        '400':
+          description: 시퀀스 중 특정 단계에서 장치가 ERR 응답
+        '503':
+          description: MQTT 브로커를 사용할 수 없거나 publish 실패
+        '504':
+          description: 시퀀스 중 특정 단계 응답 대기 시간 초과
+        '500':
+          description: MOTOR_EMERGENCY_SCRIPT 설정 오류
+
   /motor/control/press:
     post:
       summary: 모터 연속 회전 시작

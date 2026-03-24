@@ -95,6 +95,9 @@ spec:
         - name: THERMAL_UDP_PORT
           value: "5005"
 
+        - name: MOTOR_EMERGENCY_SCRIPT
+          value: "motor2 set 30; motor2 set 47; motor3 set 104; motor2 set 55; motor3 set 77; motor2 set 65; motor3 set 90; motor2 set 70;"
+
         - name: MAIL_APP_SCRIPT_URL
           valueFrom:
             secretKeyRef:

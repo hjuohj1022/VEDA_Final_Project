@@ -452,6 +452,7 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/motor/control/set` | 단일 모터 각도 설정 (`motor`, `angle`) |
 | `POST` | `/motor/control/center` | 전체 모터 동일 각도 센터 정렬 (`angle`, optional) |
 | `POST` | `/motor/control/stopall` | 전체 모터 일괄 정지 |
+| `POST` | `/motor/emergency` | 비상 대피 유도용 고정 모터 시퀀스 실행 |
 | `POST` | `/laser/control/on` | 레이저 켜기 |
 | `POST` | `/laser/control/off` | 레이저 끄기 |
 | `GET` | `/laser/status` | 레이저 MQTT 브리지 상태 조회 |

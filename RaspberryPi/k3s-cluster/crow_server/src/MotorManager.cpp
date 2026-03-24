@@ -2,16 +2,35 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <vector>
 
 // 모터 제어용 REST API의 MQTT request-response 래핑부.
 // 라우트는 JSON 검증 담당, MotorManager는 publish/응답대기/상태보관 담당.
 namespace {
 constexpr int kMinMotorIndex = 1;
 constexpr int kMaxMotorIndex = 3;
+constexpr char kDefaultEmergencySequenceName[] = "emergency_evacuation";
+constexpr char kDefaultEmergencyScript[] =
+    "motor2 set 30; motor2 set 47; motor3 set 104; motor2 set 55; "
+    "motor3 set 77; motor2 set 65; motor3 set 90; motor2 set 70;";
 
 std::string toLowerCopy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+std::string trimWhitespace(std::string value) {
+    const auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
+
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(),
+                             [&](unsigned char ch) { return !is_space(ch); }));
+    value.erase(std::find_if(value.rbegin(), value.rend(),
+                             [&](unsigned char ch) { return !is_space(ch); })
+                    .base(),
+                value.end());
     return value;
 }
 
@@ -81,14 +100,18 @@ int clampServoAngle(int angle) {
     return std::max(0, std::min(180, angle));
 }
 
-crow::response makeMotorCommandResponse(const MotorCommandResult& result) {
-    crow::json::wvalue body;
+void writeMotorCommandFields(crow::json::wvalue& body, const MotorCommandResult& result) {
     body["ok"] = result.ok;
     body["command"] = result.command;
     body["published"] = result.published;
     body["timed_out"] = result.timed_out;
     body["broker_connected"] = result.broker_connected;
     body["response"] = result.response;
+}
+
+crow::response makeMotorCommandResponse(const MotorCommandResult& result) {
+    crow::json::wvalue body;
+    writeMotorCommandFields(body, result);
 
     if (result.command.empty()) {
         body["status"] = "INVALID_REQUEST";
@@ -163,6 +186,107 @@ crow::response makeInvalidBodyResponse(const std::string& message) {
     body["status"] = "INVALID_REQUEST";
     body["message"] = message;
     return crow::response(400, body);
+}
+std::string getEmergencyScript() {
+    const char* configured = std::getenv("MOTOR_EMERGENCY_SCRIPT");
+    if ((configured == nullptr) || (*configured == '\0')) {
+        return kDefaultEmergencyScript;
+    }
+
+    const std::string trimmed = trimWhitespace(configured);
+    return trimmed.empty() ? std::string(kDefaultEmergencyScript) : trimmed;
+}
+
+std::vector<std::string> splitEmergencyCommands(const std::string& raw_script) {
+    std::vector<std::string> commands;
+    size_t start = 0;
+
+    while (start <= raw_script.size()) {
+        const size_t delimiter_pos = raw_script.find(';', start);
+        const size_t count = (delimiter_pos == std::string::npos) ? std::string::npos
+                                                                  : (delimiter_pos - start);
+        std::string command = trimWhitespace(raw_script.substr(start, count));
+        if (!command.empty()) {
+            commands.push_back(std::move(command));
+        }
+
+        if (delimiter_pos == std::string::npos) {
+            break;
+        }
+        start = delimiter_pos + 1;
+    }
+
+    return commands;
+}
+
+crow::response makeEmergencySequenceResponse(MotorManager& motor_mgr) {
+    const MotorStatusSnapshot status = motor_mgr.getStatus();
+    const std::string raw_script = getEmergencyScript();
+    const std::vector<std::string> commands = splitEmergencyCommands(raw_script);
+
+    crow::json::wvalue body;
+    body["status"] = "OK";
+    body["sequence_name"] = kDefaultEmergencySequenceName;
+    body["delivery_mode"] = "sequential_mqtt_commands";
+    body["control_topic"] = status.control_topic;
+    body["response_topic"] = status.response_topic;
+    body["raw_script"] = raw_script;
+    body["note"] =
+        "Current STM32 firmware accepts one motor command per line, so the server "
+        "splits the emergency script on ';' and publishes each step in order.";
+    body["total_steps"] = static_cast<int>(commands.size());
+    body["attempted_steps"] = 0;
+    body["successful_steps"] = 0;
+    body["published_steps"] = 0;
+    body["stopped_early"] = false;
+
+    if (commands.empty()) {
+        body["status"] = "EMERGENCY_ROUTE_MISCONFIGURED";
+        body["message"] = "MOTOR_EMERGENCY_SCRIPT is empty or contains no valid commands";
+        return crow::response(500, body);
+    }
+
+    int attempted_steps = 0;
+    int successful_steps = 0;
+    int published_steps = 0;
+    int http_status = 200;
+
+    for (size_t index = 0; index < commands.size(); ++index) {
+        const auto result = motor_mgr.sendCommand(commands[index]);
+        auto& step = body["steps"][static_cast<unsigned>(index)];
+
+        step["index"] = static_cast<int>(index + 1);
+        writeMotorCommandFields(step, result);
+
+        ++attempted_steps;
+        if (result.published) {
+            ++published_steps;
+        }
+        if (result.ok) {
+            ++successful_steps;
+            continue;
+        }
+
+        body["failed_step"] = static_cast<int>(index + 1);
+        body["stopped_early"] = ((index + 1U) < commands.size());
+
+        if (result.timed_out) {
+            body["status"] = "TIMEOUT";
+            http_status = 504;
+        } else if (!result.published || !result.broker_connected) {
+            body["status"] = "MQTT_UNAVAILABLE";
+            http_status = 503;
+        } else {
+            body["status"] = "STEP_ERROR";
+            http_status = 400;
+        }
+        break;
+    }
+
+    body["attempted_steps"] = attempted_steps;
+    body["successful_steps"] = successful_steps;
+    body["published_steps"] = published_steps;
+    return crow::response(http_status, body);
 }
 }  // 익명 네임스페이스
 
@@ -320,6 +444,11 @@ void MotorManager::handleMessage(const std::string& topic, const std::string& pa
 
 void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr) {
     // 아래 라우트들의 공통 구조: JSON 본문 검증 후 MotorManager 공통 sendCommand 경로 진입.
+    CROW_ROUTE(app, "/motor/emergency").methods(crow::HTTPMethod::POST)
+    ([&motor_mgr]() {
+        return makeEmergencySequenceResponse(motor_mgr);
+    });
+
     CROW_ROUTE(app, "/motor/control/command").methods(crow::HTTPMethod::POST)
     ([&motor_mgr](const crow::request& req) {
         const auto body = crow::json::load(req.body);
