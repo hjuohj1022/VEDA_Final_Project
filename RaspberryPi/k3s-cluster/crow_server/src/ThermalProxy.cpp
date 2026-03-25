@@ -1298,8 +1298,13 @@ bool selectBestThermalEventComponent(const std::vector<ThermalEventComponent>& c
 void updateThermalEventTrackerState(ThermalEventTrackerState& tracker,
                                     const ThermalEventConfig& config,
                                     const ThermalEventRoi& roi,
-                                    const ThermalEventComponent* bestComponent)
+                                    const ThermalEventComponent* bestComponent,
+                                    bool* cleared)
 {
+    if (cleared) {
+        *cleared = false;
+    }
+
     if (!sameThermalEventRoi(tracker.roi, roi) && !tracker.prevMask.empty()) {
         resetThermalEventTrackerState(tracker);
     }
@@ -1326,6 +1331,9 @@ void updateThermalEventTrackerState(ThermalEventTrackerState& tracker,
         tracker.missFrames += 1;
         if (tracker.missFrames >= config.clear_frames) {
             resetThermalEventTrackerState(tracker);
+            if (cleared) {
+                *cleared = true;
+            }
         }
     }
 }
@@ -1698,13 +1706,16 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             } else {
                 candidate_rejection_reason = "not_selected";
             }
+            bool tracker_cleared = false;
             updateThermalEventTrackerState(
                 g_thermal.event_tracker,
                 config,
                 analysis.roi,
-                best_component.valid ? &best_component : nullptr);
+                best_component.valid ? &best_component : nullptr,
+                &tracker_cleared);
             candidate_persist_frames = g_thermal.event_tracker.persistFrames;
-            candidate_miss_frames = g_thermal.event_tracker.missFrames;
+            // clear 임계 도달 프레임은 상태 리셋 후에도 해제 조건에서 감지되게 유지
+            candidate_miss_frames = tracker_cleared ? config.clear_frames : g_thermal.event_tracker.missFrames;
         } else {
             hot_area_pixels = 0;
             candidate_persist_frames = 0;
