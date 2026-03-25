@@ -1226,20 +1226,20 @@ std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEv
         const bool areaTooLarge = component.area > config.component_area_max;
         const bool lowContrast = component.localContrast < config.local_contrast_min;
         const bool lowAspectRatio = component.aspectRatio < config.aspect_ratio_min;
-        const bool missingTipAnchor = !hasThermalEventTipAnchor(config);
-        const bool tipDistanceUnknown = hasThermalEventTipAnchor(config) && component.distanceToTipPx < 0;
+        const bool hasTipAnchor = hasThermalEventTipAnchor(config);
+        const bool missingTipAnchor = !hasTipAnchor;
+        const bool tipDistanceUnknown = hasTipAnchor && component.distanceToTipPx < 0;
         const bool tooFarFromTip =
-            hasThermalEventTipAnchor(config)
+            hasTipAnchor
             && component.distanceToTipPx >= 0
             && component.distanceToTipPx > config.tip_distance_max_px;
+        // tip이 없으면 ROI 기반 탐지만 수행하고 거리 검사는 건너뜀
         component.valid =
             !areaTooSmall
             && !areaTooLarge
             && !lowContrast
             && !lowAspectRatio
-            && !missingTipAnchor
-            && !tipDistanceUnknown
-            && !tooFarFromTip;
+            && (!hasTipAnchor || (!tipDistanceUnknown && !tooFarFromTip));
         if (component.valid) {
             component.rejectionReason = "ok";
         } else if (areaTooSmall) {
@@ -1251,7 +1251,7 @@ std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEv
         } else if (lowAspectRatio) {
             component.rejectionReason = "low_aspect_ratio";
         } else if (missingTipAnchor) {
-            component.rejectionReason = "missing_tip_anchor";
+            component.rejectionReason = "tip_anchor_disabled";
         } else if (tipDistanceUnknown) {
             component.rejectionReason = "tip_distance_unknown";
         } else if (tooFarFromTip) {
