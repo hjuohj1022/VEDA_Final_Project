@@ -34,6 +34,8 @@ add_executable(
   src/AppScriptMailSender.cpp
   src/AuthRecoveryRoutes.cpp
   src/EspHealthManager.cpp
+  src/EventLogRoutes.cpp
+  src/EventLogStore.cpp
   src/MotorManager.cpp
   src/MqttManager.cpp
   src/SunapiProxy.cpp

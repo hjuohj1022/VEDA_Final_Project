@@ -4,6 +4,7 @@
 #include "../include/CctvManager.h"
 #include "../include/CctvProxy.h"
 #include "../include/EspHealthManager.h"
+#include "../include/EventLogRoutes.h"
 #include "../include/MqttManager.h"
 #include "../include/MotorManager.h"
 #include "../include/ThermalProxy.h"
@@ -2064,6 +2065,8 @@ int main()
         // 기존 보호 API는 full stage JWT만 허용한다.
         return token && verifyJWT(*token);
     };
+
+    registerEventLogRoutes(app, is_authorized);
 
         // ==========================================
         // 녹화된 파일 목록 조회 (보호됨)
