@@ -63,8 +63,8 @@ void Error_Handler(void);
 #define USART_RX_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-#define LASER_Pin GPIO_PIN_5
-#define LASER_GPIO_Port GPIOA
+#define LASER_Pin GPIO_PIN_0
+#define LASER_GPIO_Port GPIOB
 #define LASER_ACTIVE_STATE GPIO_PIN_SET
 #define LASER_INACTIVE_STATE GPIO_PIN_RESET
 
