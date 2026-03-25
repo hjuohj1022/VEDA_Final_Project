@@ -10,6 +10,8 @@
 namespace {
 constexpr int kMinMotorIndex = 1;
 constexpr int kMaxMotorIndex = 3;
+constexpr int kMinMotorSpeed = 1;
+constexpr int kMaxMotorSpeed = 10;
 constexpr char kDefaultEmergencySequenceName[] = "emergency_evacuation";
 constexpr char kDefaultEmergencyScript[] =
     "motor2 set 30; motor2 set 47; motor3 set 104; motor2 set 55; "
@@ -70,6 +72,10 @@ std::string normalizeWhitespaceLower(std::string value) {
 
 bool isMotorIndexValid(int motor) {
     return (motor >= kMinMotorIndex) && (motor <= kMaxMotorIndex);
+}
+
+bool isMotorSpeedValid(int speed) {
+    return (speed >= kMinMotorSpeed) && (speed <= kMaxMotorSpeed);
 }
 
 bool isDirectionValid(const std::string& direction) {
@@ -384,6 +390,10 @@ MotorCommandResult MotorManager::setAngle(int motor, int angle) {
     return sendCommand("motor" + std::to_string(motor) + " set " + std::to_string(clampServoAngle(angle)));
 }
 
+MotorCommandResult MotorManager::setSpeed(int motor, int speed) {
+    return sendCommand("motor" + std::to_string(motor) + " speed " + std::to_string(speed));
+}
+
 MotorCommandResult MotorManager::moveRelative(int motor, const std::string& direction, int degrees) {
     return sendCommand("motor" + std::to_string(motor) + " " + direction + " " + std::to_string(std::max(0, degrees)));
 }
@@ -541,6 +551,28 @@ void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr) {
         }
 
         return makeMotorCommandResponse(motor_mgr.setAngle(motor, angle));
+    });
+
+    CROW_ROUTE(app, "/motor/control/speed").methods(crow::HTTPMethod::POST)
+    ([&motor_mgr](const crow::request& req) {
+        const auto body = crow::json::load(req.body);
+        if (!body) {
+            return makeInvalidBodyResponse("Invalid JSON");
+        }
+
+        int motor = 0;
+        int speed = 0;
+        if (!tryReadJsonInt(body, "motor", motor) || !tryReadJsonInt(body, "speed", speed)) {
+            return makeInvalidBodyResponse("Fields 'motor' and 'speed' are required");
+        }
+        if (!isMotorIndexValid(motor)) {
+            return makeInvalidBodyResponse("Motor index must be between 1 and 3");
+        }
+        if (!isMotorSpeedValid(speed)) {
+            return makeInvalidBodyResponse("Speed must be between 1 and 10");
+        }
+
+        return makeMotorCommandResponse(motor_mgr.setSpeed(motor, speed));
     });
 
     CROW_ROUTE(app, "/motor/control/move").methods(crow::HTTPMethod::POST)

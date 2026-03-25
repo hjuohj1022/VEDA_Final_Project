@@ -63,6 +63,7 @@ public:
     MotorCommandResult release(int motor);
     MotorCommandResult stop(int motor);
     MotorCommandResult setAngle(int motor, int angle);
+    MotorCommandResult setSpeed(int motor, int speed);
     MotorCommandResult moveRelative(int motor, const std::string& direction, int degrees);
     MotorCommandResult readAngles();
     MotorCommandResult ping();

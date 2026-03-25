@@ -14,6 +14,9 @@ Item {
     property bool laserEnabled: false
     property var holdDirectionByMotor: ({1: "", 2: "", 3: ""})
     property var pressedHoldMotors: []
+    property int controlElementHeight: 36
+    property int controlTextPixelSize: 12
+    property int comboHorizontalPadding: 28
     property color mutedTextColor: theme && theme.textSecondary ? Qt.lighter(theme.textSecondary, 1.18) : "#c7c9d3"
     property color statusTextColor: theme && theme.textSecondary ? Qt.lighter(theme.textSecondary, 1.3) : "#e0e2ea"
 
@@ -31,6 +34,10 @@ Item {
         return Number(angleField.text)
     }
 
+    function selectedSpeed() {
+        return Number(speedField.text)
+    }
+
     function selectedDirection() {
         return directionCombo.currentIndex === 0 ? "left" : "right"
     }
@@ -44,6 +51,18 @@ Item {
             n = 0
         if (n > 180)
             n = 180
+        return String(n)
+    }
+
+    function sanitizeSpeed(raw) {
+        var t = String(raw || "").replace(/[^0-9]/g, "")
+        if (t.length === 0)
+            return "5"
+        var n = Number(t)
+        if (n < 1)
+            n = 1
+        if (n > 10)
+            n = 10
         return String(n)
     }
 
@@ -192,7 +211,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 268
+                Layout.preferredHeight: 336
                 radius: 8
                 color: theme ? theme.bgComponent : "#18181b"
                 border.color: theme ? theme.border : "#27272a"
@@ -211,17 +230,19 @@ Item {
                     }
 
                     Text {
-                        text: "Hold / stop / angle control"
+                        text: "Hold / stop / angle / speed control"
                         color: root.mutedTextColor
                         font.pixelSize: 12
                     }
 
                     RowLayout {
+                        id: targetDirectionRow
                         Layout.fillWidth: true
                         spacing: 8
 
                         ColumnLayout {
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (targetDirectionRow.width - targetDirectionRow.spacing) / 2
                             spacing: 4
 
                             Text {
@@ -233,20 +254,21 @@ Item {
                             ComboBox {
                                 id: motorCombo
                                 Layout.fillWidth: true
-                                implicitHeight: 36
+                                implicitHeight: root.controlElementHeight
                                 model: ["1", "2", "3"]
                                 currentIndex: 0
-                                leftPadding: 12
-                                rightPadding: 28
-                                font.pixelSize: 13
+                                leftPadding: root.comboHorizontalPadding
+                                rightPadding: root.comboHorizontalPadding
+                                font.pixelSize: root.controlTextPixelSize
+                                font.bold: true
 
                                 contentItem: Text {
                                     text: motorCombo.displayText
                                     color: theme ? theme.textPrimary : "white"
                                     verticalAlignment: Text.AlignVCenter
-                                    leftPadding: motorCombo.leftPadding
-                                    rightPadding: motorCombo.rightPadding
+                                    horizontalAlignment: Text.AlignHCenter
                                     font: motorCombo.font
+                                    elide: Text.ElideRight
                                 }
 
                                 background: Rectangle {
@@ -295,13 +317,14 @@ Item {
                                     highlighted: motorCombo.highlightedIndex === index
 
                                     contentItem: Text {
-                                        text: modelData
-                                        color: highlighted
-                                               ? "white"
-                                               : (theme ? theme.textPrimary : "white")
-                                        font.pixelSize: 13
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
+                                    text: modelData
+                                    color: highlighted
+                                           ? "white"
+                                           : (theme ? theme.textPrimary : "white")
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
 
                                     background: Rectangle {
                                         radius: 6
@@ -315,6 +338,7 @@ Item {
 
                         ColumnLayout {
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (targetDirectionRow.width - targetDirectionRow.spacing) / 2
                             spacing: 4
 
                             Text {
@@ -326,20 +350,21 @@ Item {
                             ComboBox {
                                 id: directionCombo
                                 Layout.fillWidth: true
-                                implicitHeight: 36
+                                implicitHeight: root.controlElementHeight
                                 model: ["Left", "Right"]
                                 currentIndex: 0
-                                leftPadding: 12
-                                rightPadding: 28
-                                font.pixelSize: 13
+                                leftPadding: root.comboHorizontalPadding
+                                rightPadding: root.comboHorizontalPadding
+                                font.pixelSize: root.controlTextPixelSize
+                                font.bold: true
 
                                 contentItem: Text {
                                     text: directionCombo.displayText
                                     color: theme ? theme.textPrimary : "white"
                                     verticalAlignment: Text.AlignVCenter
-                                    leftPadding: directionCombo.leftPadding
-                                    rightPadding: directionCombo.rightPadding
+                                    horizontalAlignment: Text.AlignHCenter
                                     font: directionCombo.font
+                                    elide: Text.ElideRight
                                 }
 
                                 background: Rectangle {
@@ -388,13 +413,14 @@ Item {
                                     highlighted: directionCombo.highlightedIndex === index
 
                                     contentItem: Text {
-                                        text: modelData
-                                        color: highlighted
-                                               ? "white"
-                                               : (theme ? theme.textPrimary : "white")
-                                        font.pixelSize: 13
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
+                                    text: modelData
+                                    color: highlighted
+                                           ? "white"
+                                           : (theme ? theme.textPrimary : "white")
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
 
                                     background: Rectangle {
                                         radius: 6
@@ -407,6 +433,7 @@ Item {
                         }
                     }
                     RowLayout {
+                        id: holdStopRow
                         Layout.fillWidth: true
                         spacing: 8
 
@@ -416,6 +443,9 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (holdStopRow.width - holdStopRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onPressed: root.startSelectedMotorHolds()
                             onReleased: root.releasePressedMotorHolds()
@@ -427,6 +457,9 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (holdStopRow.width - holdStopRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)
@@ -440,13 +473,83 @@ Item {
                     }
 
                     RowLayout {
+                        id: speedRow
                         Layout.fillWidth: true
                         spacing: 8
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredWidth: 136
-                            Layout.maximumWidth: 136
+                            Layout.preferredWidth: (speedRow.width - speedRow.spacing) / 2
+                            spacing: 4
+
+                            Text {
+                                text: "Speed"
+                                color: root.mutedTextColor
+                                font.pixelSize: 12
+                            }
+
+                            TextField {
+                                id: speedField
+                                Layout.fillWidth: true
+                                implicitHeight: root.controlElementHeight
+                                text: "5"
+                                color: theme ? theme.textPrimary : "white"
+                                font.pixelSize: root.controlTextPixelSize
+                                font.bold: true
+                                leftPadding: 0
+                                rightPadding: 0
+                                topPadding: 0
+                                bottomPadding: 0
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                inputMethodHints: Qt.ImhDigitsOnly
+                                selectByMouse: true
+                                background: Rectangle {
+                                    color: theme ? theme.bgSecondary : "#09090b"
+                                    border.color: speedField.activeFocus
+                                                  ? (theme ? theme.accent : "#f97316")
+                                                  : (theme ? theme.border : "#27272a")
+                                    border.width: 1
+                                    radius: 6
+                                }
+                                onTextEdited: {
+                                    var s = root.sanitizeSpeed(text)
+                                    if (s !== text) {
+                                        text = s
+                                        cursorPosition = text.length
+                                    }
+                                }
+                            }
+                        }
+
+                        C.SidebarControlButton {
+                            text: "Apply"
+                            compact: true
+                            theme: root.theme
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: (speedRow.width - speedRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
+                            Layout.alignment: Qt.AlignBottom
+                            enabled: !!motorBackend
+                            onClicked: {
+                                if (!motorBackend)
+                                    return
+                                speedField.text = root.sanitizeSpeed(speedField.text)
+                                motorBackend.resetSessionTimer()
+                                motorBackend.motorSetSpeed(root.selectedMotor(), root.selectedSpeed())
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        id: angleRow
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: (angleRow.width - angleRow.spacing) / 2
                             spacing: 4
 
                             Text {
@@ -458,9 +561,11 @@ Item {
                             TextField {
                                 id: angleField
                                 Layout.fillWidth: true
-                                implicitHeight: 36
+                                implicitHeight: root.controlElementHeight
                                 text: "90"
                                 color: theme ? theme.textPrimary : "white"
+                                font.pixelSize: root.controlTextPixelSize
+                                font.bold: true
                                 leftPadding: 0
                                 rightPadding: 0
                                 topPadding: 0
@@ -491,8 +596,10 @@ Item {
                             text: "Set"
                             compact: true
                             theme: root.theme
-                            Layout.preferredWidth: 88
-                            Layout.minimumWidth: 88
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: (angleRow.width - angleRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             Layout.alignment: Qt.AlignBottom
                             enabled: !!motorBackend
                             onClicked: {
@@ -506,6 +613,7 @@ Item {
                     }
 
                     RowLayout {
+                        id: allStopRow
                         Layout.fillWidth: true
                         spacing: 8
 
@@ -514,6 +622,9 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (allStopRow.width - allStopRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)
@@ -529,6 +640,9 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredWidth: (allStopRow.width - allStopRow.spacing) / 2
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)
@@ -544,7 +658,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 104
+                Layout.preferredHeight: 112
                 radius: 8
                 color: theme ? theme.bgComponent : "#18181b"
                 border.color: theme ? theme.border : "#27272a"
@@ -578,6 +692,8 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)
@@ -592,6 +708,8 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)
@@ -606,6 +724,8 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.fillWidth: true
+                            Layout.preferredHeight: root.controlElementHeight
+                            Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
                             onClicked: {
                                 if (!motorBackend)

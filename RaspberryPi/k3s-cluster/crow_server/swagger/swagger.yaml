@@ -1566,6 +1566,40 @@ paths:
         '504':
           description: 모터 응답 대기 시간 초과
 
+  /motor/control/speed:
+    post:
+      summary: 모터 속도 설정
+      description: |
+        지정한 모터의 속도를 설정합니다.
+        서버는 MQTT로 `motor{n} speed {value}` 형식의 payload를 발행합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motor
+                - speed
+              properties:
+                motor:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                speed:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+      responses:
+        '200':
+          description: 모터 응답 수신 성공
+        '400':
+          description: 잘못된 요청 또는 STM32가 ERR 반환
+        '503':
+          description: MQTT 브로커를 사용할 수 없음
+        '504':
+          description: 모터 응답 대기 시간 초과
+
   /motor/control/move:
     post:
       summary: 모터 상대 각도 이동
