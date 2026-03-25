@@ -26,6 +26,11 @@ bool Backend::motorSetAngle(int motor, int angle)
 }
 
 // 전체 모터 동일 중심 각도 정렬
+bool Backend::motorSetSpeed(int motor, int speed)
+{
+    return BackendMotorControlService::motorSetSpeed(this, d_ptr.get(), motor, speed);
+}
+
 bool Backend::motorCenter(int angle)
 {
     return BackendMotorControlService::motorCenter(this, d_ptr.get(), angle);

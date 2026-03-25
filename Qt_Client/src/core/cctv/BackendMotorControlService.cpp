@@ -17,6 +17,11 @@ bool isValidMotor(int motor) // 모터 번호(1~3) 유효성 검증
     return (motor >= 1) && (motor <= 3);
 }
 
+bool isValidMotorSpeed(int speed) // 모터 속도(1~10) 유효성 검증
+{
+    return (speed >= 1) && (speed <= 10);
+}
+
 QString normalizeDirection(const QString &direction) // 방향 문자열 소문자 정규화
 {
     return direction.trimmed().toLower();
@@ -316,6 +321,28 @@ bool BackendMotorControlService::motorSetAngle(Backend *backend, BackendPrivate 
                                { "angle", angle },
                            },
                            QString("Motor set m%1 angle=%2").arg(motor).arg(angle),
+                           "MOTOR");
+}
+
+bool BackendMotorControlService::motorSetSpeed(Backend *backend, BackendPrivate *state, int motor, int speed) // 단일 모터 속도 설정 처리
+{
+    if (!isValidMotor(motor)) {
+        emit backend->cameraControlMessage("Motor speed failed: invalid motor index (1~3)", true);
+        return false;
+    }
+    if (!isValidMotorSpeed(speed)) {
+        emit backend->cameraControlMessage("Motor speed failed: invalid speed (1~10)", true);
+        return false;
+    }
+
+    return sendControlPost(backend,
+                           state,
+                           "/motor/control/speed",
+                           QJsonObject{
+                               { "motor", motor },
+                               { "speed", speed },
+                           },
+                           QString("Motor speed m%1 speed=%2").arg(motor).arg(speed),
                            "MOTOR");
 }
 

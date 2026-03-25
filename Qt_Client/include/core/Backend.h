@@ -232,6 +232,7 @@ public:
     Q_INVOKABLE bool motorRelease(int motor);                         // 모터 press 상태 release 해제
     Q_INVOKABLE bool motorStop(int motor);                            // 단일 모터 정지
     Q_INVOKABLE bool motorSetAngle(int motor, int angle);             // 단일 모터 지정 각도 이동
+    Q_INVOKABLE bool motorSetSpeed(int motor, int speed);             // 단일 모터 속도 설정
     Q_INVOKABLE bool motorCenter(int angle = 90);                     // 전체 모터 동일 각도 센터 정렬
     Q_INVOKABLE bool motorStopAll();                                  // 전체 모터 일괄 정지
     Q_INVOKABLE bool laserOn();                                       // 레이저 켜기

@@ -12,6 +12,7 @@ public:
     static bool motorRelease(Backend *backend, BackendPrivate *state, int motor);
     static bool motorStop(Backend *backend, BackendPrivate *state, int motor);
     static bool motorSetAngle(Backend *backend, BackendPrivate *state, int motor, int angle);
+    static bool motorSetSpeed(Backend *backend, BackendPrivate *state, int motor, int speed);
     static bool motorCenter(Backend *backend, BackendPrivate *state, int angle);
     static bool motorStopAll(Backend *backend, BackendPrivate *state);
     static bool laserSetEnabled(Backend *backend, BackendPrivate *state, bool enabled);

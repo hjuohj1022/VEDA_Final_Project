@@ -450,6 +450,7 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/motor/control/release` | 모터 press 해제 (`motor`) |
 | `POST` | `/motor/control/stop` | 단일 모터 정지 (`motor`) |
 | `POST` | `/motor/control/set` | 단일 모터 각도 설정 (`motor`, `angle`) |
+| `POST` | `/motor/control/speed` | 단일 모터 속도 설정 (`motor`, `speed`, 1~10) |
 | `POST` | `/motor/control/center` | 전체 모터 동일 각도 센터 정렬 (`angle`, optional) |
 | `POST` | `/motor/control/stopall` | 전체 모터 일괄 정지 |
 | `POST` | `/motor/emergency` | 비상 대피 유도용 고정 모터 시퀀스 실행 |
