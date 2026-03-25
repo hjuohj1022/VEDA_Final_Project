@@ -368,6 +368,16 @@ bool BackendMotorControlService::motorStopAll(Backend *backend, BackendPrivate *
                            "MOTOR");
 }
 
+bool BackendMotorControlService::motorEmergency(Backend *backend, BackendPrivate *state) // 비상 대피 시퀀스 실행 요청
+{
+    return sendControlPost(backend,
+                           state,
+                           "/motor/emergency",
+                           QJsonObject(),
+                           "Motor emergency",
+                           "MOTOR");
+}
+
 bool BackendMotorControlService::laserSetEnabled(Backend *backend, BackendPrivate *state, bool enabled)
 {
     return sendControlPost(backend,

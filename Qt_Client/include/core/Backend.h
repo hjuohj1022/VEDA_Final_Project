@@ -67,6 +67,8 @@ class Backend : public QObject
     Q_PROPERTY(QString eventAlertSeverity READ eventAlertSeverity NOTIFY eventAlertStateChanged)
     Q_PROPERTY(QString eventAlertTitle READ eventAlertTitle NOTIFY eventAlertStateChanged)
     Q_PROPERTY(QString eventAlertMessage READ eventAlertMessage NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QString eventAlertReceivedAtText READ eventAlertReceivedAtText NOTIFY eventAlertStateChanged)
+    Q_PROPERTY(QVariantList eventAlertHistory READ eventAlertHistory NOTIFY eventAlertHistoryChanged)
     Q_PROPERTY(bool eventAlertAutoControl READ eventAlertAutoControl NOTIFY eventAlertStateChanged)
     Q_PROPERTY(bool eventAlertHasControlOverride READ eventAlertHasControlOverride NOTIFY eventAlertStateChanged)
     Q_PROPERTY(int eventAlertMotor1Angle READ eventAlertMotor1Angle NOTIFY eventAlertStateChanged)
@@ -132,6 +134,8 @@ public:
     QString eventAlertSeverity() const;
     QString eventAlertTitle() const;
     QString eventAlertMessage() const;
+    QString eventAlertReceivedAtText() const;
+    QVariantList eventAlertHistory() const;
     bool eventAlertAutoControl() const;
     bool eventAlertHasControlOverride() const;
     int eventAlertMotor1Angle() const;
@@ -235,6 +239,7 @@ public:
     Q_INVOKABLE bool motorSetSpeed(int motor, int speed);             // 단일 모터 속도 설정
     Q_INVOKABLE bool motorCenter(int angle = 90);                     // 전체 모터 동일 각도 센터 정렬
     Q_INVOKABLE bool motorStopAll();                                  // 전체 모터 일괄 정지
+    Q_INVOKABLE bool motorEmergency();                                // 비상 대피 모터 시퀀스 실행
     Q_INVOKABLE bool laserOn();                                       // 레이저 켜기
     Q_INVOKABLE bool laserOff();                                      // 레이저 끄기
     Q_INVOKABLE bool laserStatus();                                   // 레이저 브리지 상태 조회
@@ -321,6 +326,7 @@ signals:
     void thermalManualRangeChanged();
     void displaySettingsChanged();
     void eventAlertStateChanged();
+    void eventAlertHistoryChanged();
     void eventAlertPresetChanged();
 
 public slots:

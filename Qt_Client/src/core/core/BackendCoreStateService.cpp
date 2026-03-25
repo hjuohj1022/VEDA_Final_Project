@@ -39,6 +39,8 @@ QString BackendCoreStateService::eventAlertSource(const BackendPrivate *state) {
 QString BackendCoreStateService::eventAlertSeverity(const BackendPrivate *state) { return state->m_eventAlertSeverity; }
 QString BackendCoreStateService::eventAlertTitle(const BackendPrivate *state) { return state->m_eventAlertTitle; }
 QString BackendCoreStateService::eventAlertMessage(const BackendPrivate *state) { return state->m_eventAlertMessage; }
+QString BackendCoreStateService::eventAlertReceivedAtText(const BackendPrivate *state) { return state->m_eventAlertReceivedAtText; }
+QVariantList BackendCoreStateService::eventAlertHistory(const BackendPrivate *state) { return state->m_eventAlertHistory; }
 bool BackendCoreStateService::eventAlertAutoControl(const BackendPrivate *state) { return state->m_eventAlertAutoControl; }
 bool BackendCoreStateService::eventAlertHasControlOverride(const BackendPrivate *state) { return state->m_eventAlertHasControlOverride; }
 int BackendCoreStateService::eventAlertMotor1Angle(const BackendPrivate *state) { return state->m_eventAlertMotor1Angle; }

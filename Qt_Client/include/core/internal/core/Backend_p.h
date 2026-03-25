@@ -12,6 +12,7 @@
 #include <QString>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QVariant>
 #include <QWebSocket>
 
 struct ThermalAssemblyBuffer
@@ -184,6 +185,8 @@ struct BackendPrivate
     QString m_eventAlertSeverity = "info";
     QString m_eventAlertTitle;
     QString m_eventAlertMessage;
+    QString m_eventAlertReceivedAtText;
+    QVariantList m_eventAlertHistory;
     bool m_eventAlertAutoControl = false;
     bool m_eventAlertHasControlOverride = false;
     int m_eventAlertMotor1Angle = 90;
