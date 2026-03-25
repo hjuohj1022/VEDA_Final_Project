@@ -1,4 +1,5 @@
 #include "../include/ThermalProxy.h"
+#include "../include/EventLogStore.h"
 #include "../include/MqttManager.h"
 
 #include <algorithm>
@@ -1881,6 +1882,48 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
     const bool actuation_ok = config.actuation_enabled && mqtt && publishThermalActuation(mqtt, config);
     const bool mark_hotspot_active =
         (config.event_enabled && publish_ok) || (config.actuation_enabled && actuation_ok);
+
+    if (publish_ok) {
+        std::string event_title = config.title;
+        std::string event_message = payload;
+        const auto payload_json = crow::json::load(payload);
+        if (payload_json) {
+            if (payload_json.has("title")) {
+                event_title = payload_json["title"].s();
+            }
+            if (payload_json.has("message")) {
+                event_message = payload_json["message"].s();
+            }
+        }
+
+        EventLogInsertParams log_params;
+        log_params.source = config.source;
+        log_params.event_type = "thermal_hotspot";
+        log_params.severity = config.severity;
+        log_params.title = event_title;
+        log_params.message = event_message;
+        log_params.frame_id = static_cast<int>(header.frameId);
+        log_params.signal_value = observed_signal_value;
+        log_params.threshold_value = active_threshold;
+        log_params.hot_area_pixels = hot_area_pixels;
+        log_params.candidate_area = best_component.valid ? std::optional<int>(best_component.area) : std::nullopt;
+        log_params.center_x = best_component.valid ? std::optional<int>(best_component.centerX) : std::nullopt;
+        log_params.center_y = best_component.valid ? std::optional<int>(best_component.centerY) : std::nullopt;
+        log_params.action_requested = config.actuation_enabled;
+        if (config.actuation_enabled) {
+            // 서버 자동 제어 사용 여부도 이벤트 메타데이터에 함께 남긴다.
+            log_params.action_type = std::string("server_auto_control");
+            log_params.action_result = actuation_ok ? std::optional<std::string>("success")
+                                                    : std::optional<std::string>("failed");
+            log_params.action_message = actuation_ok ? std::optional<std::string>("Thermal auto control executed")
+                                                     : std::optional<std::string>("Thermal auto control failed");
+        }
+        log_params.payload_json = payload;
+
+        if (!insertEventLog(log_params)) {
+            std::cerr << "[THERMAL][EVENT] failed to persist event log for frame=" << header.frameId << std::endl;
+        }
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_thermal.state_mutex);
