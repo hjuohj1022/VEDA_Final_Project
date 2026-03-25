@@ -1,6 +1,7 @@
 #include "internal/auth/BackendAuthSessionService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreEventLogService.h"
 #include "internal/core/Backend_p.h"
 
 void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
@@ -66,6 +67,8 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
         emit backend->thermalStreamingChanged();
     }
 
+    BackendCoreEventLogService::clearCachedEventHistory(backend, state);
+
     state->m_isLoggedIn = false;
     if (state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty()) {
         state->m_twoFactorRequired = false;
@@ -81,6 +84,7 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
     state->m_authToken.clear();
     state->m_sessionTimer->stop();
     state->m_sessionRemainingSeconds = 0;
+    BackendCoreEventLogService::clearCachedEventHistory(backend, state);
 
     emit backend->isLoggedInChanged();
     emit backend->userIdChanged();

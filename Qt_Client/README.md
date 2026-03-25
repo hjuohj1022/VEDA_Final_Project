@@ -84,6 +84,10 @@
     - 지원 키: `source`, `severity`, `title`, `message`, `autoControl`
     - `control.*` 필드는 하위 호환용으로 파싱은 유지하지만, 현재 수동 적용 흐름은 고정 비상 제어 시퀀스를 사용
   - JSON이 아니어도 raw 문자열을 이벤트 메시지로 표시
+- 서버 이벤트 이력 연동
+  - 로그인 성공 후 `GET /events?limit=50`를 호출해 서버에 저장된 최근 이벤트 로그를 불러옴
+  - Qt를 재실행해도 로그인 후 이전 이벤트 목록을 다시 복원할 수 있음
+  - 로그아웃 시 클라이언트에 캐시된 이벤트 목록/현재 이벤트 상태를 초기화
 - 헤더 이벤트 알림 버튼
   - 로그인 상태에서만 노출
   - 읽지 않은 이벤트가 있으면 빨간 점 배지 표시
@@ -94,6 +98,7 @@
     - 좌측: 이벤트 히스토리 목록 또는 선택 로그 상세
     - 우측: 최신 이벤트 카드
   - 이벤트 목록은 수신 시각 기준으로 최근 항목이 위에 표시
+  - 초기 목록은 서버 `/events` 조회 결과로 채워지고, 이후 실시간 MQTT 이벤트가 맨 위에 추가됨
   - 목록 항목 더블클릭 시 같은 영역에서 상세 로그 보기로 전환
   - 최신 이벤트 카드는 `제목`, `수신 시각`, `출처`, `Severity`, `AUTO ON/OFF`, 메시지를 표시
   - 이벤트가 없을 때는 빈 상태 카드로 유지
@@ -113,6 +118,7 @@
   - `src/ui/qml/Main.qml`
   - `src/core/core/BackendCoreEvent.cpp`
   - `src/core/core/BackendCoreEventService.cpp`
+  - `src/core/core/BackendCoreEventLogService.cpp`
   - `src/core/cctv/BackendMotorControl.cpp`
   - `src/core/cctv/BackendMotorControlService.cpp`
   - `src/core/core/BackendCoreMqttService.cpp`
@@ -436,6 +442,8 @@ ffmpeg 배치/버전 관리:
 | `POST` | `/auth/admin/unlock` | 로그인 잠금 상태에서 관리자 해제 키 검증 |
 | `POST` | `/2fa/verify` | 비밀번호 로그인 후 OTP 검증 및 최종 JWT 발급 |
 | `GET` | `/2fa/status` | 현재 로그인 사용자 2FA 상태 조회 |
+| `GET` | `/events` | 로그인 후 서버 이벤트 로그 목록 조회 (`limit` 지원) |
+| `DELETE` | `/events` | 이벤트 로그 전체 삭제 또는 `id` 지정 단건 삭제 |
 | `POST` | `/2fa/setup/init` | OTP 등록용 `manual_key`/`otpauth_url` 발급 |
 | `POST` | `/2fa/setup/confirm` | OTP 등록 완료(첫 OTP 검증) |
 | `POST` | `/2fa/disable` | 현재 OTP로 2FA 비활성화 |
