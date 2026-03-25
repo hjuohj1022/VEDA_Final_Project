@@ -38,6 +38,8 @@ QString Backend::eventAlertSource() const { return BackendCoreStateService::even
 QString Backend::eventAlertSeverity() const { return BackendCoreStateService::eventAlertSeverity(d_ptr.get()); }
 QString Backend::eventAlertTitle() const { return BackendCoreStateService::eventAlertTitle(d_ptr.get()); }
 QString Backend::eventAlertMessage() const { return BackendCoreStateService::eventAlertMessage(d_ptr.get()); }
+QString Backend::eventAlertReceivedAtText() const { return BackendCoreStateService::eventAlertReceivedAtText(d_ptr.get()); }
+QVariantList Backend::eventAlertHistory() const { return BackendCoreStateService::eventAlertHistory(d_ptr.get()); }
 bool Backend::eventAlertAutoControl() const { return BackendCoreStateService::eventAlertAutoControl(d_ptr.get()); }
 bool Backend::eventAlertHasControlOverride() const { return BackendCoreStateService::eventAlertHasControlOverride(d_ptr.get()); }
 int Backend::eventAlertMotor1Angle() const { return BackendCoreStateService::eventAlertMotor1Angle(d_ptr.get()); }

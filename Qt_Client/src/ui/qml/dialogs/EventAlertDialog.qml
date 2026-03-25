@@ -8,49 +8,17 @@ Window {
     property var hostWindow
     property string statusText: "이벤트 대기 중"
     property bool statusError: false
+    property int selectedHistoryIndex: 0
+    property bool historyDetailOpen: false
     readonly property bool darkChrome: hostWindow ? hostWindow.isDarkMode : true
 
     transientParent: hostWindow
-    width: 500
-    height: 600
+    width: 860
+    height: contentColumn.implicitHeight + 28
     visible: false
     modality: Qt.NonModal
     flags: Qt.Dialog | Qt.FramelessWindowHint
     color: "transparent"
-
-    function sanitizeAngle(raw, fallback) {
-        var text = String(raw || "").replace(/[^0-9]/g, "")
-        if (text.length === 0)
-            return String(fallback)
-        var value = Number(text)
-        if (value < 0)
-            value = 0
-        if (value > 180)
-            value = 180
-        return String(value)
-    }
-
-    function syncPresetFromBackend() {
-        motor1Field.text = String(backend.eventAlertPresetMotor1Angle)
-        motor2Field.text = String(backend.eventAlertPresetMotor2Angle)
-        motor3Field.text = String(backend.eventAlertPresetMotor3Angle)
-        laserCheck.checked = backend.eventAlertPresetLaserEnabled
-    }
-
-    function savePreset(showMessage) {
-        motor1Field.text = sanitizeAngle(motor1Field.text, backend.eventAlertPresetMotor1Angle)
-        motor2Field.text = sanitizeAngle(motor2Field.text, backend.eventAlertPresetMotor2Angle)
-        motor3Field.text = sanitizeAngle(motor3Field.text, backend.eventAlertPresetMotor3Angle)
-        backend.resetSessionTimer()
-        backend.updateEventAlertPreset(Number(motor1Field.text),
-                                       Number(motor2Field.text),
-                                       Number(motor3Field.text),
-                                       laserCheck.checked)
-        if (showMessage) {
-            statusText = "이벤트 preset을 저장했습니다."
-            statusError = false
-        }
-    }
 
     function simplifyStatusMessage(message) {
         var text = String(message || "").replace(/\s+/g, " ").trim()
@@ -62,14 +30,14 @@ Window {
     }
 
     function severityLabel() {
-        var value = String(backend.eventAlertSeverity || "").trim().toLowerCase()
+        var value = selectedString("severity", backend.eventAlertSeverity || "").trim().toLowerCase()
         if (value.length === 0)
             return "INFO"
         return value.toUpperCase()
     }
 
     function severityColor() {
-        var value = String(backend.eventAlertSeverity || "").trim().toLowerCase()
+        var value = selectedString("severity", backend.eventAlertSeverity || "").trim().toLowerCase()
         if (value === "critical")
             return "#ef4444"
         if (value === "warning")
@@ -79,29 +47,42 @@ Window {
         return theme ? theme.accent : "#f97316"
     }
 
-    function activeControlSummary() {
-        if (!backend.eventAlertActive)
-            return "현재 수신된 이벤트가 없습니다."
-
-        if (backend.eventAlertHasControlOverride) {
-            return "Payload 제어값: M1 " + backend.eventAlertMotor1Angle
-                + " / M2 " + backend.eventAlertMotor2Angle
-                + " / M3 " + backend.eventAlertMotor3Angle
-                + " / Laser " + (backend.eventAlertLaserEnabled ? "ON" : "OFF")
-        }
-
-        return "Payload 제어값 없음. 저장 preset 사용"
+    function eventHistory() {
+        return backend.eventAlertHistory || []
     }
 
-    function presetSummary() {
-        return "저장 preset: M1 " + backend.eventAlertPresetMotor1Angle
-            + " / M2 " + backend.eventAlertPresetMotor2Angle
-            + " / M3 " + backend.eventAlertPresetMotor3Angle
-            + " / Laser " + (backend.eventAlertPresetLaserEnabled ? "ON" : "OFF")
+    function selectedEvent() {
+        var history = eventHistory()
+        if (history.length === 0)
+            return null
+        var index = Math.max(0, Math.min(selectedHistoryIndex, history.length - 1))
+        return history[index]
+    }
+
+    function selectedString(key, fallback) {
+        var item = selectedEvent()
+        if (!item || item[key] === undefined || item[key] === null)
+            return String(fallback || "")
+        return String(item[key])
+    }
+
+    function selectedBool(key, fallback) {
+        var item = selectedEvent()
+        if (!item || item[key] === undefined || item[key] === null)
+            return !!fallback
+        return !!item[key]
+    }
+
+    function activeControlSummary() {
+        if (!selectedEvent())
+            return "현재 수신된 이벤트가 없습니다."
+
+        return "현재 이벤트 적용 시 레이저 ON 후 비상 대피 시퀀스를 실행합니다."
     }
 
     function openDialog() {
-        syncPresetFromBackend()
+        selectedHistoryIndex = 0
+        historyDetailOpen = false
         statusText = backend.eventAlertActive
                    ? "현재 이벤트 정보를 확인하세요."
                    : "현재 수신된 이벤트가 없습니다."
@@ -184,6 +165,78 @@ Window {
         }
     }
 
+    Component {
+        id: historyListComponent
+
+        ListView {
+            id: eventHistoryList
+            clip: true
+            spacing: 6
+            // 최신 이벤트를 위에 두고, 더블클릭하면 상세 로그로 전환
+            model: root.eventHistory()
+            currentIndex: Math.max(0, Math.min(root.selectedHistoryIndex, count - 1))
+
+            delegate: Rectangle {
+                required property int index
+                required property var modelData
+                width: eventHistoryList.width
+                height: 34
+                radius: 6
+                color: ListView.isCurrentItem
+                       ? (root.theme ? root.theme.accent : "#f97316")
+                       : (root.darkChrome ? "#101522" : "#ffffff")
+                border.width: 1
+                border.color: ListView.isCurrentItem
+                              ? (root.theme ? root.theme.accent : "#f97316")
+                              : (root.theme ? root.theme.border : "#d1d5db")
+
+                Text {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                    text: String(modelData.receivedAt || "-")
+                    color: ListView.isCurrentItem ? "white" : (root.theme ? root.theme.textPrimary : "#111827")
+                    font.pixelSize: 12
+                    font.bold: ListView.isCurrentItem
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        root.selectedHistoryIndex = index
+                        eventHistoryList.currentIndex = index
+                    }
+                    onDoubleClicked: {
+                        root.selectedHistoryIndex = index
+                        eventHistoryList.currentIndex = index
+                        root.historyDetailOpen = true
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: historyDetailComponent
+
+        ScrollView {
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            Text {
+                width: parent.width
+                text: selectedEvent()
+                      ? selectedString("message", "로그 내용이 없습니다.")
+                      : "이벤트 목록에서 항목을 선택하면 상세 로그가 표시됩니다."
+                color: theme ? theme.textSecondary : "#374151"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         radius: 10
@@ -192,6 +245,7 @@ Window {
         border.width: 1
 
         ColumnLayout {
+            id: contentColumn
             anchors.fill: parent
             anchors.margins: 14
             spacing: 10
@@ -216,334 +270,191 @@ Window {
                 }
             }
 
-            Rectangle {
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 170
-                radius: 8
-                color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
-                border.color: theme ? theme.border : "#d1d5db"
-                border.width: 1
+                spacing: 10
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 340
+                    Layout.preferredHeight: 250
+                    radius: 8
+                    color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
+                    border.color: theme ? theme.border : "#d1d5db"
+                    border.width: 1
 
-                    Text {
-                        text: backend.eventAlertActive
-                              ? (backend.eventAlertTitle.length > 0 ? backend.eventAlertTitle : "이벤트 알림")
-                              : "현재 이벤트 없음"
-                        color: theme ? theme.textPrimary : "#111827"
-                        font.pixelSize: 15
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
                         spacing: 8
 
-                        Rectangle {
-                            Layout.preferredHeight: 24
-                            radius: 12
-                            color: theme ? theme.bgSecondary : "#e5e7eb"
-                            border.color: theme ? theme.border : "#d1d5db"
-                            border.width: 1
-                            Layout.preferredWidth: Math.max(86, sourceText.implicitWidth + 20)
+                        RowLayout {
+                            Layout.fillWidth: true
 
                             Text {
-                                id: sourceText
-                                anchors.centerIn: parent
-                                text: "Source: " + (backend.eventAlertSource.length > 0 ? backend.eventAlertSource : "-")
-                                color: theme ? theme.textSecondary : "#374151"
-                                font.pixelSize: 11
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.preferredHeight: 24
-                            radius: 12
-                            color: root.severityColor()
-                            Layout.preferredWidth: Math.max(70, severityText.implicitWidth + 20)
-
-                            Text {
-                                id: severityText
-                                anchors.centerIn: parent
-                                text: root.severityLabel()
-                                color: "white"
-                                font.pixelSize: 11
+                                text: root.historyDetailOpen ? "선택한 로그" : "이벤트 목록"
+                                color: theme ? theme.textPrimary : "#111827"
+                                font.pixelSize: 14
                                 font.bold: true
                             }
-                        }
 
-                        Rectangle {
-                            Layout.preferredHeight: 24
-                            radius: 12
-                            color: backend.eventAlertAutoControl ? "#16a34a" : "#6b7280"
-                            Layout.preferredWidth: Math.max(84, autoText.implicitWidth + 20)
+                            Item { Layout.fillWidth: true }
 
-                            Text {
-                                id: autoText
-                                anchors.centerIn: parent
-                                text: backend.eventAlertAutoControl ? "AUTO ON" : "AUTO OFF"
-                                color: "white"
-                                font.pixelSize: 11
-                                font.bold: true
+                            ActionButton {
+                                visible: root.historyDetailOpen
+                                text: "목록"
+                                compact: true
+                                Layout.preferredWidth: 72
+                                onClicked: root.historyDetailOpen = false
                             }
                         }
 
-                        Item { Layout.fillWidth: true }
-                    }
+                        Text {
+                            visible: root.historyDetailOpen
+                            text: selectedEvent()
+                                  ? ("수신 시각: " + selectedString("receivedAt", "-")
+                                     + " / 출처: " + selectedString("source", "-"))
+                                  : "선택한 이벤트가 없습니다."
+                            color: theme ? theme.textSecondary : "#6b7280"
+                            font.pixelSize: 11
+                            Layout.fillWidth: true
+                        }
 
-                    Text {
-                        text: backend.eventAlertActive
-                              ? (backend.eventAlertMessage.length > 0 ? backend.eventAlertMessage : "이벤트 설명이 없습니다.")
-                              : "MQTT 이벤트를 받으면 여기에서 제목과 설명을 확인할 수 있습니다."
-                        color: theme ? theme.textSecondary : "#374151"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-
-                    Text {
-                        text: root.activeControlSummary()
-                        color: theme ? theme.textSecondary : "#374151"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
+                        Loader {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            sourceComponent: root.historyDetailOpen ? historyDetailComponent : historyListComponent
+                        }
                     }
                 }
-            }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 182
-                radius: 8
-                color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
-                border.color: theme ? theme.border : "#d1d5db"
-                border.width: 1
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 470
+                    Layout.preferredHeight: 250
+                    radius: 8
+                    color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
+                    border.color: theme ? theme.border : "#d1d5db"
+                    border.width: 1
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 10
-
-                    Text {
-                        text: "자동제어 프리셋"
-                        color: theme ? theme.textPrimary : "#111827"
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 3
-                        columnSpacing: 8
-                        rowSpacing: 6
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-
-                            Text {
-                                text: "Motor 1"
-                                color: theme ? theme.textSecondary : "#374151"
-                                font.pixelSize: 12
-                            }
-
-                            TextField {
-                                id: motor1Field
-                                Layout.fillWidth: true
-                                implicitHeight: 38
-                                text: "90"
-                                color: theme ? theme.textPrimary : "#111827"
-                                font.pixelSize: 13
-                                font.bold: true
-                                leftPadding: 0
-                                rightPadding: 0
-                                topPadding: 0
-                                bottomPadding: 0
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                inputMethodHints: Qt.ImhDigitsOnly
-                                selectByMouse: true
-                                background: Rectangle {
-                                    color: theme ? theme.bgSecondary : "#ffffff"
-                                    border.color: motor1Field.activeFocus
-                                                  ? (theme ? theme.accent : "#f97316")
-                                                  : (theme ? theme.border : "#d1d5db")
-                                    border.width: 1
-                                    radius: 6
-                                }
-                                onTextEdited: {
-                                    var s = root.sanitizeAngle(text, backend.eventAlertPresetMotor1Angle)
-                                    if (s !== text) {
-                                        text = s
-                                        cursorPosition = text.length
-                                    }
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-
-                            Text {
-                                text: "Motor 2"
-                                color: theme ? theme.textSecondary : "#374151"
-                                font.pixelSize: 12
-                            }
-
-                            TextField {
-                                id: motor2Field
-                                Layout.fillWidth: true
-                                implicitHeight: 38
-                                text: "90"
-                                color: theme ? theme.textPrimary : "#111827"
-                                font.pixelSize: 13
-                                font.bold: true
-                                leftPadding: 0
-                                rightPadding: 0
-                                topPadding: 0
-                                bottomPadding: 0
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                inputMethodHints: Qt.ImhDigitsOnly
-                                selectByMouse: true
-                                background: Rectangle {
-                                    color: theme ? theme.bgSecondary : "#ffffff"
-                                    border.color: motor2Field.activeFocus
-                                                  ? (theme ? theme.accent : "#f97316")
-                                                  : (theme ? theme.border : "#d1d5db")
-                                    border.width: 1
-                                    radius: 6
-                                }
-                                onTextEdited: {
-                                    var s = root.sanitizeAngle(text, backend.eventAlertPresetMotor2Angle)
-                                    if (s !== text) {
-                                        text = s
-                                        cursorPosition = text.length
-                                    }
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-
-                            Text {
-                                text: "Motor 3"
-                                color: theme ? theme.textSecondary : "#374151"
-                                font.pixelSize: 12
-                            }
-
-                            TextField {
-                                id: motor3Field
-                                Layout.fillWidth: true
-                                implicitHeight: 38
-                                text: "90"
-                                color: theme ? theme.textPrimary : "#111827"
-                                font.pixelSize: 13
-                                font.bold: true
-                                leftPadding: 0
-                                rightPadding: 0
-                                topPadding: 0
-                                bottomPadding: 0
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                inputMethodHints: Qt.ImhDigitsOnly
-                                selectByMouse: true
-                                background: Rectangle {
-                                    color: theme ? theme.bgSecondary : "#ffffff"
-                                    border.color: motor3Field.activeFocus
-                                                  ? (theme ? theme.accent : "#f97316")
-                                                  : (theme ? theme.border : "#d1d5db")
-                                    border.width: 1
-                                    radius: 6
-                                }
-                                onTextEdited: {
-                                    var s = root.sanitizeAngle(text, backend.eventAlertPresetMotor3Angle)
-                                    if (s !== text) {
-                                        text = s
-                                        cursorPosition = text.length
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
+                    ColumnLayout {
+                        id: eventSummaryColumn
+                        anchors.fill: parent
+                        anchors.margins: 12
                         spacing: 8
 
                         Text {
-                            text: "레이저 포함"
-                            color: theme ? theme.textSecondary : "#374151"
-                            font.pixelSize: 12
+                            text: selectedEvent()
+                                  ? (backend.eventAlertTitle.length > 0 ? backend.eventAlertTitle : "이벤트 알림")
+                                  : "현재 이벤트 없음"
+                            color: theme ? theme.textPrimary : "#111827"
+                            font.pixelSize: 15
                             font.bold: true
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
                         }
 
-                        Item { Layout.fillWidth: true }
+                        Text {
+                            // 최신 이벤트 카드에서 갱신 시점을 바로 확인
+                            visible: backend.eventAlertActive && backend.eventAlertReceivedAtText.length > 0
+                            text: "수신 시각: " + backend.eventAlertReceivedAtText
+                            color: theme ? theme.textSecondary : "#6b7280"
+                            font.pixelSize: 11
+                            Layout.fillWidth: true
+                        }
 
-                        Switch {
-                            id: laserCheck
-                            checked: false
-                            padding: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
-                            indicator: Rectangle {
-                                implicitWidth: 46
-                                implicitHeight: 26
-                                radius: 13
-                                color: laserCheck.checked
-                                       ? (theme ? theme.accent : "#f97316")
-                                       : (theme ? theme.bgSecondary : "#ffffff")
-                                border.color: laserCheck.checked
-                                              ? (theme ? theme.accent : "#f97316")
-                                              : (theme ? theme.border : "#d1d5db")
+                            Rectangle {
+                                Layout.preferredHeight: 24
+                                radius: 12
+                                color: theme ? theme.bgSecondary : "#e5e7eb"
+                                border.color: theme ? theme.border : "#d1d5db"
                                 border.width: 1
+                                Layout.preferredWidth: Math.max(86, sourceText.implicitWidth + 20)
 
-                                Rectangle {
-                                    width: 20
-                                    height: 20
-                                    radius: 10
-                                    y: 3
-                                    x: laserCheck.checked ? 23 : 3
-                                    color: "white"
-
-                                    Behavior on x {
-                                        NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
+                                Text {
+                                    id: sourceText
+                                    anchors.centerIn: parent
+                                    text: "출처: " + (backend.eventAlertSource.length > 0 ? backend.eventAlertSource : "-")
+                                    color: theme ? theme.textSecondary : "#374151"
+                                    font.pixelSize: 11
                                 }
                             }
 
-                            contentItem: Text {
-                                text: laserCheck.checked ? "ON" : "OFF"
+                            Rectangle {
+                                Layout.preferredHeight: 24
+                                radius: 12
+                                color: root.severityColor()
+                                Layout.preferredWidth: Math.max(70, severityText.implicitWidth + 20)
+
+                                Text {
+                                    id: severityText
+                                    anchors.centerIn: parent
+                                    text: root.severityLabel()
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.preferredHeight: 24
+                                radius: 12
+                                color: backend.eventAlertAutoControl ? "#16a34a" : "#6b7280"
+                                Layout.preferredWidth: Math.max(84, autoText.implicitWidth + 20)
+
+                                Text {
+                                    id: autoText
+                                    anchors.centerIn: parent
+                                    text: backend.eventAlertAutoControl ? "자동 제어 ON" : "자동 제어 OFF"
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        Text {
+                            id: eventMessageText
+                            visible: false
+                            text: backend.eventAlertActive
+                                  ? (backend.eventAlertMessage.length > 0 ? backend.eventAlertMessage : "이벤트 설명이 없습니다.")
+                                  : "MQTT 이벤트를 받으면 여기에서 제목과 설명을 확인할 수 있습니다."
+                            color: theme ? theme.textSecondary : "#374151"
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: root.activeControlSummary()
+                            color: theme ? theme.textSecondary : "#374151"
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                            Text {
+                                width: parent.width
+                                text: backend.eventAlertActive
+                                      ? (backend.eventAlertMessage.length > 0 ? backend.eventAlertMessage : "이벤트 설명이 없습니다.")
+                                      : "MQTT 이벤트를 받으면 여기에서 제목과 설명을 확인할 수 있습니다."
                                 color: theme ? theme.textSecondary : "#374151"
                                 font.pixelSize: 12
-                                font.bold: true
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: laserCheck.indicator.width + 10
-                            }
-
-                            background: Rectangle {
-                                color: "transparent"
+                                wrapMode: Text.WordWrap
                             }
                         }
-                    }
-
-                    Text {
-                        text: root.presetSummary()
-                        color: theme ? theme.textSecondary : "#374151"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
                     }
                 }
             }
@@ -560,24 +471,23 @@ Window {
                     Layout.minimumWidth: 0
                     enabled: backend.eventAlertActive
                     onClicked: {
-                        root.savePreset(false)
                         backend.resetSessionTimer()
                         backend.applyEventAlertControl()
                     }
                 }
 
                 ActionButton {
-                    text: "프리셋 저장"
+                    text: "비상 동작 정지"
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
-                    onClicked: root.savePreset(true)
+                    onClicked: {
+                        backend.resetSessionTimer()
+                        backend.motorStopAll()
+                        statusText = "비상 동작 정지 요청을 전송했습니다."
+                        statusError = false
+                    }
                 }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
 
                 ActionButton {
                     text: "이벤트 초기화"
@@ -653,6 +563,11 @@ Window {
                                : "새 이벤트를 수신했습니다.")
                             : "현재 수신된 이벤트가 없습니다."
             root.statusError = false
+        }
+
+        function onEventAlertHistoryChanged() {
+            root.selectedHistoryIndex = 0
+            root.historyDetailOpen = false
         }
     }
 }

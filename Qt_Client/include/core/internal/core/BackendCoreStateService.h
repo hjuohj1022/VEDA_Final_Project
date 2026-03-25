@@ -1,6 +1,8 @@
 #ifndef BACKEND_CORE_STATE_SERVICE_H
 #define BACKEND_CORE_STATE_SERVICE_H
 
+#include <QVariant>
+
 class Backend;
 struct BackendPrivate;
 class QString;
@@ -44,6 +46,8 @@ public:
     static QString eventAlertSeverity(const BackendPrivate *state);
     static QString eventAlertTitle(const BackendPrivate *state);
     static QString eventAlertMessage(const BackendPrivate *state);
+    static QString eventAlertReceivedAtText(const BackendPrivate *state);
+    static QVariantList eventAlertHistory(const BackendPrivate *state);
     static bool eventAlertAutoControl(const BackendPrivate *state);
     static bool eventAlertHasControlOverride(const BackendPrivate *state);
     static int eventAlertMotor1Angle(const BackendPrivate *state);
