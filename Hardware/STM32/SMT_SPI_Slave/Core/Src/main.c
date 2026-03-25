@@ -20,8 +20,8 @@ UART_HandleTypeDef huart2;
 I2C_HandleTypeDef  hi2c1;
 
 /* USER CODE BEGIN PV */
-#define UART_RX_BUF_SIZE  64U
-#define UART_CMD_QUEUE_LEN 4U
+#define UART_RX_BUF_SIZE  256U
+#define UART_CMD_QUEUE_LEN 16U
 
 static uint8_t uart_rx_byte;
 static char uart_cmd_buf[UART_RX_BUF_SIZE];
@@ -48,6 +48,7 @@ static char *trimCommand(char *text);
 static void laserInit(void);
 static void laserSet(bool enabled);
 static bool uartPopCommand(char *out_buf, uint8_t *out_len);
+static void uartQueueSplitCommands(const char *line);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -158,7 +159,26 @@ static void laserInit(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-    __HAL_RCC_GPIOA_CLK_ENABLE();
+    if (LASER_GPIO_Port == GPIOA)
+    {
+        __HAL_RCC_GPIOA_CLK_ENABLE();
+    }
+    else if (LASER_GPIO_Port == GPIOB)
+    {
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+    }
+    else if (LASER_GPIO_Port == GPIOC)
+    {
+        __HAL_RCC_GPIOC_CLK_ENABLE();
+    }
+    else if (LASER_GPIO_Port == GPIOD)
+    {
+        __HAL_RCC_GPIOD_CLK_ENABLE();
+    }
+    else if (LASER_GPIO_Port == GPIOH)
+    {
+        __HAL_RCC_GPIOH_CLK_ENABLE();
+    }
 
     HAL_GPIO_WritePin(LASER_GPIO_Port, LASER_Pin, LASER_INACTIVE_STATE);
 
@@ -259,6 +279,7 @@ static void processUartCommand(void)
         uartSendText("CMD motor<N> set <deg>  (queued)\r\n");
         uartSendText("CMD motor<N> speed <1-10>\r\n");
         uartSendText("CMD setall <deg1> <deg2> <deg3>  (queued)\r\n");
+        uartSendText("CMD batch: cmd1; cmd2; cmd3\r\n");
         uartSendText("CMD read | ping | stopall | LED ON | LED OFF\r\n");
     }
     else
@@ -318,6 +339,78 @@ static bool uartPopCommand(char *out_buf, uint8_t *out_len)
     return ret;
 }
 
+static void uartQueueSplitCommands(const char *line)
+{
+    char segment_buf[UART_RX_BUF_SIZE];
+    uint8_t segment_len = 0U;
+    bool segment_overflow = false;
+
+    if (line == NULL)
+    {
+        return;
+    }
+
+    for (size_t i = 0U; ; i++)
+    {
+        const char ch = line[i];
+
+        if ((ch != '\0') && (ch != ';'))
+        {
+            if (!segment_overflow)
+            {
+                if (segment_len < (UART_RX_BUF_SIZE - 1U))
+                {
+                    segment_buf[segment_len] = ch;
+                    segment_len++;
+                }
+                else
+                {
+                    segment_overflow = true;
+                    uart_cmd_overflow = true;
+                }
+            }
+        }
+        else
+        {
+            if (!segment_overflow)
+            {
+                char *cmd;
+
+                segment_buf[segment_len] = '\0';
+                cmd = trimCommand(segment_buf);
+
+                if (*cmd != '\0')
+                {
+                    if (uart_queue_count < UART_CMD_QUEUE_LEN)
+                    {
+                        const uint8_t cmd_len = (uint8_t)strnlen(cmd, UART_RX_BUF_SIZE - 1U);
+
+                        (void)memcpy(uart_cmd_queue[uart_queue_tail], cmd, cmd_len + 1U);
+                        uart_queue_tail++;
+                        if (uart_queue_tail >= UART_CMD_QUEUE_LEN)
+                        {
+                            uart_queue_tail = 0U;
+                        }
+                        uart_queue_count++;
+                    }
+                    else
+                    {
+                        uart_cmd_overflow = true;
+                    }
+                }
+            }
+
+            segment_len = 0U;
+            segment_overflow = false;
+
+            if (ch == '\0')
+            {
+                break;
+            }
+        }
+    }
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
@@ -327,20 +420,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             if (uart_cmd_len > 0U)
             {
                 uart_cmd_buf[uart_cmd_len] = '\0';
-                if (uart_queue_count < UART_CMD_QUEUE_LEN)
-                {
-                    (void)memcpy(uart_cmd_queue[uart_queue_tail], uart_cmd_buf, uart_cmd_len + 1U);
-                    uart_queue_tail++;
-                    if (uart_queue_tail >= UART_CMD_QUEUE_LEN)
-                    {
-                        uart_queue_tail = 0U;
-                    }
-                    uart_queue_count++;
-                }
-                else
-                {
-                    uart_cmd_overflow = true;
-                }
+                uartQueueSplitCommands(uart_cmd_buf);
                 uart_cmd_len = 0U;
                 (void)memset(uart_cmd_buf, 0, sizeof(uart_cmd_buf));
             }

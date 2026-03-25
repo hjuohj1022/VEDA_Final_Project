@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -181,6 +182,54 @@ static bool mqttQueueStmCommand(const char *command, size_t command_len)
     return true;
 }
 
+static bool mqttQueueStmCommandList(const char *commands, size_t commands_len)
+{
+    char cmd_buf[CMD_MAX_LEN];
+    size_t cmd_len = 0U;
+    bool queued_any = false;
+    bool all_ok = true;
+
+    if ((commands == NULL) || (commands_len == 0U)) {
+        return false;
+    }
+
+    for (size_t i = 0U; i <= commands_len; i++) {
+        const bool is_end = (i == commands_len);
+        const char ch = is_end ? '\0' : commands[i];
+
+        if (!is_end && (ch != ';') && (ch != '\r') && (ch != '\n')) {
+            if ((cmd_len == 0U) && (isspace((unsigned char)ch) != 0)) {
+                continue;
+            }
+
+            if (cmd_len < (sizeof(cmd_buf) - 1U)) {
+                cmd_buf[cmd_len] = ch;
+                cmd_len++;
+            } else {
+                all_ok = false;
+            }
+            continue;
+        }
+
+        while ((cmd_len > 0U) && (isspace((unsigned char)cmd_buf[cmd_len - 1U]) != 0)) {
+            cmd_len--;
+        }
+
+        if (cmd_len > 0U) {
+            cmd_buf[cmd_len] = '\0';
+            if (!mqttQueueStmCommand(cmd_buf, cmd_len)) {
+                all_ok = false;
+            } else {
+                queued_any = true;
+            }
+        }
+
+        cmd_len = 0U;
+    }
+
+    return queued_any && all_ok;
+}
+
 static const char *mqttResolveLaserCommand(const esp_mqtt_event_handle_t event)
 {
     if (mqttPayloadEquals(event, "laser on") ||
@@ -309,7 +358,7 @@ static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t 
             break;
         }
 
-        (void)mqttQueueStmCommand(event->data, (size_t)event->data_len);
+        (void)mqttQueueStmCommandList(event->data, (size_t)event->data_len);
         break;
     }
 
