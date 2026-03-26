@@ -4,6 +4,10 @@ metadata:
   name: mariadb
 spec:
   replicas: 1
+  # MariaDB is a single-replica stateful workload backed by one RWO PVC.
+  # Recreate avoids overlapping old/new Pods during rollout restarts.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: mariadb
