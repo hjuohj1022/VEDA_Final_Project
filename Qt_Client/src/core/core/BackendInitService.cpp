@@ -1,6 +1,7 @@
 ﻿#include "internal/core/BackendInitService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreEventLogService.h"
 #include "internal/core/Backend_p.h"
 
 #include <QAbstractSocket>
@@ -33,6 +34,10 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
                                  << "realm=" << authenticator->realm();
                          Q_UNUSED(authenticator);
                      });
+
+    QObject::connect(backend, &Backend::loginSuccess, backend, [backend, state]() {
+        BackendCoreEventLogService::loadEventHistory(backend, state);
+    });
 
     backend->setupMqtt();
 
@@ -206,5 +211,9 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
         socket->connectToHost(ip, port);
     });
     simTimer->start();
+
+    QObject::connect(backend, &Backend::loginSuccess, backend, [backend, state]() {
+        BackendCoreEventLogService::loadEventHistory(backend, state);
+    });
 }
 

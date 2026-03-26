@@ -76,6 +76,7 @@ struct BackendPrivate
     // Request runtime state
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
+    QPointer<QNetworkReply> m_eventLogHistoryReply;
     QPointer<QNetworkReply> m_adminUnlockReply;
     bool m_adminUnlockInProgress = false;
     QPointer<QNetworkReply> m_twoFactorVerifyReply;
