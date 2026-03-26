@@ -319,6 +319,67 @@ bool listEventLogs(int limit, std::vector<EventLogRecord>* out_records)
     return true;
 }
 
+bool updateEventLogAction(unsigned long long id,
+                          const EventLogActionUpdateParams& params,
+                          bool* updated)
+{
+    static constexpr char kSql[] =
+        "UPDATE event_logs "
+        "SET action_requested = ?, action_type = ?, action_result = ?, action_message = ? "
+        "WHERE id = ?";
+
+    auto connection = openDatabaseConnection();
+    if (!connection) {
+        return false;
+    }
+
+    auto statement = prepareStatement(connection.get(), kSql);
+    if (!statement) {
+        return false;
+    }
+
+    MYSQL_BIND bind[5];
+    std::memset(bind, 0, sizeof(bind));
+
+    signed char action_requested_value = params.action_requested ? 1 : 0;
+    unsigned long action_type_length = 0;
+    unsigned long action_result_length = 0;
+    unsigned long action_message_length = 0;
+    MysqlBindFlag action_type_null = 0;
+    MysqlBindFlag action_result_null = 0;
+    MysqlBindFlag action_message_null = 0;
+
+    std::memset(&bind[0], 0, sizeof(bind[0]));
+    bind[0].buffer_type = MYSQL_TYPE_TINY;
+    bind[0].buffer = &action_requested_value;
+
+    bindOptionalString(bind[1], params.action_type, action_type_length, action_type_null);
+    bindOptionalString(bind[2], params.action_result, action_result_length, action_result_null);
+    bindOptionalString(bind[3], params.action_message, action_message_length, action_message_null);
+
+    std::memset(&bind[4], 0, sizeof(bind[4]));
+    bind[4].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind[4].buffer = &id;
+    bind[4].is_unsigned = true;
+
+    if (mysql_stmt_bind_param(statement.get(), bind) != 0) {
+        std::cerr << "[EVENT_LOG][DB] Failed to bind action update params: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (mysql_stmt_execute(statement.get()) != 0) {
+        std::cerr << "[EVENT_LOG][DB] Failed to update event action: "
+                  << mysql_stmt_error(statement.get()) << std::endl;
+        return false;
+    }
+
+    if (updated) {
+        *updated = mysql_stmt_affected_rows(statement.get()) > 0;
+    }
+    return true;
+}
+
 bool deleteEventLogById(unsigned long long id, bool* deleted)
 {
     static constexpr char kSql[] = "DELETE FROM event_logs WHERE id = ?";

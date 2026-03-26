@@ -47,8 +47,19 @@ struct EventLogRecord {
     std::optional<std::string> payload_json;
 };
 
+struct EventLogActionUpdateParams {
+    bool action_requested = true;
+    std::optional<std::string> action_type;
+    std::optional<std::string> action_result;
+    std::optional<std::string> action_message;
+};
+
 bool insertEventLog(const EventLogInsertParams& params, unsigned long long* inserted_id = nullptr);
 bool listEventLogs(int limit, std::vector<EventLogRecord>* out_records);
+// 저장된 이벤트 row의 비상 동작 상태를 최신 결과로 갱신한다.
+bool updateEventLogAction(unsigned long long id,
+                          const EventLogActionUpdateParams& params,
+                          bool* updated = nullptr);
 bool deleteEventLogById(unsigned long long id, bool* deleted = nullptr);
 bool deleteAllEventLogs();
 
