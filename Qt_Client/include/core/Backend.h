@@ -31,6 +31,7 @@ class Backend : public QObject
     Q_PROPERTY(int loginFailedAttempts READ loginFailedAttempts NOTIFY loginLockChanged)
     Q_PROPERTY(int loginMaxAttempts READ loginMaxAttempts CONSTANT)
     Q_PROPERTY(QString serverUrl READ serverUrl CONSTANT)
+    Q_PROPERTY(QString certDirectoryPath READ certDirectoryPath NOTIFY certDirectoryPathChanged)
     Q_PROPERTY(QString rtspIp READ rtspIp NOTIFY rtspIpChanged)
     Q_PROPERTY(QString rtspPort READ rtspPort NOTIFY rtspPortChanged)
 
@@ -93,6 +94,7 @@ public:
     int loginFailedAttempts() const;
     int loginMaxAttempts() const;
     QString serverUrl() const;
+    QString certDirectoryPath() const;
 
     QString rtspIp() const;
     void setRtspIp(const QString &ip);
@@ -170,6 +172,8 @@ public:
     Q_INVOKABLE void logout();
     Q_INVOKABLE void resetSessionTimer();
     Q_INVOKABLE bool adminUnlock(QString adminCode);
+    Q_INVOKABLE bool updateCertDirectoryPath(QString path);              // 인증서 폴더 경로 적용
+    Q_INVOKABLE bool resetCertDirectoryPath();                           // 인증서 폴더를 기본값으로 복귀
 
     // RTSP config
     Q_INVOKABLE bool updateRtspIp(QString ip);
@@ -263,6 +267,7 @@ signals:
     void userIdChanged();
     void sessionRemainingSecondsChanged();
     void loginLockChanged();
+    void certDirectoryPathChanged();
     void rtspIpChanged();
     void rtspPortChanged();
     void activeCamerasChanged();
