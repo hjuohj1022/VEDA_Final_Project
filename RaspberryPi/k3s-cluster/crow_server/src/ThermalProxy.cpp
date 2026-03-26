@@ -1878,9 +1878,13 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                                        observed_signal_value,
                                        updated_clear_threshold);
         consecutive_hits = g_thermal.event_stats.consecutive_hits;
+        // baseline을 쓰는 모드에서는 준비 완료 후에만 이벤트를 발행한다.
+        const bool baseline_ready_for_dispatch =
+            !config.baseline_enabled || g_thermal.event_stats.baseline_ready;
 
         if (!g_thermal.event_stats.hotspot_active
             && hit
+            && baseline_ready_for_dispatch
             && consecutive_hits >= config.consecutive_frames_required
             && g_thermal.event_stats.last_event_attempt_frame_id != header.frameId
             && (config.cooldown_ms <= 0
