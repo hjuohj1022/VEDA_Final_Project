@@ -257,6 +257,7 @@ struct ThermalEventStats {
     int last_candidate_center_y = -1;
     int last_candidate_persist_frames = 0;
     int last_candidate_miss_frames = 0;
+    int active_clear_miss_frames = 0;
     uint16_t last_event_attempt_frame_id = 0;
     long long last_event_attempt_at_ms = 0;
     uint16_t last_event_frame_id = 0;
@@ -1339,6 +1340,41 @@ void updateThermalEventTrackerState(ThermalEventTrackerState& tracker,
     }
 }
 
+// tracker가 비워져도 active 해제 누적은 별도로 유지한다.
+void updateThermalHotspotClearState(ThermalEventStats& stats,
+                                    const ThermalEventConfig& config,
+                                    bool analysisValid,
+                                    bool hit,
+                                    bool hasBestComponent,
+                                    int candidateMissFrames,
+                                    int observedSignalValue,
+                                    int clearThreshold)
+{
+    if (!stats.hotspot_active) {
+        stats.active_clear_miss_frames = 0;
+        return;
+    }
+
+    const bool clearCandidateFrame =
+        !hit
+        && observedSignalValue < clearThreshold
+        && (!analysisValid || !hasBestComponent || candidateMissFrames > 0);
+    if (!clearCandidateFrame) {
+        stats.active_clear_miss_frames = 0;
+        return;
+    }
+
+    const int requiredClearFrames = std::max(1, config.clear_frames);
+    // tracker miss와 별도로 active 해제 프레임을 누적한다.
+    stats.active_clear_miss_frames = std::max(
+        stats.active_clear_miss_frames + 1,
+        std::max(candidateMissFrames, 0));
+    if (stats.active_clear_miss_frames >= requiredClearFrames) {
+        stats.hotspot_active = false;
+        stats.active_clear_miss_frames = 0;
+    }
+}
+
 int countThermalPixelsAtOrAboveThreshold(const ThermalCompletedFrame& frame,
                                          const ThermalEventFrameAnalysis& analysis,
                                          int threshold)
@@ -1637,6 +1673,7 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             g_thermal.event_stats.last_candidate_center_y = -1;
             g_thermal.event_stats.last_candidate_persist_frames = 0;
             g_thermal.event_stats.last_candidate_miss_frames = 0;
+            g_thermal.event_stats.active_clear_miss_frames = 0;
             g_thermal.event_stats.consecutive_hits = 0;
             g_thermal.event_stats.hotspot_active = false;
             pruneThermalBaselineSamplesLocked(now_ms, config.baseline_window_ms);
@@ -1832,12 +1869,14 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
             }
         }
 
-        if (!hit) {
-            if ((!analysis.valid || candidate_miss_frames >= config.clear_frames)
-                && observed_signal_value < updated_clear_threshold) {
-                g_thermal.event_stats.hotspot_active = false;
-            }
-        }
+        updateThermalHotspotClearState(g_thermal.event_stats,
+                                       config,
+                                       analysis.valid,
+                                       hit,
+                                       best_component.valid,
+                                       candidate_miss_frames,
+                                       observed_signal_value,
+                                       updated_clear_threshold);
         consecutive_hits = g_thermal.event_stats.consecutive_hits;
 
         if (!g_thermal.event_stats.hotspot_active
@@ -1955,6 +1994,7 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
         }
         if (mark_hotspot_active) {
             g_thermal.event_stats.hotspot_active = true;
+            g_thermal.event_stats.active_clear_miss_frames = 0;
         }
     }
 
@@ -2253,6 +2293,7 @@ void clearThermalFrameTrackers()
     g_thermal.event_stats.last_candidate_center_y = -1;
     g_thermal.event_stats.last_candidate_persist_frames = 0;
     g_thermal.event_stats.last_candidate_miss_frames = 0;
+    g_thermal.event_stats.active_clear_miss_frames = 0;
     g_thermal.event_stats.event_attempts = 0;
     g_thermal.event_stats.events_published = 0;
     g_thermal.event_stats.actuation_requests = 0;
@@ -2394,6 +2435,7 @@ crow::json::wvalue makeThermalStatusJson()
     response["event"]["last_candidate_center_y"] = g_thermal.event_stats.last_candidate_center_y;
     response["event"]["last_candidate_persist_frames"] = g_thermal.event_stats.last_candidate_persist_frames;
     response["event"]["last_candidate_miss_frames"] = g_thermal.event_stats.last_candidate_miss_frames;
+    response["event"]["active_clear_miss_frames"] = g_thermal.event_stats.active_clear_miss_frames;
     response["event"]["last_event_attempt_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_attempt_frame_id);
     response["event"]["last_event_attempt_at_ms"] = g_thermal.event_stats.last_event_attempt_at_ms;
     response["event"]["last_event_frame_id"] = static_cast<int>(g_thermal.event_stats.last_event_frame_id);
