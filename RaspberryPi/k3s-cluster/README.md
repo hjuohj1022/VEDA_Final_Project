@@ -67,7 +67,7 @@ Internal Backends
 ###### Features
 
 - **기능 1:** 외부 트래픽을 Nginx Gateway 한 곳으로 집중시켜 TLS/mTLS와 라우팅 정책을 일관되게 적용합니다.
-- **기능 2:** Crow Server가 계정, CCTV, 열화상, MQTT 제어를 단일 API 계층으로 통합합니다.
+- **기능 2:** Crow Server가 계정/2FA/이메일 복구, CCTV, 열화상, 녹화 파일, 이벤트 로그, MQTT 제어를 단일 API 계층으로 통합합니다.
 - **기능 3:** MediaMTX가 RTSP ingest와 녹화 저장을 담당하고, Nginx가 이를 RTSPS/HLS로 외부에 노출합니다.
 - **기능 4:** Thermal DTLS Gateway가 DTLS PSK 기반 센서 통신을 복호화하고, 필요 시 plain UDP thermal chunk도 Crow Server로 전달합니다.
 - **기능 5:** Mosquitto가 모터, 레이저, ESP32 상태 제어를 위한 MQTT 허브 역할을 합니다.
@@ -88,6 +88,7 @@ Internal Backends
   - `mariadb/mariadb-deploy.yaml`
   - `mosquitto/mqtt.yaml`
   - `mediamtx/mediamtx.yaml`
+  - `crow_server/crow-db-migration-job.yaml`
   - `crow_server/crow-server.yaml`
   - `thermal_dtls_gateway/thermal-dtls-gateway.yaml`
   - `thermal_dtls_gateway/thermal-dtls-networkpolicy.yaml`
@@ -98,6 +99,8 @@ Internal Backends
   - `nginx-certs`
   - `mtls-ca`
   - `crow-sunapi-secret`
+  - `crow-admin-secret`
+  - `crow-mail-secret`
   - `thermal-dtls-secret`
   - `crow-certs`
 - **호스트 경로 주의사항**
@@ -115,6 +118,14 @@ chmod +x generate_certs.sh
 
 이후 서비스별 Secret과 ConfigMap 값을 실제 운영 환경에 맞게 준비한 뒤 Kubernetes manifest를 적용합니다.
 
+Crow Server의 2FA 컬럼 보강 Job을 사용할 경우에는 다음 ConfigMap을 먼저 준비합니다.
+
+```bash
+kubectl create configmap crow-db-migration-sql \
+  --from-file=2fa_migration.sql=RaspberryPi/k3s-cluster/crow_server/2fa_migration.sql \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
 ##### 4. 설정 가이드 (Configuration)
 
 ###### 설정 파일명 1: `metallb/metallb-config.yaml`
@@ -128,6 +139,7 @@ chmod +x generate_certs.sh
 - `mosquitto/mqtt.yaml`: ConfigMap, Deployment, Service
 - `mediamtx/mediamtx.yaml`: ConfigMap, Deployment, Service
 - `crow_server/crow-server.yaml`: Crow Server Deployment, Service
+- `crow_server/crow-db-migration-job.yaml`: Crow Server DB migration Job
 - `thermal_dtls_gateway/thermal-dtls-gateway.yaml`: Thermal Gateway Deployment, Service
 - `nginx/nginx-deployment.yaml`: Nginx Deployment, `LoadBalancer` Service
 
@@ -180,6 +192,7 @@ kubectl apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
 
 kubectl apply -f RaspberryPi/k3s-cluster/mosquitto/mqtt.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/mediamtx/mediamtx.yaml
+kubectl apply -f RaspberryPi/k3s-cluster/crow_server/crow-db-migration-job.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-gateway.yaml
 kubectl apply -f RaspberryPi/k3s-cluster/thermal_dtls_gateway/thermal-dtls-networkpolicy.yaml
@@ -191,7 +204,7 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 - `kubectl get pods -o wide`
 - `kubectl get svc`
 - `curl --cert client-qt.crt --key client-qt.key --cacert rootCA.crt https://<LB_IP>/health`
-- `GET /laser/status`, `GET /thermal/status` 확인
+- `GET /events`, `GET /recordings`, `GET /system/storage`, `GET /laser/status`, `GET /thermal/status` 확인
 - `openssl s_client -connect <LB_IP>:8883 -cert client-qt.crt -key client-qt.key -CAfile rootCA.crt`
 
 ##### 7. 통신 프로토콜 및 제어 로직 (Control Lifecycle & Protocol)
@@ -211,6 +224,9 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 | 배포 | `kubectl apply -f .../crow-server.yaml` | API 서버 배포 |
 | 상태 확인 | `kubectl get svc nginx-service` | 외부 IP 할당 확인 |
 | API | `GET /health` | Crow Server 헬스체크 |
+| API | `GET /events` | 서버 이벤트 로그 조회 |
+| API | `GET /recordings` | 녹화 파일 목록 조회 |
+| API | `GET /system/storage` | 녹화 스토리지 사용량 조회 |
 | API | `GET /laser/status` | MQTT 레이저 브리지 상태 |
 | API | `GET /thermal/status` | 열화상 UDP 수신 상태 |
 
@@ -231,17 +247,20 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 | --- | --- | --- |
 | `nginx-service`에 `EXTERNAL-IP`가 없음 | MetalLB 미설치 또는 IP 풀 문제 | `metallb-system` 상태와 `metallb-config.yaml` 확인 |
 | `https://<LB_IP>/health` 실패 | Nginx Secret 또는 Crow upstream 문제 | `nginx-certs`, `mtls-ca`, `crow-server` Pod 상태 확인 |
+| 이메일 인증/비밀번호 재설정이 실패함 | `crow-mail-secret` 또는 Apps Script 연동 문제 | `crow-mail-secret`, Crow 환경변수, 메일 웹앱 상태 확인 |
 | `GET /laser/status`에서 브로커 미연결 | Mosquitto 또는 Crow MQTT 설정 문제 | `mqtt-service`, `MQTT_HOST`, `MQTT_PORT` 확인 |
 | HLS/RTSPS 스트림 실패 | MediaMTX ingest 또는 Nginx 프록시 문제 | `CAMERA_*` 값, MediaMTX 로그, Nginx stream 설정 확인 |
 | 열화상 수신 없음 | DTLS Secret, Nginx UDP, Crow UDP 바인드 문제 | `thermal-dtls-secret`, `thermal-dtls-gateway`, Crow thermal 상태 확인 |
+| `/events` 또는 계정 복구 API가 DB 오류를 반환함 | MariaDB에 필요한 Crow 부가 스키마가 없음 | `signup_email_verifications`, `password_reset_tokens`, `event_logs` 테이블 준비 여부 확인 |
 
 ###### Operational Checklist
 
 - MetalLB가 설치되어 있고 IP 풀 범위가 네트워크와 충돌하지 않는가
-- `mariadb-secret`, `mqtt-certs`, `nginx-certs`, `mtls-ca`, `thermal-dtls-secret`, `crow-certs`가 준비되었는가
+- `mariadb-secret`, `mqtt-certs`, `nginx-certs`, `mtls-ca`, `crow-sunapi-secret`, `crow-admin-secret`, `crow-mail-secret`, `thermal-dtls-secret`, `crow-certs`가 준비되었는가
 - `pi-master`, `pi-worker1`, `pi-worker2` 노드명이 manifest의 `nodeSelector`와 일치하는가
 - `/home/pi/cctv-recordings` 경로가 쓰기 가능한가
-- `GET /health`, `GET /docs`, `GET /laser/status`, `GET /thermal/status`가 정상 응답하는가
+- MariaDB에 `users`, `signup_email_verifications`, `password_reset_tokens`, `event_logs` 스키마가 준비되었는가
+- `GET /health`, `GET /docs`, `GET /events`, `GET /recordings`, `GET /laser/status`, `GET /thermal/status`가 정상 응답하는가
 
 **작성자:** VEDA Team  
-**마지막 업데이트:** 2026-03-19
+**마지막 업데이트:** 2026-03-26
