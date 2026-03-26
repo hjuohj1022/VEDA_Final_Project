@@ -49,9 +49,11 @@ External Client / Device
 ###### Features
 
 - **기능 1:** `ssl_verify_client on`으로 HTTPS, RTSPS, MQTTS 접속에서 클라이언트 인증서를 요구합니다.
-- **기능 2:** `/`, `/sunapi/`, `/cctv/stream`, `/thermal/stream`, `/docs`, `/swagger.yaml`를 Crow Server로 프록시합니다.
-- **기능 3:** `/hls/` 경로를 MediaMTX HLS upstream으로 연결합니다.
-- **기능 4:** `8555`, `8883`, `5005/UDP`를 stream 계층에서 내부 서비스로 중계합니다.
+- **기능 2:** `/auth/*`, `/2fa/*`, `/events`, `/recordings`, `/system/storage`, `/sunapi/*`, `/docs`, `/swagger.yaml`를 포함한 일반 Crow REST 경로를 프록시합니다.
+- **기능 3:** `/cctv/` 경로는 긴 처리 시간을 고려한 별도 timeout 정책으로 Crow Server에 프록시합니다.
+- **기능 4:** `/cctv/stream`, `/thermal/stream`, `/sunapi/StreamingServer` WebSocket을 Crow Server로 터널링합니다.
+- **기능 5:** `/hls/` 경로를 MediaMTX HLS upstream으로 연결합니다.
+- **기능 6:** `8555`, `8883`, `5005/UDP`를 stream 계층에서 내부 서비스로 중계합니다.
 
 ##### 3. 개발 환경 구축 및 의존성 (Requirements & Dependencies)
 
@@ -179,7 +181,13 @@ openssl s_client -connect <LB_IP>:8555 \
 | --- | --- | --- |
 | HTTP | `https://<LB_IP>/health` | Crow Server 헬스체크 |
 | HTTP | `https://<LB_IP>/docs` | Swagger UI |
+| HTTP | `https://<LB_IP>/events` | Crow 이벤트 로그 조회 |
+| HTTP | `https://<LB_IP>/recordings` | 녹화 파일 목록 조회 |
+| HTTP | `https://<LB_IP>/system/storage` | 녹화 저장소 사용량 조회 |
 | HTTP | `https://<LB_IP>/hls/` | MediaMTX HLS 접근 |
+| WS | `wss://<LB_IP>/cctv/stream` | CCTV 바이너리 스트림 |
+| WS | `wss://<LB_IP>/thermal/stream` | Thermal 바이너리 스트림 |
+| WS | `wss://<LB_IP>/sunapi/StreamingServer` | SUNAPI StreamingServer 프록시 |
 | Stream | `<LB_IP>:8883` | MQTTS |
 | Stream | `<LB_IP>:8555` | RTSPS |
 | Stream | `<LB_IP>:5005/UDP` | Thermal DTLS ingress |
@@ -202,6 +210,7 @@ openssl s_client -connect <LB_IP>:8555 \
 | --- | --- | --- |
 | `EXTERNAL-IP`가 없음 | MetalLB 할당 실패 | `nginx-service`와 MetalLB 상태 확인 |
 | HTTPS는 되는데 WebSocket이 안 됨 | 업그레이드 헤더 또는 Crow upstream 문제 | `proxy_set_header Upgrade`, Crow 상태 확인 |
+| `/cctv/*` 요청이 빨리 타임아웃됨 | 일반 `/` 프록시로 라우팅되거나 Crow backend 지연 | `location /cctv/` timeout 설정과 Crow/CCTV backend 상태 확인 |
 | MQTTS 실패 | `mqtt-service` 또는 인증서 문제 | `nginx-certs`, `mtls-ca`, Mosquitto 상태 확인 |
 | RTSPS 실패 | MediaMTX upstream 또는 인증서 문제 | `mediamtx-service:8554` 및 Nginx stream 설정 확인 |
 | DTLS/UDP 전달 실패 | Thermal Gateway 미기동 | `thermal-dtls-gateway-service:5005` 확인 |
@@ -212,7 +221,7 @@ openssl s_client -connect <LB_IP>:8555 \
 - `nginx-certs`와 `mtls-ca`가 마운트 가능한가
 - `pi-master` 노드가 존재하는가
 - `crow-server-service`, `mediamtx-service`, `mqtt-service`, `thermal-dtls-gateway-service`가 모두 준비되었는가
-- `https://<LB_IP>/health`와 `openssl s_client` 테스트가 성공하는가
+- `https://<LB_IP>/health`, `https://<LB_IP>/events`, `https://<LB_IP>/recordings`와 `openssl s_client` 테스트가 성공하는가
 
 **작성자:** VEDA Team  
-**마지막 업데이트:** 2026-03-19
+**마지막 업데이트:** 2026-03-26
