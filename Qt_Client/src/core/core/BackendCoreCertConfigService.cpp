@@ -9,7 +9,6 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
-
 namespace {
 
 QString defaultCertDirectoryPath()
@@ -32,7 +31,13 @@ void reloadSecurityConfiguration(Backend *backend, BackendPrivate *state)
         return;
     }
 
-    // 변경된 인증서 폴더를 즉시 다시 읽는다.
+    // 인증서 경로를 바꾼 뒤에는 기존 HTTPS 연결 재사용을 막는다.
+    if (state->m_manager) {
+        state->m_manager->clearConnectionCache();
+        state->m_manager->clearAccessCache();
+    }
+
+    // 변경한 인증서 경로를 즉시 다시 읽는다.
     backend->setupSslConfiguration();
     BackendCoreMqttService::reloadMqtt(backend, state);
 }
@@ -70,7 +75,7 @@ QString BackendCoreCertConfigService::resolveCertificatePath(const BackendPrivat
     const QString overrideDir = state ? normalizeDirectoryPath(state->m_certDirectoryOverride) : QString();
     const QString fileName = QFileInfo(rawPath).fileName();
     if (!overrideDir.isEmpty() && !fileName.isEmpty()) {
-        // 사용자 지정 폴더가 있으면 같은 파일명으로 먼저 찾는다.
+        // 사용자가 지정한 폴더가 있으면 같은 파일명으로 먼저 찾는다.
         return QDir(overrideDir).filePath(fileName);
     }
 

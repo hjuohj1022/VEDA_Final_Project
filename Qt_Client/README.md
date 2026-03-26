@@ -215,6 +215,11 @@
 - 비밀번호 입력칸 우측에 표시/숨김 토글(눈 아이콘) 추가
   - 숨김 상태는 슬래시 오버레이(가리기 표시)로 시각화
 - 비밀번호 입력칸 아래에 클릭형 텍스트 `비밀번호를 잊으셨나요?` 제공
+- 로그인 화면에 `인증서 경로 설정` 버튼 추가
+  - 기본 인증서 폴더는 `실행파일 폴더/certs`
+  - 사용자가 다른 폴더를 선택해 SSL/MQTT 인증서 경로를 변경 가능
+  - 경로 변경 시 기존 HTTPS 연결 캐시를 비워 이전 인증서 연결이 재사용되지 않도록 처리
+  - 잘못된 인증서 폴더가 선택된 경우 경로 저장은 가능하지만, HTTPS 로그인은 요청 전에 차단
 - `비밀번호를 잊으셨나요?` 클릭 시 비밀번호 재설정 1단계 다이얼로그 오픈
   - `ID`, `Email` 입력 후 `POST /auth/password/forgot` 호출
   - 입력한 정보가 일치하면 메일로 재설정 코드가 전송되는 구조로 안내
@@ -405,6 +410,9 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - `LOGIN_TIMEOUT_MS`, `REGISTER_TIMEOUT_MS`
   - `SSL_CA_CERT`, `SSL_CLIENT_CERT`, `SSL_CLIENT_KEY`
   - `SSL_VERIFY_PEER`, `SSL_IGNORE_ERRORS`
+  - 로그인 화면의 `인증서 경로 설정`으로 위 인증서 파일들의 기준 폴더를 런타임에 변경 가능
+    - 기본값은 `실행파일 폴더/certs`
+    - 선택한 폴더는 `QSettings`에 저장되어 다음 실행에도 유지
 - Live RTSP(MediaMTX)
   - `RTSP_SCHEME`, `RTSP_IP`, `RTSP_PORT`
   - `RTSP_USERNAME`, `RTSP_PASSWORD`

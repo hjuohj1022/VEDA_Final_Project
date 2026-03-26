@@ -3,6 +3,7 @@
 #include "Backend.h"
 #include "internal/auth/BackendAuthSessionService.h"
 #include "internal/core/BackendCoreApiService.h"
+#include "internal/core/BackendCoreSslService.h"
 #include "internal/core/Backend_p.h"
 
 #include <QJsonDocument>
@@ -221,6 +222,13 @@ void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, Q
     const QString loginUrl = backend->serverUrl() + "/login";
     qInfo() << "[LOGIN] request URL:" << loginUrl;
     QUrl url(loginUrl);
+    QString sslError;
+    // 잘못된 인증서 경로일 때는 HTTPS 로그인 요청 자체를 막는다.
+    if (!BackendCoreSslService::isHttpsRequestReady(state, url, &sslError)) {
+        emit backend->loginFailed(sslError);
+        return;
+    }
+
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     backend->applySslIfNeeded(request);

@@ -15,6 +15,18 @@
 #include <QSslKey>
 #include <QSslSocket>
 
+namespace {
+
+QString buildCertConfigErrorMessage(const BackendPrivate *state)
+{
+    const QString certDir = BackendCoreCertConfigService::certDirectoryPath(state);
+    return QStringLiteral(
+               "인증서 폴더 설정이 올바르지 않습니다. %1 폴더의 rootCA.crt, client-qt.crt, client-qt.key 파일을 확인해 주세요.")
+        .arg(certDir);
+}
+
+} // namespace
+
 void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
@@ -34,7 +46,9 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
     state->m_sslConfig = QSslConfiguration::defaultConfiguration();
     state->m_sslConfigReady = false;
 
-    bool hasAnyConfig = false;
+    bool hasCaCertificate = false;
+    bool hasClientCertificate = false;
+    bool hasClientKey = false;
 
     const QString caPath = BackendCoreCertConfigService::resolveCertificatePath(state, caPathRaw);
     QFile caFile(caPath);
@@ -42,7 +56,7 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
         const QList<QSslCertificate> certs = QSslCertificate::fromData(caFile.readAll(), QSsl::Pem);
         if (!certs.isEmpty()) {
             state->m_sslConfig.setCaCertificates(certs);
-            hasAnyConfig = true;
+            hasCaCertificate = true;
             qInfo() << "[SSL] CA loaded:" << caPath;
         } else {
             qWarning() << "[SSL] invalid CA cert:" << caPath;
@@ -57,11 +71,13 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
         const QList<QSslCertificate> certs = QSslCertificate::fromData(certFile.readAll(), QSsl::Pem);
         if (!certs.isEmpty()) {
             state->m_sslConfig.setLocalCertificate(certs.first());
-            hasAnyConfig = true;
+            hasClientCertificate = true;
             qInfo() << "[SSL] client cert loaded:" << certPath;
         } else {
             qWarning() << "[SSL] invalid client cert:" << certPath;
         }
+    } else {
+        qWarning() << "[SSL] client cert not found:" << certPath;
     }
 
     const QString keyPath = BackendCoreCertConfigService::resolveCertificatePath(state, keyPathRaw);
@@ -70,18 +86,39 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
         QSslKey key(&keyFile, QSsl::Rsa, QSsl::Pem);
         if (!key.isNull()) {
             state->m_sslConfig.setPrivateKey(key);
-            hasAnyConfig = true;
+            hasClientKey = true;
             qInfo() << "[SSL] client key loaded:" << keyPath;
         } else {
             qWarning() << "[SSL] invalid client key:" << keyPath;
         }
+    } else {
+        qWarning() << "[SSL] client key not found:" << keyPath;
     }
 
     state->m_sslConfig.setPeerVerifyMode(verifyPeer ? QSslSocket::VerifyPeer : QSslSocket::VerifyNone);
-    state->m_sslConfigReady = hasAnyConfig;
+    // HTTPS/WSS 요청은 인증서 3종이 모두 준비된 경우에만 허용한다.
+    state->m_sslConfigReady = hasCaCertificate && hasClientCertificate && hasClientKey;
     qInfo() << "[SSL] ready=" << state->m_sslConfigReady
             << "verifyPeer=" << verifyPeer
             << "ignoreErrors=" << state->m_sslIgnoreErrors;
+}
+
+bool BackendCoreSslService::isHttpsRequestReady(BackendPrivate *state,
+                                                const QUrl &url,
+                                                QString *errorMessage)
+{
+    if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) != 0) {
+        return true;
+    }
+
+    if (state && state->m_sslConfigReady) {
+        return true;
+    }
+
+    if (errorMessage) {
+        *errorMessage = buildCertConfigErrorMessage(state);
+    }
+    return false;
 }
 
 void BackendCoreSslService::applySslIfNeeded(Backend *backend,
@@ -94,6 +131,7 @@ void BackendCoreSslService::applySslIfNeeded(Backend *backend,
     if (url.scheme().compare("https", Qt::CaseInsensitive) != 0) {
         return;
     }
+
     if (state->m_sslConfigReady) {
         request.setSslConfiguration(state->m_sslConfig);
     }
