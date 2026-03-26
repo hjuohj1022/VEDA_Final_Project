@@ -29,15 +29,27 @@ Window {
         return text
     }
 
-    function severityLabel() {
-        var value = selectedString("severity", backend.eventAlertSeverity || "").trim().toLowerCase()
+    function currentSeverityValue() {
+        if (!backend.eventAlertActive)
+            return "safe"
+
+        var value = String(backend.eventAlertSeverity || "").trim().toLowerCase()
         if (value.length === 0)
-            return "INFO"
+            return "info"
+        return value
+    }
+
+    function severityLabel() {
+        var value = root.currentSeverityValue()
+        if (value === "safe")
+            return "SAFE"
         return value.toUpperCase()
     }
 
     function severityColor() {
-        var value = selectedString("severity", backend.eventAlertSeverity || "").trim().toLowerCase()
+        var value = root.currentSeverityValue()
+        if (value === "safe")
+            return "#16a34a"
         if (value === "critical")
             return "#ef4444"
         if (value === "warning")
@@ -74,8 +86,8 @@ Window {
     }
 
     function activeControlSummary() {
-        if (!selectedEvent())
-            return "현재 수신된 이벤트가 없습니다."
+        if (!backend.eventAlertActive)
+            return "현재 감지된 이벤트가 없어 안전 상태입니다."
 
         return "현재 이벤트 적용 시 레이저 ON 후 비상 대피 시퀀스를 실행합니다."
     }
@@ -171,7 +183,10 @@ Window {
         ListView {
             id: eventHistoryList
             clip: true
-            spacing: 6
+            spacing: 4
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AsNeeded
+            }
             // 최신 이벤트를 위에 두고, 더블클릭하면 상세 로그로 전환
             model: root.eventHistory()
             currentIndex: Math.max(0, Math.min(root.selectedHistoryIndex, count - 1))
@@ -179,8 +194,8 @@ Window {
             delegate: Rectangle {
                 required property int index
                 required property var modelData
-                width: eventHistoryList.width
-                height: 34
+                width: eventHistoryList.width - 8
+                height: 30
                 radius: 6
                 color: ListView.isCurrentItem
                        ? (root.theme ? root.theme.accent : "#f97316")
@@ -192,8 +207,8 @@ Window {
 
                 Text {
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
+                    anchors.leftMargin: 9
+                    anchors.rightMargin: 9
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                     text: String(modelData.receivedAt || "-")
@@ -261,13 +276,6 @@ Window {
                 }
 
                 Item { Layout.fillWidth: true }
-
-                ActionButton {
-                    text: "닫기"
-                    compact: true
-                    Layout.preferredWidth: 72
-                    onClicked: root.closeDialog()
-                }
             }
 
             RowLayout {
@@ -277,7 +285,7 @@ Window {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 340
-                    Layout.preferredHeight: 250
+                    Layout.preferredHeight: 228
                     radius: 8
                     color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
                     border.color: theme ? theme.border : "#d1d5db"
@@ -299,6 +307,47 @@ Window {
                             }
 
                             Item { Layout.fillWidth: true }
+
+                            ActionButton {
+                                visible: !root.historyDetailOpen
+                                text: "새로고침"
+                                compact: true
+                                Layout.preferredWidth: 84
+                                onClicked: {
+                                    backend.resetSessionTimer()
+                                    if (backend.refreshEventAlertHistory()) {
+                                        statusText = "이벤트 목록 새로고침 요청을 전송했습니다."
+                                        statusError = false
+                                    } else {
+                                        statusText = "이벤트 목록을 새로고침하지 못했습니다."
+                                        statusError = true
+                                    }
+                                }
+                            }
+
+                            ActionButton {
+                                visible: !root.historyDetailOpen
+                                text: "삭제"
+                                compact: true
+                                dangerStyle: true
+                                Layout.preferredWidth: 72
+                                enabled: !!selectedEvent() && Number(selectedEvent().id || 0) > 0
+                                onClicked: {
+                                    var item = selectedEvent()
+                                    var eventLogId = item ? Number(item.id || 0) : 0
+                                    backend.resetSessionTimer()
+                                    if (eventLogId <= 0) {
+                                        statusText = "삭제할 이벤트를 먼저 선택해주세요."
+                                        statusError = true
+                                    } else if (backend.deleteEventAlertItem(eventLogId)) {
+                                        statusText = "선택한 이벤트 삭제 요청을 전송했습니다."
+                                        statusError = false
+                                    } else {
+                                        statusText = "선택한 이벤트 삭제 요청을 시작하지 못했습니다."
+                                        statusError = true
+                                    }
+                                }
+                            }
 
                             ActionButton {
                                 visible: root.historyDetailOpen
@@ -331,7 +380,7 @@ Window {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 470
-                    Layout.preferredHeight: 250
+                    Layout.preferredHeight: 228
                     radius: 8
                     color: theme && hostWindow && hostWindow.isDarkMode ? "#0b0f1a" : "#f8fafc"
                     border.color: theme ? theme.border : "#d1d5db"
@@ -344,9 +393,9 @@ Window {
                         spacing: 8
 
                         Text {
-                            text: selectedEvent()
+                            text: backend.eventAlertActive
                                   ? (backend.eventAlertTitle.length > 0 ? backend.eventAlertTitle : "이벤트 알림")
-                                  : "현재 이벤트 없음"
+                                  : "안전 상태"
                             color: theme ? theme.textPrimary : "#111827"
                             font.pixelSize: 15
                             font.bold: true
@@ -378,7 +427,9 @@ Window {
                                 Text {
                                     id: sourceText
                                     anchors.centerIn: parent
-                                    text: "출처: " + (backend.eventAlertSource.length > 0 ? backend.eventAlertSource : "-")
+                                    text: backend.eventAlertActive
+                                          ? ("출처: " + (backend.eventAlertSource.length > 0 ? backend.eventAlertSource : "-"))
+                                          : "상태: 정상"
                                     color: theme ? theme.textSecondary : "#374151"
                                     font.pixelSize: 11
                                 }
@@ -432,11 +483,35 @@ Window {
                         }
 
                         Text {
+                            visible: backend.eventAlertActive
                             text: root.activeControlSummary()
                             color: theme ? theme.textSecondary : "#374151"
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            visible: !backend.eventAlertActive
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: safeStateText.implicitHeight + 16
+                            radius: 8
+                            color: root.darkChrome ? "#0f2f1f" : "#dcfce7"
+                            border.width: 1
+                            border.color: root.darkChrome ? "#166534" : "#86efac"
+
+                            Text {
+                                id: safeStateText
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                verticalAlignment: Text.AlignVCenter
+                                text: "현재 감지된 이벤트가 없어 안전 상태입니다."
+                                color: root.darkChrome ? "#bbf7d0" : "#166534"
+                                font.pixelSize: 12
+                                font.bold: true
+                                wrapMode: Text.WordWrap
+                            }
                         }
 
                         ScrollView {
@@ -483,7 +558,7 @@ Window {
                     Layout.minimumWidth: 0
                     onClicked: {
                         backend.resetSessionTimer()
-                        backend.motorStopAll()
+                        backend.stopEventAlertControl()
                         statusText = "비상 동작 정지 요청을 전송했습니다."
                         statusError = false
                     }

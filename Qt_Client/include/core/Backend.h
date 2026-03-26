@@ -248,8 +248,12 @@ public:
     // Event alert
     Q_INVOKABLE void markEventAlertRead();
     Q_INVOKABLE void clearEventAlert();
+    Q_INVOKABLE bool deleteEventAlertHistory();                        // 이벤트 목록 전체 삭제
+    Q_INVOKABLE bool deleteEventAlertItem(qulonglong eventLogId);      // 선택한 이벤트 1건 삭제
+    Q_INVOKABLE bool refreshEventAlertHistory();                       // 서버 이벤트 목록 다시 불러오기
     Q_INVOKABLE void updateEventAlertPreset(int motor1Angle, int motor2Angle, int motor3Angle, bool laserEnabled);
     Q_INVOKABLE bool applyEventAlertControl();
+    Q_INVOKABLE bool stopEventAlertControl();                         // 이벤트 연계 비상 동작 정지
 
 signals:
     // Property notify

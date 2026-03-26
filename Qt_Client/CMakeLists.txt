@@ -53,8 +53,8 @@ qt_add_executable(Team3VideoReceiver
     src/core/core/BackendCoreStateService.cpp
     src/core/core/BackendCoreEvent.cpp
     src/core/core/BackendCoreEventLogService.cpp
+    src/core/core/BackendCoreEventLogActionService.cpp
     src/core/core/BackendCoreEventService.cpp
-    src/core/core/BackendCoreEventLogService.cpp
     src/core/core/BackendCoreSystemInfo.cpp
     src/core/core/BackendCoreSystemInfoService.cpp
     src/core/auth/BackendAuthLogin.cpp

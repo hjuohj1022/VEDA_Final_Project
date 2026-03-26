@@ -125,11 +125,13 @@ QVariantMap makeHistoryItemFromLog(const QJsonObject &logObject)
     item.insert(QStringLiteral("message"), message);
     item.insert(QStringLiteral("receivedAt"), occurredAt);
     item.insert(QStringLiteral("autoControl"), parseBoolValue(logObject.value(QStringLiteral("action_requested")), false));
+    item.insert(QStringLiteral("actionRequested"), parseBoolValue(logObject.value(QStringLiteral("action_requested")), false));
     item.insert(QStringLiteral("hasOverride"), false);
     item.insert(QStringLiteral("motor1Angle"), 90);
     item.insert(QStringLiteral("motor2Angle"), 90);
     item.insert(QStringLiteral("motor3Angle"), 90);
     item.insert(QStringLiteral("laserEnabled"), false);
+    item.insert(QStringLiteral("frameId"), logObject.value(QStringLiteral("frame_id")).toVariant());
     item.insert(QStringLiteral("eventType"), normalizeString(logObject, QStringLiteral("event_type")));
     item.insert(QStringLiteral("actionType"), normalizeString(logObject, QStringLiteral("action_type")));
     item.insert(QStringLiteral("actionResult"), normalizeString(logObject, QStringLiteral("action_result")));
@@ -197,9 +199,166 @@ void BackendCoreEventLogService::loadEventHistory(Backend *backend, BackendPriva
         }
 
         state->m_eventAlertHistory = history;
+        syncCurrentEventLogIdFromHistory(backend, state);
         emitEventAlertHistoryChanged(backend);
         qInfo() << "[EVENT][HISTORY] loaded:" << history.size();
     });
+}
+
+bool BackendCoreEventLogService::deleteEventHistory(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state || !state->m_manager || state->m_authToken.trimmed().isEmpty()) {
+        return false;
+    }
+
+    if (state->m_eventLogDeleteReply && state->m_eventLogDeleteReply->isRunning()) {
+        state->m_eventLogDeleteReply->abort();
+    }
+
+    QNetworkRequest request = backend->makeApiJsonRequest(QStringLiteral("/events"));
+    backend->applyAuthIfNeeded(request);
+
+    // 서버에 저장된 이벤트 목록 전체 삭제를 요청한다.
+    QNetworkReply *reply = state->m_manager->sendCustomRequest(
+        request,
+        QByteArrayLiteral("DELETE"),
+        QByteArray());
+    state->m_eventLogDeleteReply = reply;
+    backend->attachIgnoreSslErrors(reply, QStringLiteral("EVENT_LOG_DELETE"));
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply]() {
+        if (state->m_eventLogDeleteReply == reply) {
+            state->m_eventLogDeleteReply = nullptr;
+        }
+
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray body = reply->readAll();
+        reply->deleteLater();
+
+        if (netError != QNetworkReply::NoError || statusCode != 200) {
+            qWarning() << "[EVENT][HISTORY] delete failed:"
+                       << "status=" << statusCode
+                       << "netError=" << netError
+                       << "body=" << body;
+            emit backend->cameraControlMessage("Event alert history delete failed", true);
+            return;
+        }
+
+        state->m_eventAlertHistory.clear();
+        state->m_eventAlertLogId = 0;
+        emitEventAlertHistoryChanged(backend);
+        emit backend->cameraControlMessage("Event alert history deleted", false);
+    });
+
+    return true;
+}
+
+bool BackendCoreEventLogService::deleteEventHistoryItem(Backend *backend,
+                                                        BackendPrivate *state,
+                                                        qulonglong eventLogId)
+{
+    if (!backend || !state || !state->m_manager || state->m_authToken.trimmed().isEmpty() || eventLogId == 0) {
+        return false;
+    }
+
+    if (state->m_eventLogDeleteReply && state->m_eventLogDeleteReply->isRunning()) {
+        state->m_eventLogDeleteReply->abort();
+    }
+
+    QNetworkRequest request = backend->makeApiJsonRequest(QStringLiteral("/events"), {
+        { QStringLiteral("id"), QString::number(eventLogId) }
+    });
+    backend->applyAuthIfNeeded(request);
+
+    // 선택한 이벤트 1건만 서버 목록에서 삭제한다.
+    QNetworkReply *reply = state->m_manager->sendCustomRequest(
+        request,
+        QByteArrayLiteral("DELETE"),
+        QByteArray());
+    state->m_eventLogDeleteReply = reply;
+    backend->attachIgnoreSslErrors(reply, QStringLiteral("EVENT_LOG_DELETE_ITEM"));
+
+    QObject::connect(reply, &QNetworkReply::finished, backend, [backend, state, reply, eventLogId]() {
+        if (state->m_eventLogDeleteReply == reply) {
+            state->m_eventLogDeleteReply = nullptr;
+        }
+
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netError = reply->error();
+        const QByteArray body = reply->readAll();
+        reply->deleteLater();
+
+        if (netError != QNetworkReply::NoError || statusCode != 200) {
+            qWarning() << "[EVENT][HISTORY] delete item failed:"
+                       << "status=" << statusCode
+                       << "netError=" << netError
+                       << "body=" << body;
+            emit backend->cameraControlMessage("Event alert item delete failed", true);
+            return;
+        }
+
+        QVariantList history;
+        history.reserve(state->m_eventAlertHistory.size());
+        for (const QVariant &entry : state->m_eventAlertHistory) {
+            const QVariantMap item = entry.toMap();
+            if (item.value(QStringLiteral("id")).toULongLong() == eventLogId) {
+                continue;
+            }
+            history.append(entry);
+        }
+
+        state->m_eventAlertHistory = history;
+        if (state->m_eventAlertLogId == eventLogId) {
+            state->m_eventAlertLogId = 0;
+        }
+        emitEventAlertHistoryChanged(backend);
+        emit backend->cameraControlMessage("Event alert item deleted", false);
+    });
+
+    return true;
+}
+
+void BackendCoreEventLogService::syncCurrentEventLogIdFromHistory(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state || state->m_eventAlertLogId != 0 || !state->m_eventAlertActive) {
+        return;
+    }
+
+    const QString currentSource = state->m_eventAlertSource.trimmed().toLower();
+    const QString currentTitle = state->m_eventAlertTitle.trimmed();
+    const QString currentMessage = state->m_eventAlertMessage.trimmed();
+
+    for (const QVariant &entry : state->m_eventAlertHistory) {
+        const QVariantMap item = entry.toMap();
+        const qulonglong eventLogId = item.value(QStringLiteral("id")).toULongLong();
+        if (eventLogId == 0) {
+            continue;
+        }
+
+        const QString source = item.value(QStringLiteral("source")).toString().trimmed().toLower();
+        if (source != currentSource) {
+            continue;
+        }
+
+        // frameId가 비어 있으면 매칭 비교에서 제외할 수 있게 -1로 본다.
+        const QVariant frameIdValue = item.value(QStringLiteral("frameId"));
+        const int frameId =
+            (frameIdValue.isValid() && !frameIdValue.isNull()) ? frameIdValue.toInt() : -1;
+
+        if (state->m_eventAlertFrameId >= 0 && frameId == state->m_eventAlertFrameId) {
+            // 현재 수신 이벤트와 같은 row를 찾으면 log id를 연결한다.
+            state->m_eventAlertLogId = eventLogId;
+            return;
+        }
+
+        if (state->m_eventAlertFrameId < 0
+            && item.value(QStringLiteral("title")).toString().trimmed() == currentTitle
+            && item.value(QStringLiteral("message")).toString().trimmed() == currentMessage) {
+            state->m_eventAlertLogId = eventLogId;
+            return;
+        }
+    }
 }
 
 void BackendCoreEventLogService::clearCachedEventHistory(Backend *backend, BackendPrivate *state)
@@ -212,6 +371,10 @@ void BackendCoreEventLogService::clearCachedEventHistory(Backend *backend, Backe
         state->m_eventLogHistoryReply->abort();
     }
     state->m_eventLogHistoryReply = nullptr;
+    if (state->m_eventLogDeleteReply && state->m_eventLogDeleteReply->isRunning()) {
+        state->m_eventLogDeleteReply->abort();
+    }
+    state->m_eventLogDeleteReply = nullptr;
 
     const bool hadHistory = !state->m_eventAlertHistory.isEmpty();
     const bool hadEventState =
@@ -237,6 +400,8 @@ void BackendCoreEventLogService::clearCachedEventHistory(Backend *backend, Backe
     state->m_eventAlertTitle.clear();
     state->m_eventAlertMessage.clear();
     state->m_eventAlertReceivedAtText.clear();
+    state->m_eventAlertLogId = 0;
+    state->m_eventAlertFrameId = -1;
     state->m_eventAlertAutoControl = false;
     state->m_eventAlertHasControlOverride = false;
     state->m_eventAlertMotor1Angle = 90;
