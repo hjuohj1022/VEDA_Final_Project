@@ -6,11 +6,15 @@ struct BackendPrivate;
 class QNetworkReply;
 class QNetworkRequest;
 class QString;
+class QUrl;
 
 class BackendCoreSslService
 {
 public:
     static void setupSslConfiguration(Backend *backend, BackendPrivate *state);
+    static bool isHttpsRequestReady(BackendPrivate *state,
+                                    const QUrl &url,
+                                    QString *errorMessage = nullptr);
     static void applySslIfNeeded(Backend *backend,
                                  BackendPrivate *state,
                                  QNetworkRequest &request);
