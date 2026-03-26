@@ -26,6 +26,22 @@ int parseLimit(const char* raw_limit)
     }
     return static_cast<int>(parsed);
 }
+
+bool parseEventLogId(const std::string& raw_id, unsigned long long* out_id)
+{
+    if (!out_id || raw_id.empty()) {
+        return false;
+    }
+
+    char* end = nullptr;
+    const unsigned long long parsed = std::strtoull(raw_id.c_str(), &end, 10);
+    if (!end || *end != '\0') {
+        return false;
+    }
+
+    *out_id = parsed;
+    return true;
+}
 } // namespace
 
 void registerEventLogRoutes(crow::SimpleApp& app, const EventLogRequestAuthorizer& is_authorized)
@@ -129,6 +145,55 @@ void registerEventLogRoutes(crow::SimpleApp& app, const EventLogRequestAuthorize
         }
 
         response["deleted_id"] = static_cast<uint64_t>(id);
+        return crow::response(response);
+    });
+
+    CROW_ROUTE(app, "/events/<string>/action").methods(crow::HTTPMethod::PATCH)
+    ([is_authorized](const crow::request& req, const std::string& raw_id) {
+        if (!is_authorized(req)) {
+            return crow::response(401, "Unauthorized");
+        }
+
+        unsigned long long id = 0;
+        if (!parseEventLogId(raw_id, &id)) {
+            return crow::response(400, "Invalid event log id");
+        }
+
+        const auto body = crow::json::load(req.body);
+        if (!body) {
+            return crow::response(400, "Invalid JSON body");
+        }
+        if (!body.has("action_type") || body["action_type"].t() != crow::json::type::String) {
+            return crow::response(400, "action_type is required");
+        }
+        if (!body.has("action_result") || body["action_result"].t() != crow::json::type::String) {
+            return crow::response(400, "action_result is required");
+        }
+
+        // Qt에서 보낸 비상 동작 결과를 기존 이벤트 row에 반영한다.
+        EventLogActionUpdateParams params;
+        params.action_requested = body.has("action_requested") ? body["action_requested"].b() : true;
+        params.action_type = std::string(body["action_type"].s());
+        params.action_result = std::string(body["action_result"].s());
+        if (body.has("action_message") && body["action_message"].t() == crow::json::type::String) {
+            params.action_message = std::string(body["action_message"].s());
+        }
+
+        bool updated = false;
+        if (!updateEventLogAction(id, params, &updated)) {
+            return crow::response(500, "Failed to update event action");
+        }
+        if (!updated) {
+            return crow::response(404, "Event log not found");
+        }
+
+        crow::json::wvalue response;
+        response["status"] = "success";
+        response["updated_id"] = static_cast<uint64_t>(id);
+        response["action_requested"] = params.action_requested;
+        response["action_type"] = params.action_type.value_or("");
+        response["action_result"] = params.action_result.value_or("");
+        response["action_message"] = params.action_message.value_or("");
         return crow::response(response);
     });
 }
