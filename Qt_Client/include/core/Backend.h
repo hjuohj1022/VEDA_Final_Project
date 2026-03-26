@@ -32,6 +32,7 @@ class Backend : public QObject
     Q_PROPERTY(int loginMaxAttempts READ loginMaxAttempts CONSTANT)
     Q_PROPERTY(QString serverUrl READ serverUrl CONSTANT)
     Q_PROPERTY(QString certDirectoryPath READ certDirectoryPath NOTIFY certDirectoryPathChanged)
+    Q_PROPERTY(QString certDirectoryDisplayPath READ certDirectoryDisplayPath NOTIFY certDirectoryPathChanged)
     Q_PROPERTY(QString rtspIp READ rtspIp NOTIFY rtspIpChanged)
     Q_PROPERTY(QString rtspPort READ rtspPort NOTIFY rtspPortChanged)
 
@@ -95,6 +96,7 @@ public:
     int loginMaxAttempts() const;
     QString serverUrl() const;
     QString certDirectoryPath() const;
+    QString certDirectoryDisplayPath() const;
 
     QString rtspIp() const;
     void setRtspIp(const QString &ip);

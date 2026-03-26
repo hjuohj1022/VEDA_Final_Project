@@ -11,6 +11,7 @@ class BackendCoreCertConfigService
 public:
     static void loadCertDirectoryOverride(Backend *backend, BackendPrivate *state);
     static QString certDirectoryPath(const BackendPrivate *state);
+    static QString certDirectoryDisplayPath(const BackendPrivate *state);
     static QString resolveCertificatePath(const BackendPrivate *state, const QString &rawPath);
     static bool updateCertDirectoryPath(Backend *backend, BackendPrivate *state, const QString &path);
     static bool resetCertDirectoryPath(Backend *backend, BackendPrivate *state);
