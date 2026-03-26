@@ -7,6 +7,11 @@ QString Backend::certDirectoryPath() const
     return BackendCoreCertConfigService::certDirectoryPath(d_ptr.get());
 }
 
+QString Backend::certDirectoryDisplayPath() const
+{
+    return BackendCoreCertConfigService::certDirectoryDisplayPath(d_ptr.get());
+}
+
 bool Backend::updateCertDirectoryPath(QString path)
 {
     return BackendCoreCertConfigService::updateCertDirectoryPath(this, d_ptr.get(), path);

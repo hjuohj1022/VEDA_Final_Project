@@ -218,8 +218,11 @@
 - 로그인 화면에 `인증서 경로 설정` 버튼 추가
   - 기본 인증서 폴더는 `실행파일 폴더/certs`
   - 사용자가 다른 폴더를 선택해 SSL/MQTT 인증서 경로를 변경 가능
+  - 로그인 화면에는 현재 실제로 해석된 인증서 폴더 경로를 표시
   - 경로 변경 시 기존 HTTPS 연결 캐시를 비워 이전 인증서 연결이 재사용되지 않도록 처리
   - 잘못된 인증서 폴더가 선택된 경우 경로 저장은 가능하지만, HTTPS 로그인은 요청 전에 차단
+  - 선택한 경로는 exe 내부가 아니라 `QSettings`에 저장되므로, 같은 PC/같은 사용자에서는 다음 실행에도 유지됨
+  - 다른 PC에서 처음 실행하는 경우에는 저장된 값이 없으므로 기본값인 `실행파일 폴더/certs`가 자동 사용됨
 - `비밀번호를 잊으셨나요?` 클릭 시 비밀번호 재설정 1단계 다이얼로그 오픈
   - `ID`, `Email` 입력 후 `POST /auth/password/forgot` 호출
   - 입력한 정보가 일치하면 메일로 재설정 코드가 전송되는 구조로 안내
@@ -403,6 +406,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
 참고:
 - 관리자 잠금 해제 키는 클라이언트 `.env`에서 읽지 않습니다.
 - 관리자 잠금 해제는 Crow 서버의 `ADMIN_UNLOCK_KEY`(배포 시 `crow-admin-secret`에서 주입) 기준으로 검증됩니다.
+- 배포용 인스톨러에는 `.env`, `certs/`를 기본 포함하지 않는 구성도 가능하므로, 설치 후 실행 파일 옆에 별도 배치가 필요할 수 있습니다.
 
 주요 항목:
 - API/SSL
@@ -413,6 +417,7 @@ Live와 Playback은 제어 경로가 다릅니다. Playback은 단순 RTSP URL 1
   - 로그인 화면의 `인증서 경로 설정`으로 위 인증서 파일들의 기준 폴더를 런타임에 변경 가능
     - 기본값은 `실행파일 폴더/certs`
     - 선택한 폴더는 `QSettings`에 저장되어 다음 실행에도 유지
+    - 다른 PC에서 처음 실행하면 저장된 값이 없으므로 기본값(`실행파일 폴더/certs`)으로 시작
 - Live RTSP(MediaMTX)
   - `RTSP_SCHEME`, `RTSP_IP`, `RTSP_PORT`
   - `RTSP_USERNAME`, `RTSP_PASSWORD`
@@ -628,6 +633,32 @@ Team3VideoReceiver/
 cmake -S . -B build
 cmake --build build --config Release
 ```
+
+## 배포 및 인스톨러
+
+- Windows 배포는 보통 `Release 빌드 -> windeployqt -> 설치 테스트 -> Qt Installer Framework(binarycreator)` 순서로 진행
+- 기본 인증서 경로는 실행파일 기준 `certs/` 이므로, 배포 폴더 또는 설치 결과 폴더에 아래 구조가 필요
+
+```text
+AEGIS Vision VMS/
+├─ AEGIS.exe
+├─ .env
+└─ certs/
+   ├─ rootCA.crt
+   ├─ client-qt.crt
+   └─ client-qt.key
+```
+
+- `.env`가 없다면 `example.env`를 참고해 같은 형식으로 작성
+- 인스톨러 완료 페이지에는
+  - `바탕화면 바로가기 생성`
+  - `설치 안내 README.txt 열기`
+  옵션을 둘 수 있음
+- 설치 패키지 안에 포함된 `README.txt`는 설치 후 `.env`, `certs/` 배치 위치를 안내하는 용도
+- Qt Installer Framework 설치본에는 `MaintenanceTool.exe`가 함께 생성되며, 이를 통해 업데이트/컴포넌트 관리/언인스톨 가능
+- 시작 메뉴에는 아래 바로가기를 추가 가능
+  - `AEGIS Vision VMS`
+  - `AEGIS Vision VMS 제거`
 
 ## Wireshark 분석 기록(요약)
 

@@ -25,6 +25,25 @@ QString normalizeDirectoryPath(const QString &path)
     return QDir::cleanPath(QDir(trimmed).absolutePath());
 }
 
+QString displayDirectoryPath(const QString &absolutePath)
+{
+    const QString normalizedPath = normalizeDirectoryPath(absolutePath);
+    const QString appDirPath = normalizeDirectoryPath(QCoreApplication::applicationDirPath());
+    const QString defaultPath = defaultCertDirectoryPath();
+
+    if (normalizedPath == defaultPath) {
+        return QStringLiteral("실행파일 폴더/certs");
+    }
+    if (normalizedPath == appDirPath) {
+        return QStringLiteral("실행파일 폴더");
+    }
+    if (!appDirPath.isEmpty() && normalizedPath.startsWith(appDirPath + QLatin1Char('/'))) {
+        const QString relativePath = QDir(appDirPath).relativeFilePath(normalizedPath);
+        return QStringLiteral("실행파일 폴더/%1").arg(relativePath);
+    }
+    return normalizedPath;
+}
+
 void reloadSecurityConfiguration(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -68,6 +87,11 @@ QString BackendCoreCertConfigService::certDirectoryPath(const BackendPrivate *st
         return normalizeDirectoryPath(state->m_certDirectoryOverride);
     }
     return defaultCertDirectoryPath();
+}
+
+QString BackendCoreCertConfigService::certDirectoryDisplayPath(const BackendPrivate *state)
+{
+    return displayDirectoryPath(certDirectoryPath(state));
 }
 
 QString BackendCoreCertConfigService::resolveCertificatePath(const BackendPrivate *state, const QString &rawPath)
