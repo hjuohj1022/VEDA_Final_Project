@@ -1,6 +1,8 @@
 #include "internal/core/BackendCoreEventService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreEventLogActionService.h"
+#include "internal/core/BackendCoreEventLogService.h"
 #include "internal/core/Backend_p.h"
 
 #include <QDateTime>
@@ -8,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QTimer>
 #include <QVariantMap>
 #include <QtGlobal>
 
@@ -113,6 +116,22 @@ bool parseBoolValue(const QJsonValue &value, bool fallback)
     return fallback;
 }
 
+qulonglong parseUnsignedLongLongValue(const QJsonValue &value, qulonglong fallback = 0)
+{
+    if (value.isDouble()) {
+        const double number = value.toDouble(static_cast<double>(fallback));
+        return number >= 0.0 ? static_cast<qulonglong>(number) : fallback;
+    }
+    if (value.isString()) {
+        bool ok = false;
+        const qulonglong parsed = value.toString().trimmed().toULongLong(&ok);
+        if (ok) {
+            return parsed;
+        }
+    }
+    return fallback;
+}
+
 QString parseStringValue(const QJsonObject &obj, const QString &key, const QString &fallback, bool lowercase = false)
 {
     QString text = obj.value(key).toString().trimmed();
@@ -210,22 +229,32 @@ QVariantMap makeEventHistoryItem(const QString &source,
                                  const QString &title,
                                  const QString &body,
                                  const QString &receivedAt,
+                                 qulonglong eventLogId,
+                                 int frameId,
+                                 const QString &eventType,
                                  bool autoControl,
                                  bool hasOverride,
                                  const EventControlSpec &overrideSpec)
 {
     QVariantMap item;
+    item.insert(QStringLiteral("id"), eventLogId);
     item.insert(QStringLiteral("source"), source);
     item.insert(QStringLiteral("severity"), severity);
     item.insert(QStringLiteral("title"), title);
     item.insert(QStringLiteral("message"), body);
     item.insert(QStringLiteral("receivedAt"), receivedAt);
+    item.insert(QStringLiteral("frameId"), frameId);
+    item.insert(QStringLiteral("eventType"), eventType);
     item.insert(QStringLiteral("autoControl"), autoControl);
+    item.insert(QStringLiteral("actionRequested"), false);
     item.insert(QStringLiteral("hasOverride"), hasOverride);
     item.insert(QStringLiteral("motor1Angle"), overrideSpec.motor1Angle);
     item.insert(QStringLiteral("motor2Angle"), overrideSpec.motor2Angle);
     item.insert(QStringLiteral("motor3Angle"), overrideSpec.motor3Angle);
     item.insert(QStringLiteral("laserEnabled"), overrideSpec.laserEnabled);
+    item.insert(QStringLiteral("actionType"), QString());
+    item.insert(QStringLiteral("actionResult"), QString());
+    item.insert(QStringLiteral("actionMessage"), QString());
     return item;
 }
 
@@ -254,6 +283,8 @@ void BackendCoreEventService::clearEventAlert(Backend *backend, BackendPrivate *
     state->m_eventAlertTitle.clear();
     state->m_eventAlertMessage.clear();
     state->m_eventAlertReceivedAtText.clear();
+    state->m_eventAlertLogId = 0;
+    state->m_eventAlertFrameId = -1;
     state->m_eventAlertAutoControl = false;
     clearEventControlOverride(state);
     emitEventAlertStateChanged(backend);
@@ -302,18 +333,54 @@ bool BackendCoreEventService::applyEventAlertControl(Backend *backend, BackendPr
     // 현재 이벤트 적용은 레이저 ON 후 비상 대피 시퀀스를 바로 요청
     const bool laserRequested = backend->laserSetEnabled(true);
     if (!laserRequested) {
+        BackendCoreEventLogActionService::requestCurrentEventActionUpdate(
+            backend,
+            state,
+            QStringLiteral("motor_emergency"),
+            QStringLiteral("failed"),
+            QStringLiteral("laser on request failed"));
         emit backend->cameraControlMessage("Event alert control failed: laser on request failed", true);
         return false;
     }
 
     const bool emergencyRequested = backend->motorEmergency();
     if (!emergencyRequested) {
+        BackendCoreEventLogActionService::requestCurrentEventActionUpdate(
+            backend,
+            state,
+            QStringLiteral("motor_emergency"),
+            QStringLiteral("failed"),
+            QStringLiteral("motor emergency request failed"));
         emit backend->cameraControlMessage("Event alert control failed: motor emergency request failed", true);
         return false;
     }
 
+    BackendCoreEventLogActionService::requestCurrentEventActionUpdate(
+        backend,
+        state,
+        QStringLiteral("motor_emergency"),
+        QStringLiteral("requested"),
+        QStringLiteral("laser on -> motor emergency requested"));
     emit backend->cameraControlMessage("Event alert control requested: laser on -> motor emergency", false);
     return true;
+}
+
+bool BackendCoreEventService::stopEventAlertControl(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state) {
+        return false;
+    }
+
+    const bool stopRequested = backend->motorStopAll();
+    BackendCoreEventLogActionService::requestCurrentEventActionUpdate(
+        backend,
+        state,
+        QStringLiteral("motor_stopall"),
+        stopRequested ? QStringLiteral("requested") : QStringLiteral("failed"),
+        stopRequested
+            ? QStringLiteral("motor stop all requested")
+            : QStringLiteral("motor stop all request failed"));
+    return stopRequested;
 }
 
 void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendPrivate *state, const QByteArray &message)
@@ -330,6 +397,9 @@ void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendP
     QString severity = QStringLiteral("info");
     QString title = QStringLiteral("이벤트 알림");
     QString body = QString::fromUtf8(trimmedMessage).trimmed();
+    qulonglong eventLogId = 0;
+    int eventFrameId = -1;
+    QString eventType;
     bool autoControl = false;
     bool hasOverride = false;
     EventControlSpec overrideSpec = presetControl(state);
@@ -340,12 +410,16 @@ void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendP
         severity = parseStringValue(obj, "severity", severity, true);
         title = parseStringValue(obj, "title", title, false);
         body = parseStringValue(obj, "message", body.isEmpty() ? QStringLiteral("이벤트 메시지를 수신했습니다.") : body, false);
+        eventLogId = parseUnsignedLongLongValue(obj.value("eventLogId"), 0);
+        eventType = parseStringValue(obj, "eventType", eventType, false);
         autoControl = parseBoolValue(obj.value("autoControl"), false);
 
         if (source == QStringLiteral("thermal")) {
             // thermal 이벤트는 원본 영문 메시지 대신 UI용 한글 문구로 가공
             title = formatThermalEventTitle(obj, title);
             body = formatThermalEventMessage(obj, body);
+            eventType = QStringLiteral("thermal_hotspot");
+            eventFrameId = obj.value(QStringLiteral("thermal")).toObject().value(QStringLiteral("frameId")).toInt(-1);
         }
 
         if (obj.value("control").isObject()) {
@@ -374,6 +448,8 @@ void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendP
     state->m_eventAlertMessage = body;
     // 같은 창이 열려 있어도 새 이벤트 도착 여부를 바로 알 수 있게 시각을 갱신
     state->m_eventAlertReceivedAtText = formatEventReceivedAt();
+    state->m_eventAlertLogId = eventLogId;
+    state->m_eventAlertFrameId = eventFrameId;
     state->m_eventAlertAutoControl = autoControl;
     state->m_eventAlertHasControlOverride = hasOverride;
     if (hasOverride) {
@@ -391,6 +467,9 @@ void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendP
                                                             title,
                                                             body,
                                                             state->m_eventAlertReceivedAtText,
+                                                            eventLogId,
+                                                            eventFrameId,
+                                                            eventType,
                                                             autoControl,
                                                             hasOverride,
                                                             hasOverride ? overrideSpec : presetControl(state)));
@@ -406,6 +485,13 @@ void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendP
             << "hasOverride=" << state->m_eventAlertHasControlOverride;
     emitEventAlertStateChanged(backend);
     emitEventAlertHistoryChanged(backend);
+
+    if (state->m_authToken.trimmed().length() > 0) {
+        // 새 이벤트 직후 DB row id를 맞추기 위해 이력을 짧게 재조회한다.
+        QTimer::singleShot(300, backend, [backend, state]() {
+            BackendCoreEventLogService::loadEventHistory(backend, state, 50);
+        });
+    }
 
     if (state->m_eventAlertAutoControl) {
         applyEventAlertControl(backend, state);

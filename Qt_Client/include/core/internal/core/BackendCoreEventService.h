@@ -17,6 +17,7 @@ public:
                                        int motor3Angle,
                                        bool laserEnabled);
     static bool applyEventAlertControl(Backend *backend, BackendPrivate *state);
+    static bool stopEventAlertControl(Backend *backend, BackendPrivate *state);
     static void handleEventAlertMessage(Backend *backend, BackendPrivate *state, const QByteArray &message);
 };
 

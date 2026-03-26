@@ -77,6 +77,8 @@ struct BackendPrivate
     QPointer<QNetworkReply> m_loginReply;
     bool m_loginInProgress = false;
     QPointer<QNetworkReply> m_eventLogHistoryReply;
+    QPointer<QNetworkReply> m_eventLogDeleteReply;
+    QPointer<QNetworkReply> m_eventLogActionReply;
     QPointer<QNetworkReply> m_adminUnlockReply;
     bool m_adminUnlockInProgress = false;
     QPointer<QNetworkReply> m_twoFactorVerifyReply;
@@ -187,6 +189,8 @@ struct BackendPrivate
     QString m_eventAlertTitle;
     QString m_eventAlertMessage;
     QString m_eventAlertReceivedAtText;
+    qulonglong m_eventAlertLogId = 0;
+    int m_eventAlertFrameId = -1;
     QVariantList m_eventAlertHistory;
     bool m_eventAlertAutoControl = false;
     bool m_eventAlertHasControlOverride = false;

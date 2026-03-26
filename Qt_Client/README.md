@@ -88,6 +88,7 @@
   - 로그인 성공 후 `GET /events?limit=50`를 호출해 서버에 저장된 최근 이벤트 로그를 불러옴
   - Qt를 재실행해도 로그인 후 이전 이벤트 목록을 다시 복원할 수 있음
   - 로그아웃 시 클라이언트에 캐시된 이벤트 목록/현재 이벤트 상태를 초기화
+  - 이벤트 목록 헤더의 `새로고침` 버튼으로 `/events`를 다시 호출해 목록을 수동 갱신할 수 있음
 - 헤더 이벤트 알림 버튼
   - 로그인 상태에서만 노출
   - 읽지 않은 이벤트가 있으면 빨간 점 배지 표시
@@ -98,15 +99,21 @@
     - 좌측: 이벤트 히스토리 목록 또는 선택 로그 상세
     - 우측: 최신 이벤트 카드
   - 이벤트 목록은 수신 시각 기준으로 최근 항목이 위에 표시
+  - 이벤트 목록은 스크롤 가능하며, 목록 헤더에서 `새로고침` / `삭제`를 사용할 수 있음
   - 초기 목록은 서버 `/events` 조회 결과로 채워지고, 이후 실시간 MQTT 이벤트가 맨 위에 추가됨
   - 목록 항목 더블클릭 시 같은 영역에서 상세 로그 보기로 전환
+  - `삭제` 버튼은 현재 선택한 이벤트 1건만 서버 DB와 Qt 목록에서 함께 제거함
   - 최신 이벤트 카드는 `제목`, `수신 시각`, `출처`, `Severity`, `AUTO ON/OFF`, 메시지를 표시
-  - 이벤트가 없을 때는 빈 상태 카드로 유지
+  - 현재 이벤트가 없을 때는 우측 카드에 초록 `SAFE` 배지와 안전 상태 안내 문구를 표시
   - 하단에는 상태 바를 두어 최근 적용/초기화 결과를 표시
 - 이벤트 대응 버튼
   - `현재 이벤트 적용`: 레이저 ON 요청 후 `POST /motor/emergency` 호출
   - `비상 동작 정지`: `POST /motor/control/stopall` 호출
   - `이벤트 초기화`, `닫기` 버튼 제공
+- 이벤트 action 상태 연동
+  - `현재 이벤트 적용` 실행 결과를 현재 이벤트의 `action_type = motor_emergency`로 서버 로그에 반영
+  - `비상 동작 정지` 실행 결과를 `action_type = motor_stopall`로 서버 로그에 반영
+  - 현재 이벤트의 `eventLogId`를 바로 찾지 못하면 이벤트 이력을 다시 불러온 뒤 1회 재시도
 - 자동제어 동작
   - `autoControl=true` 이벤트를 받으면 현재 이벤트 적용과 같은 비상 제어 흐름을 즉시 요청
   - 제어 흐름:
@@ -117,6 +124,7 @@
   - `src/ui/qml/dialogs/EventAlertDialog.qml`
   - `src/ui/qml/Main.qml`
   - `src/core/core/BackendCoreEvent.cpp`
+  - `src/core/core/BackendCoreEventLogActionService.cpp`
   - `src/core/core/BackendCoreEventService.cpp`
   - `src/core/core/BackendCoreEventLogService.cpp`
   - `src/core/cctv/BackendMotorControl.cpp`
@@ -444,6 +452,7 @@ ffmpeg 배치/버전 관리:
 | `GET` | `/2fa/status` | 현재 로그인 사용자 2FA 상태 조회 |
 | `GET` | `/events` | 로그인 후 서버 이벤트 로그 목록 조회 (`limit` 지원) |
 | `DELETE` | `/events` | 이벤트 로그 전체 삭제 또는 `id` 지정 단건 삭제 |
+| `PATCH` | `/events/{id}/action` | 현재 이벤트의 비상 동작 상태(`motor_emergency`, `motor_stopall`) 반영 |
 | `POST` | `/2fa/setup/init` | OTP 등록용 `manual_key`/`otpauth_url` 발급 |
 | `POST` | `/2fa/setup/confirm` | OTP 등록 완료(첫 OTP 검증) |
 | `POST` | `/2fa/disable` | 현재 OTP로 2FA 비활성화 |
