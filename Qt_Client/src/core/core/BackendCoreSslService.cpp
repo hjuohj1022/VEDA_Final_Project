@@ -1,6 +1,7 @@
 ﻿#include "internal/core/BackendCoreSslService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreCertConfigService.h"
 #include "internal/core/Backend_p.h"
 
 #include <QCoreApplication>
@@ -17,19 +18,6 @@
 void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
-
-    auto resolvePath = [](const QString &rawPath) {
-        QFileInfo info(rawPath);
-        if (info.isAbsolute()) {
-            return rawPath;
-        }
-
-        const QString appSide = QCoreApplication::applicationDirPath() + "/" + rawPath;
-        if (QFileInfo::exists(appSide)) {
-            return appSide;
-        }
-        return rawPath;
-    };
 
     const QString caPathRaw = state->m_env.value("SSL_CA_CERT",
                             state->m_env.value("MQTT_CA_CERT", "certs/rootCA.crt")).trimmed();
@@ -48,7 +36,7 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
 
     bool hasAnyConfig = false;
 
-    const QString caPath = resolvePath(caPathRaw);
+    const QString caPath = BackendCoreCertConfigService::resolveCertificatePath(state, caPathRaw);
     QFile caFile(caPath);
     if (caFile.open(QIODevice::ReadOnly)) {
         const QList<QSslCertificate> certs = QSslCertificate::fromData(caFile.readAll(), QSsl::Pem);
@@ -63,7 +51,7 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
         qWarning() << "[SSL] CA cert not found:" << caPath;
     }
 
-    const QString certPath = resolvePath(certPathRaw);
+    const QString certPath = BackendCoreCertConfigService::resolveCertificatePath(state, certPathRaw);
     QFile certFile(certPath);
     if (certFile.open(QIODevice::ReadOnly)) {
         const QList<QSslCertificate> certs = QSslCertificate::fromData(certFile.readAll(), QSsl::Pem);
@@ -76,7 +64,7 @@ void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPriva
         }
     }
 
-    const QString keyPath = resolvePath(keyPathRaw);
+    const QString keyPath = BackendCoreCertConfigService::resolveCertificatePath(state, keyPathRaw);
     QFile keyFile(keyPath);
     if (keyFile.open(QIODevice::ReadOnly)) {
         QSslKey key(&keyFile, QSsl::Rsa, QSsl::Pem);

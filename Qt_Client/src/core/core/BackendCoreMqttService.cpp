@@ -1,6 +1,7 @@
 ﻿#include "internal/core/BackendCoreMqttService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreCertConfigService.h"
 #include "internal/core/Backend_p.h"
 
 #include <QCoreApplication>
@@ -70,19 +71,6 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
             << "detected=" << detectTopic
             << "event=" << eventTopic
             << "thermal=" << thermalTopic;
-
-    auto resolvePath = [](const QString &rawPath) {
-        QFileInfo info(rawPath);
-        if (info.isAbsolute()) {
-            return rawPath;
-        }
-
-        const QString appSide = QCoreApplication::applicationDirPath() + "/" + rawPath;
-        if (QFileInfo::exists(appSide)) {
-            return appSide;
-        }
-        return rawPath;
-    };
 
     auto clientStateName = [](QMqttClient::ClientState value) -> const char * {
         switch (value) {
@@ -321,9 +309,9 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
     });
 
     if (useTls) {
-        const QString caPath = resolvePath(caPathRaw);
-        const QString certPath = resolvePath(certPathRaw);
-        const QString keyPath = resolvePath(keyPathRaw);
+        const QString caPath = BackendCoreCertConfigService::resolveCertificatePath(state, caPathRaw);
+        const QString certPath = BackendCoreCertConfigService::resolveCertificatePath(state, certPathRaw);
+        const QString keyPath = BackendCoreCertConfigService::resolveCertificatePath(state, keyPathRaw);
 
         QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
         bool tlsReady = true;
@@ -389,5 +377,22 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
 
     qInfo() << "[MQTT][TCP] connectToHost()";
     state->m_mqttClient->connectToHost();
+}
+
+void BackendCoreMqttService::reloadMqtt(Backend *backend, BackendPrivate *state)
+{
+    if (!backend || !state) {
+        return;
+    }
+
+    if (state->m_mqttClient) {
+        // 바뀐 인증서 경로로 MQTT를 다시 연결한다.
+        QMqttClient *client = state->m_mqttClient;
+        state->m_mqttClient = nullptr;
+        client->disconnectFromHost();
+        client->deleteLater();
+    }
+
+    setupMqtt(backend, state);
 }
 

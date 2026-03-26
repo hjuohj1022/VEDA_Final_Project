@@ -1,6 +1,7 @@
 ﻿#include "internal/core/BackendInitService.h"
 
 #include "Backend.h"
+#include "internal/core/BackendCoreCertConfigService.h"
 #include "internal/core/BackendCoreEventLogService.h"
 #include "internal/core/Backend_p.h"
 
@@ -24,6 +25,7 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
     state->m_manager->setCookieJar(new QNetworkCookieJar(backend));
     backend->setActiveCameras(0);
     backend->loadEnv();
+    BackendCoreCertConfigService::loadCertDirectoryOverride(backend, state);
     backend->setupSslConfiguration();
 
     QObject::connect(state->m_manager, &QNetworkAccessManager::authenticationRequired,

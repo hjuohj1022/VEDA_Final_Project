@@ -1,5 +1,6 @@
 ﻿import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import "../dialogs"
 
@@ -18,6 +19,8 @@ Item {
     property string signupEmailVerifiedId: ""
     property string signupEmailVerifiedAddress: ""
     property string signupEmailStatusText: ""
+    property string certDirectoryStatusText: ""
+    property bool certDirectoryStatusIsError: false
     property int authFieldWidth: 320
     property int authInlineButtonWidth: 78
     property int authInlineSpacing: 8
@@ -83,6 +86,34 @@ Item {
             return
         }
         backend.registerUser(idField.text, pwField.text, emailField.text)
+    }
+
+    // FolderDialog가 돌려준 file URL을 로컬 경로로 바꾼다.
+    function urlToLocalPath(u) {
+        var s = String(u || "")
+        if (s.indexOf("file:///") === 0) {
+            return decodeURIComponent(s.slice(8))
+        }
+        if (s.indexOf("file://") === 0) {
+            return decodeURIComponent(s.slice(7))
+        }
+        if (s.indexOf("file:/") === 0) {
+            return decodeURIComponent(s.slice(6))
+        }
+        return s
+    }
+
+    // 현재 인증서 폴더를 FolderDialog 초기 위치로 맞춘다.
+    function localPathToFileUrl(path) {
+        var s = String(path || "")
+        if (s.length === 0)
+            return ""
+        var normalized = s.replace(/\\/g, "/")
+        if (/^[A-Za-z]:\//.test(normalized))
+            return "file:///" + encodeURI(normalized)
+        if (normalized.indexOf("/") === 0)
+            return "file://" + encodeURI(normalized)
+        return normalized
     }
 
     // 회원가입 비밀번호 복잡도 검증 함수
@@ -802,6 +833,57 @@ Item {
                     }
                 }
 
+                Button {
+                    text: "인증서 경로 설정"
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    height: 36
+                    visible: !backend.twoFactorRequired
+                    scale: down ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                    background: Rectangle {
+                        color: parent.down ? (theme ? theme.border : "#27272a") : "transparent"
+                        border.color: theme ? theme.border : "#52525b"
+                        radius: 6
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme ? theme.textPrimary : "#f4f4f5"
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    onClicked: {
+                        certFolderDialog.currentFolder = root.localPathToFileUrl(backend.certDirectoryPath)
+                        certFolderDialog.open()
+                    }
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    visible: !backend.twoFactorRequired
+                    color: theme ? theme.textSecondary : "#a1a1aa"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    text: "인증서 폴더: " + backend.certDirectoryPath
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: root.authFieldWidth
+                    visible: !backend.twoFactorRequired && root.certDirectoryStatusText.length > 0
+                    color: root.certDirectoryStatusIsError
+                           ? "#ef4444"
+                           : "#22c55e"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    text: root.certDirectoryStatusText
+                }
+
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
@@ -1040,6 +1122,29 @@ Item {
             errorDialog.text = message && message.length > 0
                              ? message
                              : "비밀번호가 재설정되었습니다. 새 비밀번호로 로그인해 주세요."
+            errorDialog.open()
+        }
+    }
+
+    FolderDialog {
+        id: certFolderDialog
+        title: "인증서 폴더 선택"
+
+        onAccepted: {
+            var selectedPath = root.urlToLocalPath(selectedFolder)
+            if (!selectedPath || selectedPath.length === 0)
+                return
+
+            if (backend.updateCertDirectoryPath(selectedPath)) {
+                root.certDirectoryStatusIsError = false
+                root.certDirectoryStatusText = "인증서 폴더를 적용했습니다."
+                return
+            }
+
+            root.certDirectoryStatusIsError = true
+            root.certDirectoryStatusText = "인증서 폴더를 적용하지 못했습니다."
+            errorDialog.title = "인증서 경로 설정 실패"
+            errorDialog.text = "선택한 폴더를 인증서 경로로 적용하지 못했습니다."
             errorDialog.open()
         }
     }

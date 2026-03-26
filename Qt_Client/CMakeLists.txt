@@ -43,6 +43,8 @@ qt_add_executable(Team3VideoReceiver
     src/core/stream/BackendPlaybackWsRuntimeService.cpp
     src/core/core/BackendCoreEnv.cpp
     src/core/core/BackendCoreEnvService.cpp
+    src/core/core/BackendCoreCertConfig.cpp
+    src/core/core/BackendCoreCertConfigService.cpp
     src/core/core/BackendCoreSsl.cpp
     src/core/core/BackendCoreSslService.cpp
     src/core/core/BackendCoreMqtt.cpp

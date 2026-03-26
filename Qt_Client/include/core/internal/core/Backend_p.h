@@ -110,6 +110,7 @@ struct BackendPrivate
     QSslConfiguration m_sslConfig;
     bool m_sslConfigReady = false;
     bool m_sslIgnoreErrors = false;
+    QString m_certDirectoryOverride;
 
     // MQTT runtime state
     QPointer<QMqttClient> m_mqttClient;

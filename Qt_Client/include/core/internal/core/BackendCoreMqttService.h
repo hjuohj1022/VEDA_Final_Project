@@ -8,6 +8,7 @@ class BackendCoreMqttService
 {
 public:
     static void setupMqtt(Backend *backend, BackendPrivate *state);
+    static void reloadMqtt(Backend *backend, BackendPrivate *state);
 };
 
 #endif // BACKEND_CORE_MQTT_SERVICE_H
