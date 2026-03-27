@@ -5,8 +5,9 @@
 #include <cstdlib>
 #include <vector>
 
-// 모터 제어용 REST API의 MQTT request-response 래핑부.
-// 라우트는 JSON 검증 담당, MotorManager는 publish/응답대기/상태보관 담당.
+// 모터 제어 MQTT 요청-응답 래퍼 구현 파일이다.
+// REST 라우트는 입력 검증만 담당하고,
+// 실제 명령 발행, 응답 대기, 최근 상태 기록은 이 파일의 로직이 처리한다.
 namespace {
 constexpr int kMinMotorIndex = 1;
 constexpr int kMaxMotorIndex = 3;
@@ -306,7 +307,7 @@ MotorManager::MotorManager(const std::string& broker_host,
       control_topic_(control_topic),
       response_topic_(response_topic),
       timeout_ms_(timeout_ms) {
-    // response topic 선구독 및 도착 응답의 handleMessage() 집계.
+    // 응답 토픽을 먼저 구독하고, 도착한 응답은 handleMessage()로 한곳에서 모아 처리한다.
     mqtt_->set_message_callback([this](const std::string& topic, const std::string& payload) {
         handleMessage(topic, payload);
     });
@@ -435,7 +436,7 @@ MotorStatusSnapshot MotorManager::getStatus() const {
 }
 
 void MotorManager::handleMessage(const std::string& topic, const std::string& payload) {
-    // 현재 사용 대상은 response topic 하나, 해당 topic 메시지만 최신 응답으로 기록.
+    // 현재는 응답 토픽 하나만 사용하므로, 그 토픽에서 온 메시지만 최신 응답으로 기록한다.
     if (topic != response_topic_) {
         return;
     }
@@ -453,7 +454,7 @@ void MotorManager::handleMessage(const std::string& topic, const std::string& pa
 }
 
 void registerMotorRoutes(crow::SimpleApp& app, MotorManager& motor_mgr) {
-    // 아래 라우트들의 공통 구조: JSON 본문 검증 후 MotorManager 공통 sendCommand 경로 진입.
+    // 아래 라우트들은 모두 JSON 본문을 검증한 뒤 MotorManager의 공통 sendCommand 경로로 들어간다.
     CROW_ROUTE(app, "/motor/emergency").methods(crow::HTTPMethod::POST)
     ([&motor_mgr]() {
         return makeEmergencySequenceResponse(motor_mgr);

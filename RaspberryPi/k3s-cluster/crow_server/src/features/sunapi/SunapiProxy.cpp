@@ -12,8 +12,9 @@
 #include <sstream>
 #include <string>
 
-// SUNAPI HTTP API의 Crow 라우트 뒤 어댑터 계층.
-// main.cpp에 정의된 JWT 검증 함수
+// SUNAPI HTTP 인터페이스를 Crow 라우트 뒤에서 감싸는 프록시 구현 파일이다.
+// 프런트엔드가 사용하는 고정 API 형태를 카메라의 실제 SUNAPI 호출로 변환한다.
+// main.cpp에 정의된 JWT 검증 함수를 재사용한다.
 extern bool verifyJWT(const std::string& token);
 
 namespace {

@@ -12,7 +12,8 @@
 
 #pragma pack(push, 1)
 
-// Binary frame header used for single-payload CCTV streams.
+// 단일 페이로드 기반 CCTV 스트림이 프레임 앞부분에 붙여 보내는 고정 길이 헤더다.
+// 해상도와 페이로드 크기를 먼저 읽은 뒤, 뒤따르는 바이너리 프레임 본문을 안전하게 분리하는 데 사용한다.
 struct FrameHeader {
     uint32_t frame_idx;
     uint32_t width;
@@ -20,7 +21,8 @@ struct FrameHeader {
     uint32_t payload_size;
 };
 
-// Binary frame header used for RGBD streams with split depth and BGR payloads.
+// RGBD 스트림이 깊이 정보와 BGR 페이로드를 나눠 보낼 때 사용하는 헤더다.
+// 한 프레임 안에 두 개의 데이터 덩어리가 연속으로 들어오므로 각 크기를 따로 보관한다.
 struct RgbdHeader {
     uint32_t frame_idx;
     uint32_t width;
@@ -31,7 +33,8 @@ struct RgbdHeader {
 
 #pragma pack(pop)
 
-// Describes the payload format currently emitted by the CCTV backend stream.
+// 현재 백엔드가 보내는 CCTV 스트림 페이로드 형식을 나타낸다.
+// 프레임 읽기 루프는 이 값을 기준으로 어떤 헤더를 먼저 읽고, 이어서 어느 길이만큼 본문을 읽을지 결정한다.
 enum class CctvStreamMode {
     NONE,
     PC_IMAGE,
@@ -39,55 +42,58 @@ enum class CctvStreamMode {
     DEPTH_RAW
 };
 
-// Owns the TLS connection to the CCTV backend and delivers stream frames to Crow-side consumers.
+// CCTV 백엔드와의 실제 TLS 연결을 소유하고,
+// 제어 명령 요청/응답과 장기 스트림 수신을 모두 담당하는 핵심 매니저다.
 class CctvManager {
 public:
     using RawStreamCallback = std::function<void(const std::vector<uint8_t>&)>;
 
-    // Stores the backend connection parameters and certificate paths.
+    // 백엔드 주소와 TLS 인증서 경로를 보관해 이후 제어 연결/스트림 연결에 재사용한다.
     CctvManager(const std::string& host,
                 int port,
                 const std::string& ca_path,
                 const std::string& cert_path,
                 const std::string& key_path);
-    // Releases the stream socket, SSL context, and reader thread.
+    // 살아 있는 스트림 연결과 수신 스레드를 정리하고, OpenSSL 컨텍스트를 해제한다.
     ~CctvManager();
 
-    // Opens the long-lived CCTV stream connection and starts the reader thread.
+    // 장기 스트림 연결을 만들고 수신 스레드를 시작한다.
+    // 이미 연결 중이면 기존 상태를 정리한 뒤 다시 연결을 시도한다.
     bool connect();
-    // Stops the reader thread and closes any active TLS sockets.
+    // 수신 스레드를 멈추고 현재 열린 소켓과 SSL 객체를 모두 닫는다.
     void disconnect();
 
-    // Sends a control or stream command to the backend and returns the backend response text.
+    // 제어 명령 또는 스트림 시작 명령을 백엔드에 전달하고, 백엔드가 반환한 텍스트 응답을 돌려준다.
     std::string sendCommand(const std::string& command);
-    // Registers the callback that receives raw frame packets including backend headers.
+    // 스트림 수신 시 프레임 원본 바이트를 넘겨받을 콜백을 등록한다.
+    // 프록시 계층은 이 콜백을 통해 웹소켓 브로드캐스트를 수행한다.
     void setStreamCallback(RawStreamCallback cb) { stream_cb_ = cb; }
 
-    // Reports whether the streaming connection is currently established.
+    // 현재 장기 스트림 연결이 살아 있는지 확인한다.
     bool isConnected() const { return connected_; }
-    // Reports which binary stream format the backend is currently sending.
+    // 현재 수신 중인 스트림의 바이너리 포맷을 확인한다.
     CctvStreamMode getStreamMode() const { return stream_mode_; }
 
 private:
-    // Continuously reads binary frames from the backend and forwards them to the callback.
+    // 장기 스트림 소켓에서 프레임 헤더와 본문 바이트를 반복해서 읽어 콜백으로 전달한다.
     void streamLoop();
-    // Creates the SSL context used for CCTV backend connections.
+    // CCTV 연결 전용 SSL_CTX를 초기화하고 인증서/키/CA 정보를 적재한다.
     void initSsl();
-    // Frees the SSL context and any OpenSSL resources owned by this manager.
+    // 이 매니저가 소유한 SSL 컨텍스트와 OpenSSL 관련 리소스를 해제한다.
     void cleanupSsl();
-    // Reads exactly len bytes from the active backend stream socket.
+    // 활성 스트림 소켓에서 지정한 길이만큼 정확히 읽는다.
     bool readExact(void* buf, size_t len);
-    // Reads a newline-terminated response from the active control socket.
+    // 제어용 소켓에서 개행 단위 텍스트 응답 한 줄을 읽는다.
     std::string readLine();
-    // Applies a receive timeout to the active backend socket.
+    // 백엔드 소켓에 수신 타임아웃을 적용해 영원히 블로킹되지 않도록 한다.
     bool setSocketRecvTimeoutMs(int timeout_ms);
-    // Opens a one-off TLS connection for control commands or stream startup.
+    // 제어 명령 또는 스트림 시작용 단발성 TLS 연결을 생성한다.
     bool openTlsConnection(SSL** out_ssl, int* out_socket_fd);
-    // Closes a TLS connection previously opened by openTlsConnection().
+    // openTlsConnection()으로 만든 TLS 연결을 정리한다.
     void closeTlsConnection(SSL* ssl, int socket_fd);
-    // Executes a short-lived control command over a temporary TLS connection.
+    // 짧게 연결해서 요청/응답만 처리하는 제어 명령 경로다.
     std::string sendControlCommand(const std::string& command);
-    // Starts a streaming command and hands the resulting socket to the reader thread.
+    // 스트림 시작 명령을 보내고, 이후 지속 수신할 소켓을 수신 스레드에 넘긴다.
     std::string startStreamCommand(const std::string& command);
 
     std::string host_;

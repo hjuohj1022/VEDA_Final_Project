@@ -28,6 +28,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+// 열화상 UDP 스트림을 수신해 정규화하고,
+// 실시간 웹소켓 중계와 고온 지점 이벤트 감지, 자동 제어까지 수행하는 구현 파일이다.
 // main.cpp에서 제공하는 공용 JWT 검증 헬퍼를 그대로 재사용한다.
 bool verifyJWT(const std::string& token);
 
@@ -97,14 +99,14 @@ struct ThermalChunkHeader {
     bool hasRangeData = false;
 };
 
-// WebSocket 브로드캐스트용 바이너리 payload와 메타데이터를 함께 묶는다.
+// 웹소켓 브로드캐스트에 사용할 바이너리 본문과 메타데이터를 함께 묶는다.
 struct ThermalNormalizedPacket {
     ThermalPacketHeader header;
     bool hasRangeData = false;
     std::string wsPayload;
 };
 
-// frameId가 없는 레거시 송신자도 서버 쪽에서 synthetic frameId를 붙여 추적한다.
+// frameId가 없는 레거시 송신자도 서버 쪽에서 임시 프레임 식별자를 붙여 추적한다.
 struct ThermalLegacyFrameState {
     uint16_t frameId = 0;
     uint16_t totalChunks = 0;
@@ -119,7 +121,7 @@ struct ThermalNormalizerState {
     uint16_t nextSyntheticFrameId = 1;
 };
 
-// 여러 UDP 조각을 모아 "하나의 열화상 프레임"으로 재조립하는 중간 상태다.
+// 여러 UDP 조각을 모아 "하나의 열화상 프레임"으로 다시 조립하는 중간 상태다.
 struct ThermalFrameTracker {
     uint16_t totalChunks = 0;
     long long firstSeenAtMs = 0;
@@ -135,7 +137,7 @@ struct ThermalFrameTracker {
     std::set<uint16_t> uniqueChunks;
 };
 
-// 모든 청크가 모여 이벤트 분석과 WebSocket 송신이 가능한 완성 프레임이다.
+// 모든 조각이 모여 이벤트 분석과 웹소켓 송신이 가능한 완성 프레임이다.
 struct ThermalCompletedFrame {
     ThermalPacketHeader header;
     size_t payloadBytes = 0;
@@ -145,7 +147,7 @@ struct ThermalCompletedFrame {
     std::string framePayload;
 };
 
-// 이벤트 판정 시 실제로 분석할 열화상 관심 영역(ROI)이다.
+// 이벤트 판정 시 실제로 분석할 열화상 관심 영역이다.
 struct ThermalEventRoi {
     int x = 0;
     int y = 0;
@@ -169,7 +171,7 @@ struct ThermalEventFrameAnalysis {
     std::vector<int> roiRawValues;
 };
 
-// 임계값을 넘은 픽셀 덩어리를 하나의 후보 hotspot component로 표현한다.
+// 임계값을 넘은 픽셀 덩어리를 하나의 고온 지점 후보 덩어리로 표현한다.
 struct ThermalEventComponent {
     bool valid = false;
     int area = 0;
@@ -202,7 +204,7 @@ struct ThermalEventTrackerState {
     std::vector<uint8_t> prevMask;
 };
 
-// UDP 수신, 프레임 재조립, WebSocket 브로드캐스트 상태를 외부에 보여주기 위한 통계다.
+// UDP 수신, 프레임 재조립, 웹소켓 브로드캐스트 상태를 외부에 보여주기 위한 통계다.
 struct ThermalProxyStats {
     bool udp_bound = false;
     bool receiver_running = false;
@@ -343,13 +345,13 @@ struct ThermalEventConfig {
     bool laser_enabled = false;
 };
 
-// baseline 적응 임계값 계산을 위해 최근 정상 프레임 샘플을 저장한다.
+// 기준선 적응 임계값 계산을 위해 최근 정상 프레임 샘플을 저장한다.
 struct ThermalBaselineSample {
     long long observed_at_ms = 0;
     int signal_value = 0;
 };
 
-// 열화상 프록시의 전역 실행 상태. 수신 스레드와 WebSocket 클라이언트가 함께 공유한다.
+// 열화상 프록시의 전역 실행 상태다. 수신 스레드와 웹소켓 클라이언트가 함께 공유한다.
 struct ThermalProxyState {
     std::mutex state_mutex;
     std::mutex receiver_mutex;
@@ -558,7 +560,7 @@ uint16_t readBe16(const unsigned char* p)
     return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
 }
 
-// WebSocket으로 내보낼 canonical payload 헤더를 big-endian으로 기록한다.
+// 웹소켓으로 내보낼 표준 페이로드 헤더를 빅엔디언 순서로 기록한다.
 void writeBe16(char* p, uint16_t value)
 {
     p[0] = static_cast<char>((value >> 8) & 0xFF);
@@ -786,8 +788,8 @@ void finalizeCompletedThermalFrame(const ThermalPacketHeader& latestHeader,
     out.ready = true;
 }
 
-// 들어온 UDP 청크를 서버 내부 공통 포맷으로 정규화한다.
-// 이 단계에서 레거시 포맷은 synthetic frameId를 부여하고, WS 전송용 payload도 함께 만든다.
+// 들어온 UDP 조각을 서버 내부 공통 형식으로 정규화한다.
+// 이 단계에서 레거시 포맷은 임시 프레임 식별자를 부여하고, 웹소켓 전송용 본문도 함께 만든다.
 bool normalizeThermalPayload(const std::string& payload,
                              const std::string& senderKey,
                              long long nowMs,
@@ -921,7 +923,7 @@ bool decodeThermalFramePixelRaw(const ThermalCompletedFrame& frame, size_t pixel
     return false;
 }
 
-// 완성된 열화상 프레임에서 ROI 통계치를 계산해 이벤트 판정의 입력으로 쓴다.
+// 완성된 열화상 프레임에서 관심 영역 통계치를 계산해 이벤트 판정의 입력으로 쓴다.
 bool analyzeThermalEventFrame(const ThermalCompletedFrame& frame,
                               const ThermalEventConfig& config,
                               ThermalEventFrameAnalysis& out)
@@ -1153,7 +1155,7 @@ bool selectDiagnosticThermalComponent(const std::vector<ThermalEventComponent>& 
     return found;
 }
 
-// seed/grow 임계값을 기준으로 hotspot 후보 덩어리를 분리하고 각 후보의 품질 점수를 계산한다.
+// 시작 임계값과 확장 임계값을 기준으로 고온 지점 후보 덩어리를 분리하고 각 후보의 품질 점수를 계산한다.
 std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEventFrameAnalysis& analysis,
                                                                  int seedThreshold,
                                                                  int growThreshold,
@@ -1263,7 +1265,7 @@ std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEv
             hasTipAnchor
             && component.distanceToTipPx >= 0
             && component.distanceToTipPx > config.tip_distance_max_px;
-        // tip이 없으면 ROI 기반 탐지만 수행하고 거리 검사는 건너뜀
+        // 기준 팁 위치가 없으면 관심 영역 기반 탐지만 수행하고 거리 검사는 건너뛴다.
         component.valid =
             !areaTooSmall
             && !areaTooLarge
@@ -1295,7 +1297,7 @@ std::vector<ThermalEventComponent> extractThermalEventComponents(const ThermalEv
     return components;
 }
 
-// 여러 hotspot 후보 중 현재 프레임에서 가장 신뢰할 수 있는 후보 하나를 고른다.
+// 여러 고온 지점 후보 중 현재 프레임에서 가장 신뢰할 수 있는 후보 하나를 고른다.
 bool selectBestThermalEventComponent(const std::vector<ThermalEventComponent>& components,
                                      const ThermalEventConfig& config,
                                      ThermalEventComponent& out)
@@ -1369,7 +1371,7 @@ void updateThermalEventTrackerState(ThermalEventTrackerState& tracker,
     }
 }
 
-// tracker가 비워져도 active 해제 누적은 별도로 유지한다.
+// 추적기가 비워져도 활성 해제 누적은 별도로 유지한다.
 void updateThermalHotspotClearState(ThermalEventStats& stats,
                                     const ThermalEventConfig& config,
                                     bool analysisValid,
@@ -1394,7 +1396,7 @@ void updateThermalHotspotClearState(ThermalEventStats& stats,
     }
 
     const int requiredClearFrames = std::max(1, config.clear_frames);
-    // tracker miss와 별도로 active 해제 프레임을 누적한다.
+    // 추적기 누락 횟수와 별도로 활성 해제용 프레임 수를 누적한다.
     stats.active_clear_miss_frames = std::max(
         stats.active_clear_miss_frames + 1,
         std::max(candidateMissFrames, 0));
@@ -1534,7 +1536,7 @@ void updateThermalBaselineStatsLocked(const ThermalEventConfig& config, int base
     g_thermal.event_stats.current_clear_threshold_max_value = computeThermalClearThreshold(config, active_threshold);
 }
 
-// 이벤트 발행이나 자동 제어가 켜져 있을 때만 MQTT 클라이언트를 lazy-init 한다.
+// 이벤트 발행이나 자동 제어가 켜져 있을 때만 MQTT 클라이언트를 지연 초기화한다.
 MqttManager* ensureThermalEventMqtt(const ThermalEventConfig& config)
 {
     if (!config.event_enabled && !config.actuation_enabled) {
@@ -1550,7 +1552,7 @@ MqttManager* ensureThermalEventMqtt(const ThermalEventConfig& config)
     return g_thermal.event_mqtt.get();
 }
 
-// 감지 결과를 이벤트 로그/MQTT에서 함께 소비할 수 있는 JSON payload로 직렬화한다.
+// 감지 결과를 이벤트 로그와 MQTT에서 함께 소비할 수 있는 JSON 본문으로 직렬화한다.
 std::string makeThermalEventPayload(const ThermalEventConfig& config,
                                     const ThermalPacketHeader& header,
                                     int active_threshold,
@@ -1645,7 +1647,7 @@ bool publishThermalActuation(MqttManager* mqtt, const ThermalEventConfig& config
     return motor1_ok && motor2_ok && motor3_ok && laser_ok;
 }
 
-// 프레임 하나를 기준으로 hotspot 이벤트를 판정하고,
+// 프레임 하나를 기준으로 고온 지점 이벤트를 판정하고,
 // 조건을 만족하면 MQTT 이벤트 발행과 자동 제어까지 이어서 처리한다.
 void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
 {
@@ -1786,7 +1788,7 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                 best_component.valid ? &best_component : nullptr,
                 &tracker_cleared);
             candidate_persist_frames = g_thermal.event_tracker.persistFrames;
-            // clear 임계 도달 프레임은 상태 리셋 후에도 해제 조건에서 감지되게 유지
+            // 해제 임계값에 도달한 프레임은 상태 초기화 뒤에도 해제 조건 판정에 반영되게 유지한다.
             candidate_miss_frames = tracker_cleared ? config.clear_frames : g_thermal.event_tracker.missFrames;
         } else {
             hot_area_pixels = 0;
@@ -1912,7 +1914,7 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
                                        observed_signal_value,
                                        updated_clear_threshold);
         consecutive_hits = g_thermal.event_stats.consecutive_hits;
-        // baseline을 쓰는 모드에서는 준비 완료 후에만 이벤트를 발행한다.
+        // 기준선을 사용하는 모드에서는 준비가 끝난 뒤에만 이벤트를 발행한다.
         const bool baseline_ready_for_dispatch =
             !config.baseline_enabled || g_thermal.event_stats.baseline_ready;
 
@@ -2357,7 +2359,7 @@ void clearThermalFrameTrackers()
     g_thermal.event_stats.last_event_message.clear();
 }
 
-// 현재 연결된 모든 WebSocket 클라이언트에게 정규화된 열화상 청크를 전송한다.
+// 현재 연결된 모든 웹소켓 클라이언트에게 정규화된 열화상 조각을 전송한다.
 void broadcastThermalChunk(const std::string& payload)
 {
     const auto clients = snapshotClients();
@@ -2506,8 +2508,8 @@ crow::json::wvalue makeThermalStatusJson()
     return response;
 }
 
-// 백그라운드 UDP 수신 스레드 본체.
-// 수신 -> 정규화 -> 프레임 재조립/통계 업데이트 -> 이벤트 판정 -> WS 브로드캐스트 순서로 돈다.
+// 백그라운드 UDP 수신 스레드의 본체다.
+// 수신 -> 정규화 -> 프레임 재조립/통계 갱신 -> 이벤트 판정 -> 웹소켓 브로드캐스트 순서로 동작한다.
 void thermalReceiverLoop()
 {
     const std::string bind_host = envOrDefault("THERMAL_UDP_BIND_HOST", "0.0.0.0");
@@ -2612,14 +2614,14 @@ void thermalReceiverLoop()
         const std::string payload(buffer.data(), static_cast<size_t>(received));
         const long long now_ms = currentTimeMs();
 
-        // 네트워크에서 받은 원본 UDP payload를 내부 공통 포맷으로 먼저 맞춘다.
+        // 네트워크에서 받은 원본 UDP 본문을 내부 공통 형식으로 먼저 맞춘다.
         ThermalNormalizedPacket normalized{};
         if (!normalizeThermalPayload(payload, sender_key, now_ms, frame_timeout_ms, normalizer, normalized)) {
             noteInvalidPacketStats(payload.size(), sender_text, enable_frame_stats, stats_log_interval_ms);
             continue;
         }
 
-        // 프레임이 완성되면 이벤트 판정과 WS 브로드캐스트가 같은 루프 안에서 이어진다.
+        // 프레임이 완성되면 이벤트 판정과 웹소켓 브로드캐스트가 같은 루프 안에서 이어진다.
         ThermalCompletedFrame completedFrame{};
         updatePacketStats(normalized,
                           payload.size(),
@@ -2669,9 +2671,9 @@ void requestThermalReceiverStopIfIdle()
     }
     g_thermal.stop_requested.store(true);
 }
-} // namespace
+}  // 익명 네임스페이스
 
-// 열화상 제어용 REST와 실시간 스트리밍용 WebSocket 라우트를 등록한다.
+// 열화상 제어용 REST와 실시간 스트리밍용 웹소켓 라우트를 등록한다.
 void registerThermalProxyRoutes(crow::SimpleApp& app)
 {
     const ThermalEventConfig config = loadThermalEventConfig();

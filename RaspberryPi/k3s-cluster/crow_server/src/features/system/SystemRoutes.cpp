@@ -5,12 +5,16 @@
 #include <string>
 #include <sys/statvfs.h>
 
+// 시스템 점검용 REST 엔드포인트와 스웨거 정적 문서 서빙을 담당하는 구현 파일이다.
+// 운영자가 현재 서버 상태와 저장소 여유 공간을 확인하거나,
+// API 문서를 브라우저에서 바로 열 수 있게 하는 비교적 가벼운 기능을 모아둔다.
 namespace {
 constexpr char kRecordingDirectory[] = "/app/recordings";
 constexpr char kSwaggerIndexPath[] = "/app/swagger/index.html";
 constexpr char kSwaggerSpecPath[] = "/app/swagger/swagger.yaml";
 
-// 컨테이너 내부의 정적 파일을 읽어 적절한 Content-Type과 함께 반환한다.
+// 컨테이너 내부의 정적 파일을 읽어 HTTP 응답으로 반환한다.
+// 스웨거 UI HTML, OpenAPI YAML처럼 서버에 포함된 문서 자원을 그대로 서빙할 때 사용한다.
 crow::response serveFile(const char* path, const char* content_type, const char* not_found_message) {
     std::ifstream input(path);
     if (!input.is_open()) {
@@ -24,9 +28,10 @@ crow::response serveFile(const char* path, const char* content_type, const char*
     response.add_header("Content-Type", content_type);
     return response;
 }
-}  // namespace
+}  // 익명 네임스페이스
 
-// crow_server의 시스템 점검용 REST 라우트와 문서 서빙 라우트를 묶어 등록한다.
+// 시스템 점검용 REST와 문서 서빙 라우트를 한 번에 등록한다.
+// 보호가 필요한 저장소 조회와 공개해도 되는 헬스체크/문서 경로를 같은 모듈 안에서 함께 관리한다.
 void registerSystemRoutes(crow::SimpleApp& app, const RequestAuthorizer& is_authorized) {
     CROW_ROUTE(app, "/system/storage")
     ([is_authorized](const crow::request& req) {

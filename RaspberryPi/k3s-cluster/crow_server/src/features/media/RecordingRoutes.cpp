@@ -9,11 +9,15 @@
 
 namespace fs = std::filesystem;
 
+// 녹화 파일 관리용 REST 엔드포인트 구현 파일이다.
+// 녹화 목록 조회, 파일 삭제, 바이트 범위 기반 스트리밍 다운로드가
+// 동일한 경로 검증 규칙과 인증 규칙을 따르도록 한 곳에 모아뒀다.
 namespace {
 constexpr char kRecordingDirectory[] = "/app/recordings";
 constexpr long long kMaxStreamResponseBytes = 8LL * 1024LL * 1024LL;
 
-// HTTP Range 헤더에 들어온 숫자 문자열을 64비트 정수로 안전하게 변환한다.
+// HTTP 범위 헤더에 들어온 숫자 문자열을 64비트 정수로 안전하게 변환한다.
+// 숫자 외 문자가 섞여 있거나 파싱이 끝까지 되지 않으면 잘못된 범위로 간주한다.
 bool parseLongLong(const std::string& text, long long* value) {
     if (!value || text.empty()) {
         return false;
@@ -34,6 +38,7 @@ bool parseLongLong(const std::string& text, long long* value) {
 }
 
 // 디렉터리 탈출(`..`, `/`, `\\`) 시도를 막고 recordings 루트 아래 경로만 허용한다.
+// 삭제 경로와 스트리밍 경로가 모두 이 검사를 거치므로 파일 시스템 접근 보안의 핵심 지점이다.
 std::string resolveSafeRecordingPath(const std::string& filename) {
     if (filename.find("..") != std::string::npos ||
         filename.find('/') != std::string::npos ||
@@ -43,9 +48,10 @@ std::string resolveSafeRecordingPath(const std::string& filename) {
 
     return (fs::path(kRecordingDirectory) / filename).string();
 }
-}  // namespace
+}  // 익명 네임스페이스
 
-// 인증된 웹 클라이언트가 사용하는 녹화 관리 REST 엔드포인트를 한 곳에서 등록한다.
+// 인증된 웹 클라이언트가 사용하는 녹화 관리 라우트를 한 번에 등록한다.
+// 목록 조회, 삭제, 스트리밍이 같은 경로 보안 정책을 공유하도록 이 파일에 묶어둔다.
 void registerRecordingRoutes(crow::SimpleApp& app, const RequestAuthorizer& is_authorized) {
     CROW_ROUTE(app, "/recordings")
     ([is_authorized](const crow::request& req) {
@@ -56,7 +62,7 @@ void registerRecordingRoutes(crow::SimpleApp& app, const RequestAuthorizer& is_a
         crow::json::wvalue response;
         response["files"] = std::vector<std::string>();
 
-        // 현재 녹화 디렉터리의 mp4 파일만 노출해 클라이언트 목록을 구성한다.
+        // 현재 녹화 디렉터리의 mp4 파일만 노출해 화면에 보여줄 목록을 구성한다.
         if (fs::exists(kRecordingDirectory) && fs::is_directory(kRecordingDirectory)) {
             int index = 0;
             for (const auto& entry : fs::directory_iterator(kRecordingDirectory)) {

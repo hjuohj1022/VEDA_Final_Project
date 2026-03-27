@@ -21,6 +21,9 @@
 #include <type_traits>
 #include <vector>
 
+// 회원가입 이메일 인증과 비밀번호 재설정 보조 기능 구현 파일이다.
+// 인증 코드 생성/저장/검증, 메일 발송, 토큰 사용 처리 같은 부수 흐름을
+// 메인 인증 라우트와 분리해 관리하기 위해 이 파일에 모아뒀다.
 namespace {
 constexpr char kDatabaseName[] = "veda_db";
 constexpr size_t kMaxUserIdLength = 64;
@@ -80,7 +83,8 @@ struct SignupEmailVerificationState {
     bool consumed = false;
 };
 
-// DB 연결 생성 함수
+// 인증 관련 쿼리에서 공통으로 쓸 DB 연결을 생성한다.
+// 필수 환경 변수가 빠져 있으면 즉시 실패해 이후 로직이 애매한 상태로 진행되지 않게 한다.
 MysqlConnectionPtr openDatabaseConnection() {
     const char* db_host = std::getenv("DB_HOST");
     const char* db_user = std::getenv("DB_USER");
@@ -105,7 +109,8 @@ MysqlConnectionPtr openDatabaseConnection() {
     return connection;
 }
 
-// Prepared statement 생성 함수
+// 주어진 SQL로 준비된 질의문 객체를 만들고, 실패 시 빈 포인터를 돌려준다.
+// 이후 바인딩과 실행 단계는 호출부가 맡고, 여기서는 생성과 기본 오류 출력만 담당한다.
 MysqlStatementPtr prepareStatement(MYSQL* connection, const std::string& sql) {
     if (!connection) {
         return {};
@@ -137,7 +142,7 @@ std::string bytesToHex(const unsigned char* data, size_t size) {
     return hex;
 }
 
-// SHA-256 해시를 16진수 문자열로 계산하는 함수
+// 입력 문자열의 SHA-256 해시를 계산해 16진수 문자열로 바꾼다.
 std::string sha256Hex(const std::string& text) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
@@ -306,7 +311,8 @@ std::optional<std::string> validateEmailVerificationCode(const std::string& code
     return std::nullopt;
 }
 
-// Password reset code validation helper
+// 비밀번호 재설정 코드가 형식상 유효한지 확인한다.
+// 현재 정책은 6자리 숫자 문자열이며, 공백이나 다른 문자는 허용하지 않는다.
 std::optional<std::string> validatePasswordResetCode(const std::string& code) {
     if (code.empty()) {
         return "재설정 코드를 입력해 주세요.";
@@ -320,7 +326,8 @@ std::optional<std::string> validatePasswordResetCode(const std::string& code) {
     return std::nullopt;
 }
 
-// Trim leading/trailing ASCII whitespace from request/env values
+// 요청 본문이나 환경 변수에서 읽은 문자열의 앞뒤 공백을 정리한다.
+// 의도치 않은 공백 때문에 인증 코드나 메일 주소 비교가 실패하는 상황을 줄이기 위한 보조 함수다.
 std::string trimWhitespace(const std::string& value) {
     const auto first = std::find_if(value.begin(), value.end(), [](unsigned char ch) {
         return std::isspace(ch) == 0;
@@ -1422,7 +1429,8 @@ bool markTokenUsed(MYSQL* connection, const std::string& table_name, const std::
     return mysql_stmt_affected_rows(statement.get()) > 0;
 }
 
-// Delete unused recovery code record
+// 사용하지 않은 비밀번호 재설정 토큰 레코드를 삭제한다.
+// 토큰 재발급이나 만료 처리 시 불필요하게 남은 레코드를 정리할 때 사용한다.
 bool deleteRecoveryTokenByHash(MYSQL* connection,
                                const std::string& table_name,
                                const std::string& token_hash) {
@@ -1474,7 +1482,7 @@ std::string resolveRequestIp(const crow::request& req) {
     return {};
 }
 
-}  // namespace
+}  // 익명 네임스페이스
 
 // 이메일 인증/비밀번호 재설정 라우트 등록 함수
 void registerAuthRecoveryRoutes(crow::SimpleApp& app) {

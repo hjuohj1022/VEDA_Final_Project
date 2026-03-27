@@ -7,9 +7,12 @@
 #include <cstdlib>
 #include <string>
 
+// 구글 앱스 스크립트 기반 메일 전송 구현 파일이다.
+// 인증 코드나 복구 코드를 메일 본문에 담아 전송할 때 필요한
+// JSON 직렬화, HTTP POST 요청, 응답 수집 과정을 한 곳에서 담당한다.
 namespace {
 
-// JSON 문자열 이스케이프 함수
+// JSON 문자열 안에 그대로 넣기 어려운 문자를 안전한 이스케이프 형태로 바꾼다.
 std::string escapeJsonString(const std::string& text)
 {
     std::string escaped;
@@ -47,7 +50,7 @@ std::string escapeJsonString(const std::string& text)
     return escaped;
 }
 
-// 응답 본문 수집 콜백 함수
+// curl이 내려주는 응답 본문 조각을 하나의 문자열 버퍼로 이어 붙이는 콜백이다.
 size_t writeResponseCallback(char* ptr, size_t size, size_t nmemb, void* userdata)
 {
     if (!ptr || !userdata) {
@@ -59,16 +62,18 @@ size_t writeResponseCallback(char* ptr, size_t size, size_t nmemb, void* userdat
     return size * nmemb;
 }
 
-// 환경 변수 문자열 조회 함수
+// 주어진 환경 변수 값을 문자열로 읽고, 없으면 빈 문자열을 돌려준다.
 std::string readEnvString(const char* key)
 {
     const char* value = std::getenv(key);
     return value ? std::string(value) : std::string{};
 }
 
-}  // namespace
+}  // 익명 네임스페이스
 
-// Apps Script 메일 발송 웹앱 호출 함수
+// 앱스 스크립트 웹앱으로 실제 메일 발송 요청을 보내는 공개 진입점이다.
+// 외부 호출부는 이 함수를 통해 메일 목적과 코드를 넘기고,
+// 실패 시 상세 사유를 error_message로 받아 사용자 안내나 로그에 활용한다.
 bool sendAppScriptMail(const std::string& to_email,
                        const std::string& code,
                        const std::string& purpose,

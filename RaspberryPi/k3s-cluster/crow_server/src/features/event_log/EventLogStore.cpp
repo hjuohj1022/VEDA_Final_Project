@@ -14,6 +14,9 @@
 #include <utility>
 #include <vector>
 
+// 이벤트 로그 테이블 전용 DB 접근 구현 파일이다.
+// 이벤트 저장, 최근 목록 조회, 조치 결과 갱신, 삭제처럼
+// event_logs 테이블과 직접 맞닿는 SQL 처리를 이 파일에 모아둔다.
 namespace {
 constexpr char kDatabaseName[] = "veda_db";
 
@@ -155,7 +158,7 @@ std::optional<std::string> parseOptionalString(const char* text, unsigned long l
     }
     return std::string(text, length);
 }
-} // namespace
+}  // 익명 네임스페이스
 
 bool insertEventLog(const EventLogInsertParams& params, unsigned long long* inserted_id)
 {

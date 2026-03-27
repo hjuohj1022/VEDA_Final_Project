@@ -6,7 +6,11 @@
 #include <string>
 #include <vector>
 
+// 이벤트 로그 REST 엔드포인트 구현 파일이다.
+// HTTP 계층의 입력 검증과 JSON 응답 구성만 담당하고,
+// 실제 DB CRUD는 EventLogStore에 위임해 역할을 분리한다.
 namespace {
+// limit 쿼리 문자열을 안전한 범위의 정수로 변환한다.
 int parseLimit(const char* raw_limit)
 {
     if (!raw_limit) {
@@ -42,7 +46,7 @@ bool parseEventLogId(const std::string& raw_id, unsigned long long* out_id)
     *out_id = parsed;
     return true;
 }
-} // namespace
+}  // 익명 네임스페이스
 
 void registerEventLogRoutes(crow::SimpleApp& app, const RequestAuthorizer& is_authorized)
 {

@@ -12,8 +12,9 @@
 #include <iostream>
 #include <vector>
 
-// CCTV 백엔드와의 실제 TLS 입출력 담당부.
-// 제어 명령은 짧은 연결, 스트림은 장기 연결 + reader thread 분리 처리 구조.
+// CCTV 백엔드와의 실제 TLS 통신을 담당하는 구현 파일이다.
+// 제어 명령은 짧은 요청/응답 연결로 처리하고,
+// 스트림은 장기 연결과 수신 스레드를 분리해 안정적으로 유지한다.
 namespace {
 // 일반 제어 명령 및 스트림 ACK의 단기 응답 시간 상한.
 constexpr int kCommandResponseTimeoutMs = 3000;
@@ -198,8 +199,8 @@ bool CctvManager::connect() {
         return true;
     }
 
-    // 이전 stream ACK/read 실패 뒤 남은 stale 상태 정리 목적.
-    // 새 thread 생성 전 join 가능한 reader thread 정리 필요.
+    // 이전 스트림 시작 확인 응답 실패나 읽기 실패 뒤 남은 오래된 상태를 정리한다.
+    // 새 스레드를 만들기 전에 join 가능한 기존 수신 스레드를 반드시 회수해야 한다.
     stop_thread_ = true;
     lock.unlock();
     if (reader_thread_.joinable()) {
@@ -224,7 +225,7 @@ bool CctvManager::connect() {
 }
 
 void CctvManager::disconnect() {
-    // 소멸자 경로 포함, thread 종료 후 소켓/SSL 리소스 추가 정리.
+    // 소멸자 경로를 포함해, 수신 스레드를 종료한 뒤 소켓과 SSL 자원을 추가로 정리한다.
     stop_thread_ = true;
     if (reader_thread_.joinable()) {
         reader_thread_.join();
@@ -239,7 +240,7 @@ void CctvManager::disconnect() {
 }
 
 std::string CctvManager::sendControlCommand(const std::string& command) {
-    // 스트림 연결과 분리된 전용 소켓 기반 요청/응답 1회 처리.
+    // 스트림 연결과 분리된 전용 소켓으로 제어 요청 하나와 응답 한 번을 처리한다.
     SSL* control_ssl = nullptr;
     int control_fd = -1;
     if (!openTlsConnection(&control_ssl, &control_fd)) {
@@ -288,7 +289,7 @@ std::string CctvManager::sendControlCommand(const std::string& command) {
 }
 
 std::string CctvManager::startStreamCommand(const std::string& command) {
-    // 장기 연결 상태 진입 및 streamLoop 읽기 모드 결정.
+    // 장기 연결 상태로 진입하고, streamLoop가 어떤 방식으로 읽어야 할지 모드를 결정한다.
     if (!connected_ && !connect()) {
         return "Error: Not connected";
     }
@@ -341,8 +342,8 @@ std::string CctvManager::sendCommand(const std::string& command) {
 }
 
 void CctvManager::streamLoop() {
-    // stream_mode_ 기준 헤더 선행 읽기 후 payload 연속 읽기.
-    // reader thread의 역할은 해석이 아닌 프레임 단위 바이트 배열 전달.
+    // stream_mode_ 기준으로 헤더를 먼저 읽고, 그 뒤 필요한 길이만큼 본문 바이트를 연속해서 읽는다.
+    // 수신 스레드의 역할은 데이터를 해석하는 것이 아니라 프레임 단위 바이트 묶음을 안정적으로 넘기는 데 있다.
     while (!stop_thread_) {
         if (stream_mode_ == CctvStreamMode::NONE) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));

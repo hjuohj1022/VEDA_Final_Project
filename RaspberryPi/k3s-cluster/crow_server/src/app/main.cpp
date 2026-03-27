@@ -34,8 +34,9 @@
 #include <utility>
 #include <vector>
 
-// crow_server의 진입점.
-// 인증과 서비스 부트스트랩을 담당하며, 세부 기능 라우트는 feature 모듈에 위임한다.
+// crow_server의 메인 엔트리 파일이다.
+// 인증, 계정 관리, 2단계 인증, 외부 서비스 초기화처럼 여러 기능을 하나의 앱으로 조립하며,
+// 세부 네트워크 처리나 개별 기능 구현은 각 기능 모듈에 위임하고 여기서는 공통 보안 흐름과 부트스트랩에 집중한다.
 
 std::string getJwtSecret();
 
@@ -43,8 +44,8 @@ namespace {
 bool verifyTokenStage(const std::string& token,
                       const std::string& expected_stage,
                       std::string* user_id_out);
-// 인증/DB/파일 스트리밍 헬퍼의 라우트 바깥 배치.
-// main()의 서비스 등록 흐름 집중 목적 구조.
+// 인증, DB, 파일 스트리밍 관련 보조 함수를 라우트 바깥에 모아 둔다.
+// 이렇게 하면 main()은 서비스 등록 흐름과 상위 초기화 순서에 더 집중할 수 있다.
 constexpr char kDatabaseName[] = "veda_db";
 constexpr size_t kMaxUserIdLength = 64;
 constexpr size_t kMaxPasswordLength = 128;
@@ -56,7 +57,7 @@ constexpr size_t kPasswordSaltBytes = 16;
 constexpr size_t kPasswordHashBytes = 32;
 constexpr char kPasswordHashPrefix[] = "pbkdf2_sha256";
 constexpr unsigned int kMysqlErrDuplicateEntry = 1062;
-// TOTP 2FA는 Authenticator 앱과 서버가 동일한 규칙을 공유해야 하므로 상수로 고정한다.
+// TOTP 기반 2단계 인증은 인증 앱과 서버가 동일한 규칙을 공유해야 하므로 관련 값을 상수로 고정한다.
 constexpr size_t kTotpSecretBufferBytes = 128;
 constexpr size_t kTotpSecretBytes = 20;
 constexpr int kTotpDigits = 6;
@@ -89,7 +90,7 @@ struct MysqlStatementCloser {
 using MysqlConnectionPtr = std::unique_ptr<MYSQL, MysqlConnectionCloser>;
 using MysqlStatementPtr = std::unique_ptr<MYSQL_STMT, MysqlStatementCloser>;
 
-// users 테이블의 2FA 관련 상태를 한 번에 읽어 라우트 분기에서 재사용한다.
+// users 테이블의 2단계 인증 관련 상태를 한 번에 읽어 라우트 분기에서 재사용한다.
 struct UserTwoFactorInfo {
     bool found = false;
     bool enabled = false;
@@ -465,7 +466,7 @@ bool updateStoredPasswordHash(MYSQL* connection,
     return true;
 }
 
-// OTP는 검증 로직에 들어가기 전에 숫자 6자리 형식인지 먼저 확인한다.
+// OTP는 실제 검증 로직에 들어가기 전에 숫자 6자리 형식인지 먼저 확인한다.
 std::optional<std::string> validateOtpCode(const std::string& code) {
     if (code.size() != static_cast<size_t>(kTotpDigits)) {
         return "OTP must be 6 digits";
@@ -506,7 +507,7 @@ std::string urlEncodeComponent(const std::string& input) {
     return oss.str();
 }
 
-// Authenticator 앱과의 호환을 위해 secret은 Base32 문자열로 저장하고 전달한다.
+// 인증 앱과의 호환을 위해 비밀키는 Base32 문자열 형태로 저장하고 전달한다.
 std::string base32Encode(const unsigned char* data, size_t size) {
     static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -597,7 +598,7 @@ std::string buildOtpAuthUrl(const std::string& issuer,
            "&period=" + std::to_string(kTotpPeriodSeconds);
 }
 
-// RFC 6238 방식으로 현재 time-step에 대응하는 6자리 OTP를 계산한다.
+// RFC 6238 방식으로 현재 시간 구간에 대응하는 6자리 OTP를 계산한다.
 bool generateTotpCodeAtStep(const std::string& base32_secret,
                             long long step,
                             std::string* out_code) {
@@ -661,7 +662,7 @@ bool verifyTotpCode(const std::string& base32_secret,
     const long long now = static_cast<long long>(std::time(nullptr));
     const long long current_step = now / kTotpPeriodSeconds;
 
-    // 시간 오차를 조금 허용하되, 이미 사용한 step 이하의 OTP는 재사용하지 않는다.
+    // 시간 오차는 조금 허용하되, 이미 사용한 구간 이하의 OTP는 다시 쓰지 못하게 막는다.
     for (int delta = -kTotpAllowedSkewSteps; delta <= kTotpAllowedSkewSteps; ++delta) {
         const long long candidate_step = current_step + delta;
         if (candidate_step < 0 || candidate_step <= last_used_step) {
@@ -685,7 +686,7 @@ bool verifyTotpCode(const std::string& base32_secret,
     return false;
 }
 
-// 로그인과 /2fa 라우트에서 공통으로 쓰는 2FA 상태 조회를 prepared statement로 묶는다.
+// 로그인과 /2fa 라우트에서 공통으로 쓰는 2단계 인증 상태 조회를 준비된 질의문으로 묶는다.
 bool loadUserTwoFactorInfo(MYSQL* connection,
                            const std::string& user_id,
                            UserTwoFactorInfo* out) {
@@ -800,7 +801,7 @@ bool loadUserTwoFactorInfo(MYSQL* connection,
     return true;
 }
 
-// setup/init 단계에서는 아직 활성화하지 않고 pending secret으로만 저장한다.
+// setup/init 단계에서는 아직 활성화하지 않고 임시 비밀키 상태로만 저장한다.
 bool savePendingTotpSecret(MYSQL* connection,
                            const std::string& user_id,
                            const std::string& pending_secret,
@@ -846,7 +847,7 @@ bool savePendingTotpSecret(MYSQL* connection,
     return true;
 }
 
-// 첫 OTP 검증이 끝난 시점에만 pending secret을 실제 로그인용 secret으로 승격한다.
+// 첫 OTP 검증이 끝난 시점에만 임시 비밀키를 실제 로그인용 비밀키로 승격한다.
 bool activatePendingTotpSecret(MYSQL* connection,
                                const std::string& user_id,
                                long long step) {
@@ -889,7 +890,7 @@ bool activatePendingTotpSecret(MYSQL* connection,
     return mysql_stmt_affected_rows(statement.get()) > 0;
 }
 
-// 같은 30초 window의 OTP 재사용을 막기 위해 마지막으로 승인한 step을 기록한다.
+// 같은 30초 구간의 OTP 재사용을 막기 위해 마지막으로 승인한 시간 구간을 기록한다.
 bool updateLastUsedTotpStep(MYSQL* connection,
                             const std::string& user_id,
                             long long step) {
@@ -925,7 +926,7 @@ bool updateLastUsedTotpStep(MYSQL* connection,
     return true;
 }
 
-// 2FA 비활성화 시에는 active/pending 상태를 모두 지워 다음 설정을 깨끗하게 시작한다.
+// 2단계 인증 비활성화 시에는 활성/대기 상태를 모두 지워 다음 설정을 깨끗하게 시작한다.
 bool disableUserTwoFactor(MYSQL* connection,
                           const std::string& user_id) {
     auto statement = prepareStatement(
@@ -962,8 +963,9 @@ bool disableUserTwoFactor(MYSQL* connection,
     return true;
 }
 
-// Account deletion is intentionally a separate helper so the route can stay focused
-// on security checks: authenticated user, password re-entry, optional OTP, then delete.
+// 계정 삭제 자체는 별도 헬퍼로 분리해 둔다.
+// 라우트 본문은 "인증된 사용자 확인 -> 비밀번호 재입력 확인 -> 필요 시 OTP 검증 -> 실제 삭제"라는
+// 보안 흐름에만 집중하고, 실제 삭제 질의문의 세부 구현은 이 함수가 맡는다.
 bool deleteUserAccount(MYSQL* connection,
                        const std::string& user_id) {
     auto statement = prepareStatement(connection, "DELETE FROM users WHERE id = ? LIMIT 1");
@@ -1105,9 +1107,9 @@ bool loadUserEmailVerificationState(MYSQL* connection,
     return true;
 }
 
-// A signed JWT is not enough on its own once account deletion is supported.
-// Protected APIs should also confirm that the user row still exists, otherwise
-// an old token issued before deletion could continue to work until expiry.
+// 계정 삭제가 지원되는 시점부터는 "서명된 JWT"만으로는 충분하지 않다.
+// 보호 라우트는 토큰 검증 외에도 실제 사용자 행이 아직 남아 있는지 다시 확인해야 하며,
+// 그렇지 않으면 삭제 전에 발급된 예전 토큰이 만료 시점까지 계속 살아 있을 수 있다.
 bool doesUserExist(MYSQL* connection,
                    const std::string& user_id) {
     if (!connection) {
@@ -1195,7 +1197,7 @@ bool loadExistingFullJwtUserId(const std::string& token,
     return true;
 }
 
-// full access token과 pre_2fa token을 같은 포맷으로 발급하고 claim으로만 역할을 구분한다.
+// 정식 접근 토큰과 2차 인증 전 임시 토큰을 같은 형식으로 발급하고, 클레임 값으로만 역할을 구분한다.
 std::string generateToken(const std::string& user_id,
                           const std::string& auth_stage,
                           std::chrono::seconds ttl) {
@@ -1229,7 +1231,7 @@ bool verifyTokenStage(const std::string& token,
             const std::string auth_stage = decoded.get_payload_claim("auth_stage").as_string();
             return auth_stage == expected_stage;
         } catch (const std::exception&) {
-            // 구형 토큰과의 호환을 위해 auth_stage가 없으면 full 토큰으로만 간주한다.
+            // 구형 토큰과의 호환을 위해 auth_stage가 없으면 정식 접근 토큰으로만 간주한다.
             return expected_stage == kJwtStageFull;
         }
     } catch (const std::exception& e) {
@@ -1238,7 +1240,7 @@ bool verifyTokenStage(const std::string& token,
     }
 }
 
-// 보호 라우트는 full stage JWT만 통과시키고 pre_auth 토큰은 막는다.
+// 보호 라우트는 정식 단계 JWT만 통과시키고 pre_auth 토큰은 막는다.
 std::optional<std::string> getAuthorizedUserId(const crow::request& req) {
     const auto token = extractBearerToken(req);
     if (!token) {
@@ -1246,16 +1248,15 @@ std::optional<std::string> getAuthorizedUserId(const crow::request& req) {
     }
 
     std::string user_id;
-    // The token must be a full-access JWT and its owner must still exist.
-    // This closes the gap where a deleted account could keep using an old JWT
-    // until the token expiration time.
+    // 보호 라우트에서는 "정식 권한 JWT"이면서, 그 토큰의 소유자 계정도 실제로 존재해야 한다.
+    // 이렇게 해야 삭제된 계정이 예전 토큰만으로 만료 시점까지 계속 API를 호출하는 틈을 막을 수 있다.
     if (!loadExistingFullJwtUserId(*token, &user_id)) {
         return std::nullopt;
     }
 
     return user_id;
 }
-}  // namespace
+}  // 익명 네임스페이스
 
 // -------------------------------------------------------
 // JWT 관련 설정 및 함수
@@ -1282,20 +1283,20 @@ bool verifyPreAuthJWT(const std::string& token, std::string* user_id_out) {
 }
 
 // -------------------------------------------------------
-// MariaDB에서 ID/PW 확인
+// MariaDB에서 아이디/비밀번호를 확인하는 구형 호환용 함수다.
 // -------------------------------------------------------
 [[maybe_unused]] bool checkUserFromDBLegacy(std::string inputId, std::string inputPw) {
     MYSQL *conn;
     MYSQL_RES *res;
     MYSQL_ROW row;
     
-    // 환경변수에서 접속 정보 가져오기 (YAML에 설정함)
+    // 환경 변수에서 접속 정보를 가져온다.
     const char* db_host = std::getenv("DB_HOST");     // mariadb-service
     const char* db_user = std::getenv("DB_USER");     // veda_user
     const char* db_pass = std::getenv("DB_PASSWORD"); // secret에서 가져옴
     const char* db_name = "veda_db";                  // DB 이름 (YAML에 설정 필요, 없으면 기본값)
 
-    // 환경변수 없으면 실패 처리 (안전장치)
+    // 필수 환경 변수가 없으면 즉시 실패 처리한다.
     if(!db_host || !db_user || !db_pass) {
         std::cerr << "[Error] DB Environment variables are missing!" << std::endl;
         return false;
@@ -1303,15 +1304,15 @@ bool verifyPreAuthJWT(const std::string& token, std::string* user_id_out) {
 
     conn = mysql_init(NULL);
 
-    // DB 연결
+    // 데이터베이스 연결을 시도한다.
     if (!mysql_real_connect(conn, db_host, db_user, db_pass, "veda_db", 3306, NULL, 0)) {
         std::cerr << "[DB Error] " << mysql_error(conn) << std::endl;
         mysql_close(conn);
         return false;
     }
 
-    // 쿼리 실행 (보안을 위해선 PreparedStatement를 써야 하지만, 지금은 간단히 구현)
-    // 주의: 실제 상용 서비스에선 SQL Injection 방지 처리가 필요함
+    // 쿼리를 직접 문자열로 조립해 실행하는 단순 구현이다.
+    // 실제 운영 코드에서는 준비된 질의문을 사용해 SQL 삽입 공격을 반드시 막아야 한다.
     std::string query = "SELECT count(*) FROM users WHERE id='" + inputId + "' AND password='" + inputPw + "'";
     
     if (mysql_query(conn, query.c_str())) {
@@ -1324,7 +1325,7 @@ bool verifyPreAuthJWT(const std::string& token, std::string* user_id_out) {
     res = mysql_use_result(conn);
     bool loginSuccess = false;
     if ((row = mysql_fetch_row(res)) != NULL) {
-        // count(*)가 1이면 로그인 성공
+        // count(*)가 1이면 로그인 성공으로 판단한다.
         if (std::stoi(row[0]) == 1) {
             loginSuccess = true;
         }
@@ -1404,7 +1405,7 @@ bool checkUserFromDBSecure(const std::string& inputId, const std::string& inputP
 RegisterUserStatus registerUserToDBSecure(const std::string& inputId,
                                           const std::string& inputPw,
                                           const std::string& inputEmail) {
-    // 신규 계정의 prepared statement + PBKDF2 해시 형태 저장.
+    // 신규 계정은 준비된 질의문과 PBKDF2 해시 형태로 저장한다.
     if (validateRegistrationCredentials(inputId, inputPw)) {
         return RegisterUserStatus::InvalidInput;
     }
@@ -1474,22 +1475,22 @@ RegisterUserStatus registerUserToDBSecure(const std::string& inputId,
 
 int main()
 {
-    // mosquitto 전역 초기화의 앱 수명 동안 1회 유지.
+    // mosquitto 전역 초기화는 앱 수명 동안 한 번만 유지한다.
     MqttLibraryGuard mqtt_library_guard;
     crow::SimpleApp app;
 
-    // SUNAPI 프록시 라우트 등록 (/sunapi/stw-cgi/*)
+    // SUNAPI 프록시 라우트를 등록한다. (/sunapi/stw-cgi/*)
     registerSunapiProxyRoutes(app);
-    // SUNAPI StreamingServer WebSocket 프록시 등록 (/sunapi/StreamingServer)
+    // SUNAPI StreamingServer 웹소켓 프록시를 등록한다. (/sunapi/StreamingServer)
     registerSunapiWsProxyRoutes(app);
 
     // ==========================================
-    // CCTV 매니저 초기화 및 라우트 등록
+    // CCTV 매니저를 초기화하고 관련 라우트를 등록한다.
     // ==========================================
     const char* cctv_host = std::getenv("CCTV_BACKEND_HOST") ? std::getenv("CCTV_BACKEND_HOST") : "127.0.0.1";
     int cctv_port = std::getenv("CCTV_BACKEND_PORT") ? std::atoi(std::getenv("CCTV_BACKEND_PORT")) : 9090;
     
-    // 인증서 경로 (기본값 설정)
+    // CCTV 백엔드 접속에 쓸 인증서 경로의 기본값을 잡는다.
     std::string cert_dir = "/app/certs";
     CctvManager cctv_mgr(
         cctv_host, cctv_port,
@@ -1498,7 +1499,7 @@ int main()
         cert_dir + "/cctv.key"
     );
     
-    // CCTV 라우트 등록
+    // CCTV 관련 라우트를 등록한다.
     registerCctvProxyRoutes(app, cctv_mgr);
     registerThermalProxyRoutes(app);
 
@@ -1656,7 +1657,7 @@ int main()
             return crow::response(409, "2FA is already enabled");
         }
 
-        // setup/init은 secret을 발급만 하고 confirm 전까지 pending 상태로 유지한다.
+        // setup/init은 비밀키를 발급만 하고 confirm 전까지 임시 상태로 유지한다.
         const std::string secret = generateRandomBase32Secret();
         if (secret.empty()) {
             return crow::response(500, "Failed to generate TOTP secret");
@@ -1711,7 +1712,7 @@ int main()
         }
 
         long long matched_step = -1;
-        // 첫 OTP가 맞아야만 pending secret을 실제 secret으로 활성화한다.
+        // 첫 OTP가 맞아야만 임시 비밀키를 실제 비밀키로 활성화한다.
         if (!verifyTotpCode(two_factor_info.pending_secret, otp, -1, &matched_step)) {
             return crow::response(401, "Invalid OTP");
         }
@@ -1821,9 +1822,9 @@ int main()
 
     CROW_ROUTE(app, "/account/delete").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
-        // Account deletion is protected by the normal full JWT and then one more
-        // local proof step. Even if a session token is stolen, the attacker still
-        // needs the current password and, when 2FA is enabled, the live OTP code.
+        // 계정 삭제는 일반 보호 API보다 한 단계 더 강한 확인 절차를 둔다.
+        // 세션 토큰이 탈취되더라도 현재 비밀번호를 다시 알아야 하고,
+        // 2FA가 켜져 있으면 실시간 OTP까지 있어야 삭제가 가능하도록 만든다.
         const auto user_id = getAuthorizedUserId(req);
         if (!user_id) {
             return crow::response(401, "Unauthorized");
@@ -1850,9 +1851,8 @@ int main()
             return crow::response(500, "Database connection failed");
         }
 
-        // First confirm that the caller still knows the current password for the
-        // authenticated account. This prevents "click once and delete" behavior
-        // from an already-open session.
+        // 먼저 로그인된 사용자가 현재 비밀번호를 실제로 다시 알고 있는지 확인한다.
+        // 이렇게 해야 이미 열린 세션만으로 단번에 계정을 지워 버리는 위험을 줄일 수 있다.
         if (!verifyUserPassword(connection.get(), *user_id, password)) {
             return crow::response(401, "Invalid password");
         }
@@ -1873,16 +1873,15 @@ int main()
             }
 
             long long matched_step = -1;
-            // When 2FA is enabled we require a fresh OTP from the authenticator app
-            // before deleting the account. The same replay protection rule used by
-            // login/disable is reused here through last_used_step.
+            // 2FA가 활성화된 계정은 삭제 직전에도 인증 앱의 최신 OTP를 다시 요구한다.
+            // 또한 last_used_step을 재사용해 로그인/비활성화와 동일한 재사용 방지 규칙을 적용한다.
             if (!verifyTotpCode(two_factor_info.secret, otp, two_factor_info.last_used_step, &matched_step)) {
                 return crow::response(401, "Invalid OTP");
             }
         }
 
-        // At this point the requester passed all configured identity checks, so
-        // the actual row can be removed from the users table.
+        // 여기까지 통과했다면 요청자는 구성된 모든 신원 확인 절차를 마친 상태이므로,
+        // 이제 users 테이블의 실제 계정 행을 삭제해도 된다.
         if (!deleteUserAccount(connection.get(), *user_id)) {
             return crow::response(500, "Failed to delete user");
         }
@@ -1894,11 +1893,11 @@ int main()
     });
 
     // ==========================================
-    // 로그인 계정 비밀번호 변경 API
+    // 로그인한 계정의 비밀번호 변경 API
     // ==========================================
     CROW_ROUTE(app, "/account/password/change").methods(crow::HTTPMethod::POST)
     ([](const crow::request& req){
-        // 로그인 완료(JWT full stage) 사용자만 비밀번호 변경 허용
+        // 로그인 완료 상태의 JWT를 가진 사용자만 비밀번호 변경을 허용한다.
         const auto user_id = getAuthorizedUserId(req);
         if (!user_id) {
             return crow::response(401, "Unauthorized");
@@ -1924,7 +1923,7 @@ int main()
             return crow::response(400, "새 비밀번호는 현재 비밀번호와 달라야 합니다.");
         }
 
-        // 신규 비밀번호는 회원가입과 동일한 복잡도 정책 적용
+        // 새 비밀번호에는 회원가입과 동일한 복잡도 정책을 적용한다.
         if (const auto complexity_error = validatePasswordComplexity(new_password)) {
             return crow::response(400, *complexity_error);
         }
@@ -1970,11 +1969,11 @@ int main()
             return crow::response(400, *credential_error);
         }
 
-        // mTLS 정보 확인 (로깅용)
+        // mTLS 정보는 운영 로그 확인용으로만 읽는다.
         std::string device_id = req.get_header_value("X-Device-ID");
         if (!device_id.empty()) std::cout << "[mTLS Device] " << device_id << std::endl;
 
-        // DB 확인 후 토큰 생성
+        // 사용자 확인이 끝난 뒤 토큰을 생성한다.
         auto connection = openDatabaseConnection();
         if (!connection) {
             return crow::response(500, "데이터베이스 연결에 실패했습니다.");
@@ -1985,7 +1984,7 @@ int main()
         }
 
         UserEmailVerificationState email_state;
-        // 이메일이 등록된 계정은 인증 완료 전 로그인 차단, 이메일 미등록(레거시) 계정은 허용
+        // 이메일이 등록된 계정은 인증 완료 전 로그인을 막고, 이메일이 없는 레거시 계정은 허용한다.
         if (!loadUserEmailVerificationState(connection.get(), id, &email_state)) {
             return crow::response(500, "이메일 인증 상태를 불러오지 못했습니다.");
         }
@@ -2003,14 +2002,14 @@ int main()
 
         crow::json::wvalue res;
         if (!two_factor_info.enabled) {
-            // 2FA가 꺼져 있으면 기존과 동일하게 바로 access token을 내려준다.
+            // 2FA가 꺼져 있으면 기존과 동일하게 바로 접근 토큰을 내려준다.
             res["status"] = "success";
             res["requires_2fa"] = false;
             res["token"] = generateJWT(id);
             return crow::response(res);
         }
 
-        // 2FA 사용자는 access token 대신 짧게 사는 pre_auth_token으로 OTP 단계로 넘긴다.
+        // 2FA 사용자는 접근 토큰 대신 수명이 짧은 pre_auth_token으로 OTP 단계로 넘긴다.
         res["status"] = "2fa_required";
         res["requires_2fa"] = true;
         res["pre_auth_token"] = generatePreAuthJWT(id);
@@ -2019,11 +2018,11 @@ int main()
     });
 
     // ==========================================
-    // 토큰 검증 헬퍼 (캡처를 위해 람다로 정의)
+    // 토큰 검증 보조 함수를 람다로 정의해 하위 라우트 등록에 재사용한다.
     // ==========================================
     auto is_authorized = [](const crow::request& req) {
         const auto token = extractBearerToken(req);
-        // 기존 보호 API는 full stage JWT만 허용한다.
+        // 기존 보호 API는 정식 단계 JWT만 허용한다.
         return token && verifyJWT(*token);
     };
 

@@ -9,14 +9,15 @@
 #include <mutex>
 #include <set>
 
-// CCTV 제어용 REST API와 스트림 중계용 WebSocket API 등록부.
-// 핵심 관심사: HTTP 요청의 명령 문자열 변환, 단일 백그라운드 worker 유지.
+// CCTV 프록시 계층의 구현 파일이다.
+// REST 요청을 CCTV 제어 명령으로 바꾸고, 수신한 바이너리 스트림을
+// 웹소켓 클라이언트에게 중계하는 상위 어댑터 역할을 맡는다.
 namespace {
-// 현재 CCTV 바이너리 스트림을 구독 중인 Crow WebSocket 클라이언트 목록.
+// 현재 CCTV 바이너리 스트림을 구독 중인 Crow 웹소켓 클라이언트 목록이다.
 std::set<crow::websocket::connection*> cctv_clients;
 std::mutex clients_mutex;
 
-// 한 번에 하나만 실행되는 백그라운드 CCTV 제어 명령의 상태.
+// 한 번에 하나만 실행되는 백그라운드 CCTV 제어 명령의 상태를 모아 둔 구조체다.
 struct AsyncCommandStatus {
     bool running = false;
     bool last_ok = true;
@@ -31,11 +32,11 @@ std::mutex view_rotation_throttle_mutex;
 std::chrono::steady_clock::time_point last_view_rotation_command_at;
 bool has_last_view_rotation_command = false;
 
-// 비동기 CCTV 제어 명령의 단일 실행 worker.
-// detach() 미사용, join 가능한 단일 thread 유지 기반 종료 시점 정리 단순화.
+// 비동기 CCTV 제어 명령을 직렬로 처리하는 단일 작업 스레드다.
+// detach()를 쓰지 않고 join 가능한 스레드 하나만 유지해 종료 시점 정리를 단순하게 만든다.
 class AsyncCommandWorker {
 public:
-    // 첫 비동기 요청 진입 시 worker thread 시작.
+    // 첫 비동기 요청이 들어오면 작업 스레드를 시작한다.
     void start(CctvManager& cctv_mgr) {
         std::lock_guard<std::mutex> lock(mutex_);
         cctv_mgr_ = &cctv_mgr;
@@ -47,7 +48,7 @@ public:
         worker_thread_ = std::thread(&AsyncCommandWorker::run, this);
     }
 
-    // 실행 중 작업 부재 시에만 새 명령 큐 적재.
+    // 현재 실행 중인 작업이 없을 때만 새 명령을 대기열에 올린다.
     bool schedule(const std::string& command) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -71,7 +72,7 @@ public:
         return true;
     }
 
-    // 서버 종료 시 대기 중 명령 정리 및 worker thread join.
+    // 서버 종료 시 대기 중 명령을 정리하고 작업 스레드를 join 한다.
     void shutdown() {
         std::string cancelled_command;
         {
@@ -105,7 +106,7 @@ public:
     }
 
 private:
-    // condition_variable 기반 새 명령 대기 후 sendCommand() 호출.
+    // 조건 변수로 새 명령을 기다렸다가, 준비되면 sendCommand()를 호출한다.
     void run() {
         while (true) {
             std::string command;
@@ -202,7 +203,7 @@ bool tryScheduleAsyncCommand(CctvManager& cctv_mgr, const std::string& command) 
     return async_command_worker.schedule(command);
 }
 
-// 명령 특성별 즉시 실행/worker 위임 결정.
+// 명령 성격에 따라 즉시 실행할지, 작업 스레드에 맡길지 결정한다.
 crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command, bool force_async = false) {
     if (force_async || isAsyncPreferredCommand(command)) {
         if (!tryScheduleAsyncCommand(cctv_mgr, command)) {
@@ -215,7 +216,7 @@ crow::response dispatchCommand(CctvManager& cctv_mgr, const std::string& command
     return makeCommandResponse(command, cctv_mgr.sendCommand(command));
 }
 
-// view 회전 명령의 과도한 연속 입력 방지용 별도 쿨다운.
+// view 회전 명령이 너무 자주 연속 입력되지 않도록 별도 재호출 대기 시간을 둔다.
 crow::response dispatchViewCommand(CctvManager& cctv_mgr, const std::string& command, bool has_rotation_update) {
     if (!has_rotation_update) {
         return dispatchCommand(cctv_mgr, command, true);
@@ -246,7 +247,7 @@ crow::response dispatchViewCommand(CctvManager& cctv_mgr, const std::string& com
 }  // 익명 네임스페이스
 
 void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
-    // CCTV 매니저 수신 바이너리 프레임의 현재 접속 중 모든 WebSocket 클라이언트 전달.
+    // CCTV 매니저가 수신한 바이너리 프레임을 현재 접속 중인 모든 웹소켓 클라이언트에 전달한다.
     cctv_mgr.setStreamCallback([](const std::vector<uint8_t>& full_frame) {
         std::vector<crow::websocket::connection*> clients;
         {
@@ -301,8 +302,8 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
 
     CROW_ROUTE(app, "/cctv/control/stop").methods(crow::HTTPMethod::POST)
     ([&cctv_mgr]() {
-        // Stop should preempt stream/control flow immediately.
-        // Avoid async BUSY gating so the command always reaches CCTV relay.
+        // stop 명령은 현재 스트림 상태나 비동기 작업 스레드 점유 여부와 상관없이
+        // 즉시 전달되어야 하므로, BUSY 체크를 우회해 곧바로 릴레이로 보낸다.
         return makeCommandResponse("stop", cctv_mgr.sendCommand("stop"));
     });
 
@@ -393,7 +394,7 @@ void registerCctvProxyRoutes(crow::SimpleApp& app, CctvManager& cctv_mgr) {
                 should_start_default_stream = (cctv_mgr.getStreamMode() == CctvStreamMode::NONE);
             }
 
-            // 첫 클라이언트 접속 + 스트림 모드 부재 시 기본 pc_stream 기동.
+            // 첫 클라이언트가 접속했고 아직 스트림 모드가 없다면 기본 pc_stream을 자동 기동한다.
             if (should_start_default_stream) {
                 const std::string result = cctv_mgr.sendCommand("pc_stream");
                 if (result.rfind("Error:", 0) == 0) {
