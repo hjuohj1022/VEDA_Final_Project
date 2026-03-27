@@ -1,5 +1,6 @@
 #include "features/thermal/ThermalProxy.h"
 #include "features/event_log/EventLogStore.h"
+#include "integrations/telegram/TelegramAlertSender.h"
 #include "infra/mqtt/MqttManager.h"
 
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1634,6 +1636,53 @@ std::string makeThermalEventPayload(const ThermalEventConfig& config,
 }
 
 // 이벤트 발생 후 필요한 경우 모터와 레이저 제어 명령을 순차적으로 발행한다.
+// 열화상 이벤트 내용을 모바일에서 바로 읽기 쉬운 Telegram 메시지로 정리한다.
+std::string makeThermalTelegramMessage(const ThermalEventConfig& config,
+                                       const ThermalPacketHeader& header,
+                                       int observed_signal_value,
+                                       int active_threshold,
+                                       int hot_area_pixels,
+                                       const ThermalEventComponent* best_component)
+{
+    std::ostringstream message;
+    message << "[AEGIS] 열화상 이상 고온 감지\n\n";
+    message << "출처: " << config.source << "\n";
+    message << "심각도: " << config.severity << "\n";
+    message << "프레임: " << header.frameId << "\n";
+    message << "신호값: " << observed_signal_value << "\n";
+    message << "임계값: " << active_threshold << "\n";
+    message << "최대값: " << header.maxValue << "\n";
+    message << "고온 영역: " << hot_area_pixels << " px";
+
+    if (best_component && best_component->valid) {
+        message << "\n감지 위치: (" << best_component->centerX << ", " << best_component->centerY << ")";
+        message << "\n후보 면적: " << best_component->area << " px";
+        message << "\n후보 점수: " << best_component->score;
+    }
+
+    if (config.actuation_enabled) {
+        message << "\n자동 제어: 사용";
+    }
+
+    return message.str();
+}
+
+// Telegram 전송은 별도 스레드에서 처리해 이벤트 루프를 막지 않게 한다.
+void dispatchThermalTelegramAlertAsync(std::string message, uint16_t frame_id)
+{
+    std::thread([message = std::move(message), frame_id]() {
+        std::string error_message;
+        if (!sendTelegramAlert(message, &error_message)) {
+            std::cerr << "[THERMAL][TELEGRAM] failed frame=" << frame_id
+                      << " reason=" << error_message
+                      << std::endl;
+            return;
+        }
+
+        std::cout << "[THERMAL][TELEGRAM] sent frame=" << frame_id << std::endl;
+    }).detach();
+}
+
 bool publishThermalActuation(MqttManager* mqtt, const ThermalEventConfig& config)
 {
     if (!mqtt || !config.actuation_enabled) {
@@ -1961,6 +2010,12 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
     const bool actuation_ok = config.actuation_enabled && mqtt && publishThermalActuation(mqtt, config);
     const bool mark_hotspot_active =
         (config.event_enabled && publish_ok) || (config.actuation_enabled && actuation_ok);
+    const std::string telegram_message = makeThermalTelegramMessage(config,
+                                                                    header,
+                                                                    observed_signal_value,
+                                                                    active_threshold,
+                                                                    hot_area_pixels,
+                                                                    best_component.valid ? &best_component : nullptr);
 
     if (publish_ok) {
         std::string event_title = config.title;
@@ -2002,6 +2057,8 @@ void maybePublishThermalEvent(const ThermalCompletedFrame& frame)
         if (!insertEventLog(log_params)) {
             std::cerr << "[THERMAL][EVENT] failed to persist event log for frame=" << header.frameId << std::endl;
         }
+
+        dispatchThermalTelegramAlertAsync(telegram_message, header.frameId);
     }
 
     {

@@ -32,6 +32,7 @@ add_executable(
   crow_server
   src/app/main.cpp
   src/integrations/mail/AppScriptMailSender.cpp
+  src/integrations/telegram/TelegramAlertSender.cpp
   src/features/auth/AuthRecoveryRoutes.cpp
   src/features/esp/EspHealthManager.cpp
   src/features/event_log/EventLogRoutes.cpp
