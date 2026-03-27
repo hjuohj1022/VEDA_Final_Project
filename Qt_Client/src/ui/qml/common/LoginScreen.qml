@@ -838,7 +838,7 @@ Item {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
                     height: 36
-                    visible: !backend.twoFactorRequired
+                    visible: !root.signupMode && !backend.twoFactorRequired
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
 
@@ -865,7 +865,7 @@ Item {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
-                    visible: !backend.twoFactorRequired
+                    visible: !root.signupMode && !backend.twoFactorRequired
                     color: theme ? theme.textSecondary : "#a1a1aa"
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -875,7 +875,9 @@ Item {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: root.authFieldWidth
-                    visible: !backend.twoFactorRequired && root.certDirectoryStatusText.length > 0
+                    visible: !root.signupMode
+                             && !backend.twoFactorRequired
+                             && root.certDirectoryStatusText.length > 0
                     color: root.certDirectoryStatusIsError
                            ? "#ef4444"
                            : "#22c55e"
