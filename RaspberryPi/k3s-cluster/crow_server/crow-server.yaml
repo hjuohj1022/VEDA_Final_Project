@@ -113,6 +113,16 @@ spec:
             secretKeyRef:
               name: crow-mail-secret
               key: MAIL_APP_SCRIPT_TIMEOUT_MS
+        - name: TELEGRAM_BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: crow-telegram-secret
+              key: TELEGRAM_BOT_TOKEN
+        - name: TELEGRAM_CHAT_ID
+          valueFrom:
+            secretKeyRef:
+              name: crow-telegram-secret
+              key: TELEGRAM_CHAT_ID
         - name: ADMIN_UNLOCK_KEY
           valueFrom:
             secretKeyRef:
