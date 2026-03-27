@@ -30,19 +30,21 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(
   crow_server
-  src/main.cpp
-  src/AppScriptMailSender.cpp
-  src/AuthRecoveryRoutes.cpp
-  src/EspHealthManager.cpp
-  src/EventLogRoutes.cpp
-  src/EventLogStore.cpp
-  src/MotorManager.cpp
-  src/MqttManager.cpp
-  src/SunapiProxy.cpp
-  src/SunapiWsProxy.cpp
-  src/CctvManager.cpp
-  src/CctvProxy.cpp
-  src/ThermalProxy.cpp
+  src/app/main.cpp
+  src/integrations/mail/AppScriptMailSender.cpp
+  src/features/auth/AuthRecoveryRoutes.cpp
+  src/features/esp/EspHealthManager.cpp
+  src/features/event_log/EventLogRoutes.cpp
+  src/features/event_log/EventLogStore.cpp
+  src/features/media/RecordingRoutes.cpp
+  src/features/motor/MotorManager.cpp
+  src/infra/mqtt/MqttManager.cpp
+  src/features/sunapi/SunapiProxy.cpp
+  src/features/sunapi/SunapiWsProxy.cpp
+  src/features/cctv/CctvManager.cpp
+  src/features/cctv/CctvProxy.cpp
+  src/features/system/SystemRoutes.cpp
+  src/features/thermal/ThermalProxy.cpp
 )
 
 target_compile_definitions(crow_server PRIVATE 
