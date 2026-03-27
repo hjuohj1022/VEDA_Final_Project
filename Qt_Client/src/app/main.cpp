@@ -7,6 +7,7 @@
 #include <QWindow>
 
 #include "Backend.h"
+#include "ui/QrCodeImageProvider.h"
 
 int main(int argc, char *argv[])
 {
@@ -33,6 +34,7 @@ int main(int argc, char *argv[])
 
     Backend backend;
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("qrcode"), new QrCodeImageProvider());
 
     if (!appIcon.isNull()) {
         // QML top-level window icons
