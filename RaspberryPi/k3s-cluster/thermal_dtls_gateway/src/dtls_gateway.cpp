@@ -25,10 +25,12 @@
 namespace thermal_dtls_gateway {
 namespace {
 
+// OpenSSL의 C 스타일 콜백에서 현재 게이트웨이 인스턴스에 접근하기 위한 포인터입니다.
 DtlsGateway* g_gateway = nullptr;
 
 } // namespace
 
+// 환경변수를 읽어 게이트웨이 실행 설정을 초기화합니다.
 DtlsGateway::DtlsGateway()
     : bindHost_(envOrDefault("DTLS_BIND_HOST", "0.0.0.0"))
     , bindPort_(envIntOrDefault("DTLS_BIND_PORT", kDefaultDtlsPort))
@@ -64,6 +66,7 @@ DtlsGateway::DtlsGateway()
     g_gateway = this;
 }
 
+// 실행 중 열었던 소켓과 OpenSSL 리소스를 정리합니다.
 DtlsGateway::~DtlsGateway()
 {
     if (g_gateway == this) {
@@ -80,6 +83,7 @@ DtlsGateway::~DtlsGateway()
     }
 }
 
+// OpenSSL DTLS 서버 컨텍스트와 UDP 소켓을 준비합니다.
 void DtlsGateway::init()
 {
     SSL_load_error_strings();
@@ -128,6 +132,7 @@ void DtlsGateway::init()
     }
 }
 
+// DTLS 세션 또는 plain UDP fallback 세션을 받아 worker로 넘기는 메인 루프입니다.
 void DtlsGateway::run()
 {
     const auto reopenListenSocket = [this]() {
@@ -161,6 +166,7 @@ void DtlsGateway::run()
                 throw std::runtime_error("BIO_ADDR_new failed");
             }
 
+            // DTLSv1_listen은 본격적인 세션 생성 전에 stateless cookie를 검증합니다.
             ERR_clear_error();
             const int listenRc = DTLSv1_listen(sessionSsl, peer);
             if (listenRc <= 0) {
@@ -186,6 +192,7 @@ void DtlsGateway::run()
 
         bool workerMode = true;
         try {
+            // 현재 listen socket은 곧 worker가 전용으로 사용하므로 즉시 대체 소켓을 엽니다.
             reopenListenSocket();
         } catch (const std::exception& ex) {
             std::cerr << "[DTLS] Failed to open replacement listen socket: " << ex.what()
@@ -226,6 +233,7 @@ void DtlsGateway::run()
                       << '\n';
 
             if (allowPlainUdpFallback_) {
+                // 이미 raw thermal chunk가 들어오고 있으므로 DTLS handshake 경로는 건너뜁니다.
                 SSL_free(sessionSsl);
                 sessionSsl = nullptr;
 
@@ -281,6 +289,7 @@ void DtlsGateway::run()
     }
 }
 
+// connect된 세션 소켓에서 다음 datagram의 종류를 미리 판별합니다.
 IncomingDatagramKind DtlsGateway::inspectConnectedPeerDatagram(int fd,
                                                                unsigned char* buffer,
                                                                std::size_t bufferLen,
@@ -305,6 +314,7 @@ IncomingDatagramKind DtlsGateway::inspectConnectedPeerDatagram(int fd,
     }
 }
 
+// plain UDP fallback 모드에서 들어오는 thermal payload를 그대로 전달합니다.
 void DtlsGateway::runRawSessionWorker(int sessionFd, sockaddr_storage peerSock)
 {
     try {
@@ -346,12 +356,14 @@ void DtlsGateway::runRawSessionWorker(int sessionFd, sockaddr_storage peerSock)
     }
 }
 
+// DTLS handshake를 마치고 복호화된 thermal payload를 전달합니다.
 void DtlsGateway::runSessionWorker(SSL* sessionSsl, int sessionFd, sockaddr_storage peerSock)
 {
     try {
         const std::string peerText = sockaddrToString(peerSock);
         BIO* sessionBio = SSL_get_rbio(sessionSsl);
 
+        // 피어에 connect된 UDP 소켓 위에서 DTLS handshake를 완료합니다.
         ERR_clear_error();
         const int acceptRc = SSL_accept(sessionSsl);
         if (acceptRc <= 0) {
@@ -374,6 +386,7 @@ void DtlsGateway::runSessionWorker(SSL* sessionSsl, int sessionFd, sockaddr_stor
 
         std::array<unsigned char, kMaxThermalPacketBytes> buffer{};
         for (;;) {
+            // 여기서 DTLS record를 복호화하고, 실제 thermal application payload만 전달합니다.
             ERR_clear_error();
             const int bytesRead = SSL_read(sessionSsl, buffer.data(), static_cast<int>(buffer.size()));
             if (bytesRead <= 0) {
@@ -410,6 +423,7 @@ void DtlsGateway::runSessionWorker(SSL* sessionSsl, int sessionFd, sockaddr_stor
     }
 }
 
+// OpenSSL이 전달한 client identity에 맞는 PSK를 반환합니다.
 unsigned int DtlsGateway::pskServerCallback(SSL*,
                                             const char* identity,
                                             unsigned char* psk,
@@ -432,6 +446,7 @@ unsigned int DtlsGateway::pskServerCallback(SSL*,
     return static_cast<unsigned int>(g_gateway->pskKey_.size());
 }
 
+// cookie exchange가 켜져 있을 때 OpenSSL이 새 cookie 생성을 요청합니다.
 int DtlsGateway::generateCookie(SSL* ssl, unsigned char* cookie, unsigned int* cookieLen)
 {
     if (g_gateway == nullptr || cookie == nullptr || cookieLen == nullptr) {
@@ -440,6 +455,7 @@ int DtlsGateway::generateCookie(SSL* ssl, unsigned char* cookie, unsigned int* c
     return g_gateway->buildCookie(ssl, cookie, cookieLen);
 }
 
+// 수신한 cookie가 유효한지 OpenSSL에 알려줍니다.
 int DtlsGateway::verifyCookie(SSL* ssl, const unsigned char* cookie, unsigned int cookieLen)
 {
     if (g_gateway == nullptr || cookie == nullptr) {
@@ -448,6 +464,7 @@ int DtlsGateway::verifyCookie(SSL* ssl, const unsigned char* cookie, unsigned in
     return g_gateway->checkCookie(ssl, cookie, cookieLen);
 }
 
+// 피어 주소를 재료로 stateless DTLS cookie를 생성합니다.
 int DtlsGateway::buildCookie(SSL* ssl, unsigned char* cookie, unsigned int* cookieLen)
 {
     std::vector<unsigned char> material;
@@ -455,6 +472,7 @@ int DtlsGateway::buildCookie(SSL* ssl, unsigned char* cookie, unsigned int* cook
         return 0;
     }
 
+    // 피어 주소를 HMAC 입력으로 사용해, 주소를 위조한 송신자는 cookie 검증을 통과하지 못하게 합니다.
     unsigned int digestLen = 0;
     unsigned char digest[EVP_MAX_MD_SIZE] = {0};
     HMAC(EVP_sha256(),
@@ -470,6 +488,7 @@ int DtlsGateway::buildCookie(SSL* ssl, unsigned char* cookie, unsigned int* cook
     return 1;
 }
 
+// 전달받은 cookie와 기대값을 비교해 재시도 요청이 정당한지 검사합니다.
 int DtlsGateway::checkCookie(SSL* ssl, const unsigned char* cookie, unsigned int cookieLen)
 {
     unsigned char expected[EVP_MAX_MD_SIZE] = {0};
@@ -485,6 +504,7 @@ int DtlsGateway::checkCookie(SSL* ssl, const unsigned char* cookie, unsigned int
     return CRYPTO_memcmp(cookie, expected, expectedLen) == 0 ? 1 : 0;
 }
 
+// cookie exchange를 쓰지 않는 경우 첫 datagram이 올 때까지 피어 주소를 기다립니다.
 bool DtlsGateway::waitForPeerDatagram(int fd, sockaddr_storage& out, socklen_t& outLen)
 {
     std::array<unsigned char, 1> probe{};
@@ -510,6 +530,7 @@ bool DtlsGateway::waitForPeerDatagram(int fd, sockaddr_storage& out, socklen_t& 
     }
 }
 
+// cookie 생성용 HMAC 입력을 만들기 위해 피어 주소와 포트를 바이트 배열로 추출합니다.
 bool DtlsGateway::cookieMaterial(SSL* ssl, std::vector<unsigned char>& out)
 {
     sockaddr_storage peer{};
@@ -539,6 +560,7 @@ bool DtlsGateway::cookieMaterial(SSL* ssl, std::vector<unsigned char>& out)
     return false;
 }
 
+// OpenSSL의 BIO_ADDR 타입을 일반 sockaddr_storage로 바꿉니다.
 bool DtlsGateway::bioAddrToSockaddr(const BIO_ADDR* peer, sockaddr_storage& out, socklen_t& outLen)
 {
     if (peer == nullptr) {
@@ -573,6 +595,7 @@ bool DtlsGateway::bioAddrToSockaddr(const BIO_ADDR* peer, sockaddr_storage& out,
     return false;
 }
 
+// Crow Server 쪽 UDP endpoint로 payload 하나를 전송합니다.
 bool DtlsGateway::forwardPayload(const unsigned char* data, std::size_t len)
 {
     const ssize_t sent = ::sendto(forward_.fd,
@@ -582,10 +605,12 @@ bool DtlsGateway::forwardPayload(const unsigned char* data, std::size_t len)
                                   reinterpret_cast<const sockaddr*>(&forward_.addr),
                                   forward_.addrLen);
     const bool success = sent == static_cast<ssize_t>(len);
+    // 성공/실패 모두 통계에 반영해 전송 누락도 관찰할 수 있게 합니다.
     recordForwardResult(data, len, success);
     return success;
 }
 
+// thermal packet 전달 결과를 기준으로 프레임 통계를 누적합니다.
 void DtlsGateway::recordForwardResult(const unsigned char* data, std::size_t len, bool success)
 {
     if (!enableFrameStats_) {
@@ -606,6 +631,7 @@ void DtlsGateway::recordForwardResult(const unsigned char* data, std::size_t len
     maybeLogStatsLocked(nowMs);
 }
 
+// 일정 주기마다 누적된 thermal 통계를 요약 로그로 출력합니다.
 void DtlsGateway::maybeLogStatsLocked(long long nowMs)
 {
     if (statsLogIntervalMs_ <= 0) {

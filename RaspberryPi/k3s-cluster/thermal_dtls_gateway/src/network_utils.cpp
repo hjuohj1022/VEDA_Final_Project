@@ -13,6 +13,7 @@
 
 namespace thermal_dtls_gateway {
 
+// 운영 중인 소켓의 송수신 버퍼 크기를 조정합니다.
 void configureSocketBuffers(int fd, int recvBytes, int sendBytes, const std::string& socketLabel)
 {
     if (recvBytes > 0 && ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recvBytes, sizeof(recvBytes)) != 0) {
@@ -23,6 +24,7 @@ void configureSocketBuffers(int fd, int recvBytes, int sendBytes, const std::str
     }
 }
 
+// 현재 소켓에 실제 적용된 버퍼 크기를 조회합니다.
 int querySocketBufferBytes(int fd, int optName)
 {
     int value = 0;
@@ -33,6 +35,7 @@ int querySocketBufferBytes(int fd, int optName)
     return value;
 }
 
+// 소켓 버퍼 상태를 로그용 문자열로 요약합니다.
 std::string socketBufferSummary(int fd)
 {
     std::ostringstream oss;
@@ -41,6 +44,7 @@ std::string socketBufferSummary(int fd)
     return oss.str();
 }
 
+// host:port에 UDP 소켓을 바인드하고 재사용 옵션도 함께 설정합니다.
 int bindUdpSocket(const std::string& host, int port)
 {
     addrinfo hints{};
@@ -68,6 +72,7 @@ int bindUdpSocket(const std::string& host, int port)
         ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 #endif
 
+        // 하나의 주소라도 성공적으로 bind되면 그 소켓을 사용합니다.
         if (::bind(fd, ai->ai_addr, static_cast<socklen_t>(ai->ai_addrlen)) == 0) {
             break;
         }
@@ -84,6 +89,7 @@ int bindUdpSocket(const std::string& host, int port)
     return fd;
 }
 
+// recv/send가 영원히 블로킹되지 않도록 UDP 타임아웃을 설정합니다.
 void configureSocketTimeout(int fd, int seconds)
 {
     timeval timeout{};
@@ -98,6 +104,7 @@ void configureSocketTimeout(int fd, int seconds)
     }
 }
 
+// Crow Server와 같은 전달 대상의 주소를 해석하고 전용 소켓을 준비합니다.
 UdpTarget resolveUdpTarget(const std::string& host, int port)
 {
     addrinfo hints{};
@@ -131,6 +138,7 @@ UdpTarget resolveUdpTarget(const std::string& host, int port)
     return target;
 }
 
+// connect된 UDP 소켓을 다시 비연결 상태로 되돌립니다.
 void disconnectUdpSocket(int fd)
 {
     sockaddr_storage unspec{};
@@ -139,6 +147,7 @@ void disconnectUdpSocket(int fd)
     ::connect(fd, addr, sizeof(sockaddr));
 }
 
+// IPv4/IPv6 sockaddr를 사람이 읽기 쉬운 `ip:port` 문자열로 변환합니다.
 std::string sockaddrToString(const sockaddr_storage& addr)
 {
     char host[INET6_ADDRSTRLEN] = {0};

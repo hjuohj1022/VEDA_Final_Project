@@ -12,12 +12,14 @@
 
 namespace thermal_dtls_gateway {
 
+// 현재 시각을 epoch milliseconds로 반환합니다.
 long long currentTimeMs()
 {
     using namespace std::chrono;
     return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
+// 문자열 앞뒤의 공백을 제거한 복사본을 만듭니다.
 std::string trimCopy(const std::string& value)
 {
     size_t begin = 0;
@@ -32,6 +34,7 @@ std::string trimCopy(const std::string& value)
     return value.substr(begin, end - begin);
 }
 
+// 환경변수를 읽되 비어 있으면 지정한 기본값을 사용합니다.
 std::string envOrDefault(const char* name, const std::string& fallback)
 {
     const char* value = std::getenv(name);
@@ -43,6 +46,7 @@ std::string envOrDefault(const char* name, const std::string& fallback)
     return trimmed.empty() ? fallback : trimmed;
 }
 
+// 비어 있으면 안 되는 필수 환경변수를 읽습니다.
 std::string requireEnv(const char* name)
 {
     const char* value = std::getenv(name);
@@ -57,6 +61,7 @@ std::string requireEnv(const char* name)
     return trimmed;
 }
 
+// 정수 환경변수를 읽고, 형식이 잘못되면 예외를 발생시킵니다.
 int envIntOrDefault(const char* name, int fallback)
 {
     const char* value = std::getenv(name);
@@ -76,12 +81,14 @@ int envIntOrDefault(const char* name, int fallback)
     }
 }
 
+// network byte order의 16비트 값을 읽습니다.
 std::uint16_t readBe16(const unsigned char* p)
 {
     return static_cast<std::uint16_t>((static_cast<std::uint16_t>(p[0]) << 8)
                                       | static_cast<std::uint16_t>(p[1]));
 }
 
+// 불리언 환경변수를 읽고 다양한 문자열 표현을 허용합니다.
 bool envBoolOrDefault(const char* name, bool fallback)
 {
     const char* value = std::getenv(name);
@@ -107,6 +114,7 @@ bool envBoolOrDefault(const char* name, bool fallback)
     throw std::runtime_error(std::string("Invalid boolean environment variable: ") + name);
 }
 
+// hex 문자열에서 숫자/영문자만 추려 바이트 배열로 변환합니다.
 std::vector<unsigned char> parseHex(const std::string& hex)
 {
     std::string filtered;
@@ -130,6 +138,7 @@ std::vector<unsigned char> parseHex(const std::string& hex)
     return bytes;
 }
 
+// 누적된 OpenSSL 에러 스택을 표준 에러로 출력합니다.
 void printOpenSslErrors(const std::string& prefix)
 {
     std::cerr << prefix << '\n';
