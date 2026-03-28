@@ -194,8 +194,10 @@ pipeline {
                         sh '''
                             set -euo pipefail
 
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-pvc.yaml
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-backup-cronjob.yaml
                             kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/mariadb
                             kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/mariadb --timeout=180s
                         '''
