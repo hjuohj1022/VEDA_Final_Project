@@ -1,0 +1,97 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mariadb-backup
+spec:
+  # 시연용 설정: 1분마다 dump + 닫힌 binlog를 백업 폴더로 저장한다.
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: pi-worker2
+          restartPolicy: OnFailure
+          containers:
+            - name: mariadb-backup
+              image: mariadb:10.6
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: TZ
+                  value: Asia/Seoul
+                - name: MYSQL_PWD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mariadb-secret
+                      key: root-password
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+
+                  TS="$(date +%F-%H%M%S)"
+                  BACKUP_ROOT="/backup"
+                  DUMP_DIR="$BACKUP_ROOT/dump"
+                  BINLOG_DIR="$BACKUP_ROOT/binlog"
+                  STATE_FILE="$BINLOG_DIR/.last_copied"
+
+                  mkdir -p "$DUMP_DIR" "$BINLOG_DIR"
+
+                  # 최신 시점 복구용 논리 백업을 gzip 형태로 저장한다.
+                  mariadb-dump -h mariadb-service -uroot \
+                    --single-transaction --quick --routines --triggers --events \
+                    --databases veda_db \
+                    | gzip > "$DUMP_DIR/veda_db-$TS.sql.gz"
+
+                  # 현재 열려 있는 binlog를 닫고 다음 파일로 넘겨 복사 가능한 상태로 만든다.
+                  mariadb -h mariadb-service -uroot -e "FLUSH BINARY LOGS;"
+
+                  ACTIVE_BINLOG="$(mariadb -N -B -h mariadb-service -uroot -e "SHOW MASTER STATUS" | cut -f1 || true)"
+                  LAST_COPIED=""
+
+                  if [ -f "$STATE_FILE" ]; then
+                    LAST_COPIED="$(cat "$STATE_FILE")"
+                  fi
+
+                  NEWEST_COPIED="$LAST_COPIED"
+
+                  # 현재 사용 중인 binlog를 제외한 닫힌 binlog만 순서대로 복사한다.
+                  for BINLOG_FILE in $(find /var/lib/mysql-ro -maxdepth 1 -type f -name 'mariadb-bin.[0-9]*' | sort); do
+                    BINLOG_NAME="$(basename "$BINLOG_FILE")"
+
+                    if [ -n "$ACTIVE_BINLOG" ] && [ "$BINLOG_NAME" = "$ACTIVE_BINLOG" ]; then
+                      continue
+                    fi
+
+                    if [ -n "$LAST_COPIED" ] && { [ "$BINLOG_NAME" \< "$LAST_COPIED" ] || [ "$BINLOG_NAME" = "$LAST_COPIED" ]; }; then
+                      continue
+                    fi
+
+                    cp -f "$BINLOG_FILE" "$BINLOG_DIR/$BINLOG_NAME"
+                    NEWEST_COPIED="$BINLOG_NAME"
+                  done
+
+                  if [ "$NEWEST_COPIED" != "$LAST_COPIED" ] && [ -n "$NEWEST_COPIED" ]; then
+                    printf '%s' "$NEWEST_COPIED" > "$STATE_FILE"
+                  fi
+
+                  # 시연용 설정: 10분보다 오래된 dump/binlog는 정리한다.
+                  find "$DUMP_DIR" -type f -name 'veda_db-*.sql.gz' -mmin +10 -delete
+                  find "$BINLOG_DIR" -type f -name 'mariadb-bin.[0-9]*' -mmin +10 -delete
+              volumeMounts:
+                - name: backup-dir
+                  mountPath: /backup
+                - name: mariadb-storage
+                  mountPath: /var/lib/mysql-ro
+                  readOnly: true
+          volumes:
+            - name: backup-dir
+              hostPath:
+                path: /srv/veda-backups/mariadb
+                type: DirectoryOrCreate
+            - name: mariadb-storage
+              persistentVolumeClaim:
+                claimName: mariadb-pvc
