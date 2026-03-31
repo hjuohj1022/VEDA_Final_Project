@@ -28,35 +28,34 @@ Rectangle {
     signal requestRtspSettings()
     signal requestEventAlert()
     signal requestExportCancel()
-
+    // 세션 시간 포맷 함수
     function formatSession(seconds) {
         var s = Math.max(0, seconds)
         var m = Math.floor(s / 60)
         var r = s % 60
         return (m < 10 ? "0" + m : "" + m) + ":" + (r < 10 ? "0" + r : "" + r)
     }
-
+    // 사용자 이름 표시 함수
     function displayUserName() {
         var raw = (root.userId || "").trim()
         if (raw.length === 0)
             return "Guest"
         return raw
     }
-
+    // 사용자 이니셜 표시 함수
     function displayUserInitial() {
         var name = displayUserName()
         return name.length > 0 ? name.charAt(0).toUpperCase() : "G"
     }
-
+    // 계정 메뉴 X 위치 제한 함수
     function clampAccountMenuX(value, menuWidth) {
         return Math.max(12, Math.min(root.width - menuWidth - 12, value))
     }
-
+    // 계정 메뉴 Y 위치 보정 함수
     function clampAccountMenuY(value, menuHeight) {
-        var maxY = Math.max(8, root.height - menuHeight - 8)
-        return Math.max(8, Math.min(maxY, value))
+        return Math.max(8, value)
     }
-
+    // 화면 안내 문구 생성 함수
     function screenGuideText() {
         if (currentSection === 0) {
             return "View 화면 안내\n" +
@@ -125,6 +124,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         root.requestHome()
@@ -249,6 +249,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.requestExportCancel()
                 }
             }
@@ -332,7 +333,7 @@ Rectangle {
                             easing.type: Easing.OutCubic
                         }
                     }
-
+                    // 실행 상태 변경 처리 함수
                     onRunningChanged: {
                         if (!running) {
                             eventAlertPulse.opacity = 0.0
@@ -353,6 +354,7 @@ Rectangle {
                     tooltipText: root.eventAlertUnread
                                  ? "새 이벤트 알림"
                                  : (root.eventAlertActive ? "이벤트 알림 보기" : "이벤트 알림")
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.requestEventAlert()
 
                     Rectangle {
@@ -377,6 +379,7 @@ Rectangle {
                 fg: theme ? theme.textSecondary : "#a1a1aa"
                 enabledButton: root.isLoggedIn
                 tooltipText: "RTSP 설정"
+                // 클릭 이벤트 처리 함수
                 onClicked: root.requestRtspSettings()
             }
 
@@ -385,6 +388,7 @@ Rectangle {
                 label: root.isDarkMode ? "\uE708" : "\uE706"
                 fg: theme ? theme.accent : "#f97316"
                 tooltipText: root.isDarkMode ? "라이트 모드" : "다크 모드"
+                // 클릭 이벤트 처리 함수
                 onClicked: root.toggleTheme()
             }
 
@@ -496,18 +500,25 @@ Rectangle {
 
                 MouseArea {
                     id: authMouse
+                    property bool menuWasOpenOnPress: false
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 누름 시 메뉴 열림 상태 기록 함수
+                    onPressed: {
+                        menuWasOpenOnPress = accountMenu.opened
+                    }
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         if (root.isLoggedIn) {
-                            if (accountMenu.opened) {
+                            if (menuWasOpenOnPress) {
                                 accountMenu.close()
                             } else {
                                 backend.refreshTwoFactorStatus()
                                 accountMenu.open()
                             }
+                            menuWasOpenOnPress = false
                         } else {
                             root.requestLogin()
                         }
@@ -524,7 +535,7 @@ Rectangle {
         focus: true
         width: 286
         padding: 0
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnReleaseOutside
         x: {
             var point = authBtn.mapToItem(root, authBtn.width - width, authBtn.height + 10)
             return clampAccountMenuX(point.x, width)
@@ -624,6 +635,7 @@ Rectangle {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
+                                    // 클릭 이벤트 처리 함수
                                     onClicked: {
                                         accountMenu.close()
                                         root.requestPasswordChange()
@@ -745,6 +757,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         accountMenu.close()
                         root.requestTwoFactorSetup()
@@ -817,6 +830,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         accountMenu.close()
                         root.requestTwoFactorDisable()
@@ -876,6 +890,7 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             accountMenu.close()
                             root.requestLogout()
@@ -915,6 +930,7 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             accountMenu.close()
                             root.requestAccountDelete()

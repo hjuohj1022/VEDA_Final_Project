@@ -21,7 +21,7 @@ Dialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
+    // 새 비밀번호 복잡도 검증 함수
     function validateNewPasswordComplexity(password) {
         // 새 비밀번호 복잡도 규칙 검증
         if (password.length < 8)
@@ -36,8 +36,7 @@ Dialog {
             return "비밀번호에는 특수문자가 1개 이상 포함되어야 합니다."
         return ""
     }
-
-    // 재설정 코드 입력 다이얼로그 초기화 함수
+    // 다이얼로그 열기 함수
     function openDialog(userIdValue, emailValue, initialCode, message) {
         statusText = ""
         helperText = "입력한 정보가 일치하면 메일로 코드가 전송됩니다. 메일을 받은 경우에만 아래 코드를 입력해 주세요."
@@ -54,7 +53,7 @@ Dialog {
             codeField.forceActiveFocus()
         }
     }
-
+    // 비밀번호 재설정 전송 함수
     function submitReset() {
         if (!backendObject) {
             root.statusText = "Backend is not available."
@@ -85,7 +84,7 @@ Dialog {
 
     Connections {
         target: backendObject
-
+        // 비밀번호 재설정 완료 처리 함수
         function onPasswordResetCompleted(message) {
             if (!root.visible)
                 return
@@ -94,7 +93,7 @@ Dialog {
             root.close()
             root.resetCompleted(message)
         }
-
+        // 비밀번호 재설정 실패 처리 함수
         function onPasswordResetFailed(error) {
             if (!root.visible)
                 return
@@ -181,6 +180,7 @@ Dialog {
                                   : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: root.statusText = ""
             }
 
@@ -203,7 +203,9 @@ Dialog {
                                       : (root.theme ? root.theme.border : "#27272a")
                         radius: 6
                     }
+                    // 텍스트 편집 처리 함수
                     onTextEdited: root.statusText = ""
+                    // 입력 확정 처리 함수
                     onAccepted: root.submitReset()
                 }
 
@@ -213,6 +215,7 @@ Dialog {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 32
                     height: 32
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.newPasswordVisible = !root.newPasswordVisible
                     contentItem: Item {
                         Text {
@@ -274,6 +277,7 @@ Dialog {
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
@@ -294,6 +298,7 @@ Dialog {
                 Layout.preferredWidth: 148
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: root.submitReset()
                 background: Rectangle {
                     color: parent.enabled

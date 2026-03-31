@@ -29,6 +29,11 @@ spec:
         args:
           - "--character-set-server=utf8mb4"
           - "--collation-server=utf8mb4_unicode_ci"
+          - "--server-id=1"
+          - "--log-bin=/var/lib/mysql/mariadb-bin"
+          - "--binlog-format=ROW"
+          - "--binlog-expire-logs-seconds=604800"
+          - "--max-binlog-size=100M"
         
         ports:
         - containerPort: 3306

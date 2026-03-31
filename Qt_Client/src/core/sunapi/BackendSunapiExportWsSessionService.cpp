@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportWsSessionService.h"
+#include "internal/sunapi/BackendSunapiExportWsSessionService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -16,6 +16,7 @@
 #include <QUrl>
 #include <QWebSocket>
 
+// 재생 웹소켓 내보내기 요청 함수
 void BackendSunapiExportWsSessionService::requestPlaybackExportViaWs(Backend *backend, BackendPrivate *state, int channelIndex,
                                          const QString &dateText,
                                          const QString &startTimeText,
@@ -47,6 +48,7 @@ void BackendSunapiExportWsSessionService::requestPlaybackExportViaWs(Backend *ba
         return;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest sessionReq = backend->makeApiJsonRequest("/api/sunapi/export/session", {
         {"channel", QString::number(channelIndex)},
         {"date", dateText.trimmed()},

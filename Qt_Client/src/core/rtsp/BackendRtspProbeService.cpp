@@ -6,6 +6,7 @@
 #include <QTcpSocket>
 #include <QTimer>
 
+// probe RTSP Endpoint 처리 함수
 void BackendRtspProbeService::probeRtspEndpoint(Backend *backend, QString ip, QString port, int timeoutMs)
 {
     const QString ipTrimmed = ip.trimmed();

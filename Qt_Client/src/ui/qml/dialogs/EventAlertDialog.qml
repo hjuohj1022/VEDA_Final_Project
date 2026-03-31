@@ -19,7 +19,7 @@ Window {
     modality: Qt.NonModal
     flags: Qt.Dialog | Qt.FramelessWindowHint
     color: "transparent"
-
+    // 상태 메시지 정리 함수
     function simplifyStatusMessage(message) {
         var text = String(message || "").replace(/\s+/g, " ").trim()
         if (text.length === 0)
@@ -28,7 +28,7 @@ Window {
             return text.substring(0, 120) + "..."
         return text
     }
-
+    // 현재 심각도 조회 함수
     function currentSeverityValue() {
         if (!backend.eventAlertActive)
             return "safe"
@@ -38,14 +38,14 @@ Window {
             return "info"
         return value
     }
-
+    // 심각도 라벨 계산 함수
     function severityLabel() {
         var value = root.currentSeverityValue()
         if (value === "safe")
             return "SAFE"
         return value.toUpperCase()
     }
-
+    // 심각도 색상 계산 함수
     function severityColor() {
         var value = root.currentSeverityValue()
         if (value === "safe")
@@ -58,11 +58,11 @@ Window {
             return "#f97316"
         return theme ? theme.accent : "#f97316"
     }
-
+    // 이벤트 이력 조회 함수
     function eventHistory() {
         return backend.eventAlertHistory || []
     }
-
+    // 선택 이벤트 조회 함수
     function selectedEvent() {
         var history = eventHistory()
         if (history.length === 0)
@@ -70,28 +70,28 @@ Window {
         var index = Math.max(0, Math.min(selectedHistoryIndex, history.length - 1))
         return history[index]
     }
-
+    // 선택 문자열 조회 함수
     function selectedString(key, fallback) {
         var item = selectedEvent()
         if (!item || item[key] === undefined || item[key] === null)
             return String(fallback || "")
         return String(item[key])
     }
-
+    // 선택 불리언 조회 함수
     function selectedBool(key, fallback) {
         var item = selectedEvent()
         if (!item || item[key] === undefined || item[key] === null)
             return !!fallback
         return !!item[key]
     }
-
+    // 제어 상태 요약 함수
     function activeControlSummary() {
         if (!backend.eventAlertActive)
             return "현재 감지된 이벤트가 없어 안전 상태입니다."
 
         return "현재 이벤트 적용 시 레이저 ON 후 비상 대피 시퀀스를 실행합니다."
     }
-
+    // 다이얼로그 열기 함수
     function openDialog() {
         selectedHistoryIndex = 0
         historyDetailOpen = false
@@ -102,11 +102,11 @@ Window {
         visible = true
         backend.markEventAlertRead()
     }
-
+    // 다이얼로그 닫기 함수
     function closeDialog() {
         visible = false
     }
-
+    // 가시성 변경 처리 함수
     onVisibleChanged: {
         if (!visible)
             return
@@ -219,10 +219,12 @@ Window {
 
                 MouseArea {
                     anchors.fill: parent
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         root.selectedHistoryIndex = index
                         eventHistoryList.currentIndex = index
                     }
+                    // 더블 클릭 처리 함수
                     onDoubleClicked: {
                         root.selectedHistoryIndex = index
                         eventHistoryList.currentIndex = index
@@ -313,6 +315,7 @@ Window {
                                 text: "새로고침"
                                 compact: true
                                 Layout.preferredWidth: 84
+                                // 클릭 이벤트 처리 함수
                                 onClicked: {
                                     backend.resetSessionTimer()
                                     if (backend.refreshEventAlertHistory()) {
@@ -332,6 +335,7 @@ Window {
                                 dangerStyle: true
                                 Layout.preferredWidth: 72
                                 enabled: !!selectedEvent() && Number(selectedEvent().id || 0) > 0
+                                // 클릭 이벤트 처리 함수
                                 onClicked: {
                                     var item = selectedEvent()
                                     var eventLogId = item ? Number(item.id || 0) : 0
@@ -354,6 +358,7 @@ Window {
                                 text: "목록"
                                 compact: true
                                 Layout.preferredWidth: 72
+                                // 클릭 이벤트 처리 함수
                                 onClicked: root.historyDetailOpen = false
                             }
                         }
@@ -545,6 +550,7 @@ Window {
                     Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
                     enabled: backend.eventAlertActive
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         backend.applyEventAlertControl()
@@ -556,6 +562,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         backend.stopEventAlertControl()
@@ -570,6 +577,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         backend.clearEventAlert()
@@ -583,6 +591,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.closeDialog()
                 }
             }
@@ -615,7 +624,7 @@ Window {
     }
     Connections {
         target: backend
-
+        // 카메라 제어 메시지 처리 함수
         function onCameraControlMessage(message, isError) {
             if (!root.visible)
                 return
@@ -626,7 +635,7 @@ Window {
             root.statusText = root.simplifyStatusMessage(message)
             root.statusError = isError
         }
-
+        // 이벤트 알림 상태 변경 처리 함수
         function onEventAlertStateChanged() {
             if (!root.visible)
                 return
@@ -639,7 +648,7 @@ Window {
                             : "현재 수신된 이벤트가 없습니다."
             root.statusError = false
         }
-
+        // 이벤트 알림 이력 변경 처리 함수
         function onEventAlertHistoryChanged() {
             root.selectedHistoryIndex = 0
             root.historyDetailOpen = false

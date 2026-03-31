@@ -60,6 +60,7 @@ Dialog {
                 Layout.preferredHeight: 34
                 scale: down ? 0.97 : 1.0
                 Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? (theme ? theme.border : "#374151") : (theme ? theme.bgSecondary : "#1f2937")

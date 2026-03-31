@@ -12,14 +12,17 @@ Dialog {
     property string statusText: ""
     property bool busy: false
     readonly property int dialogRadius: 10
+    readonly property string qrCodeSource: root.otpAuthUrl.length > 0
+                                           ? "image://qrcode/" + encodeURIComponent(root.otpAuthUrl)
+                                           : ""
 
     modal: true
     parent: Overlay.overlay
-    width: 430
+    width: 520
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
+    // 설정 화면 열기 함수
     function openForSetup() {
         mode = "setup"
         manualKey = ""
@@ -28,10 +31,10 @@ Dialog {
         otpField.text = ""
         busy = true
         open()
-        if (backendObject)
-            backendObject.startTwoFactorSetup()
+        if (root.backendObject)
+            root.backendObject.startTwoFactorSetup()
     }
-
+    // 비활성화 화면 열기 함수
     function openForDisable() {
         mode = "disable"
         manualKey = ""
@@ -42,12 +45,12 @@ Dialog {
         open()
         otpField.forceActiveFocus()
     }
-
-    onOpened: if (backendObject) backendObject.resetSessionTimer()
+    // 열림 처리 함수
+    onOpened: if (root.backendObject) root.backendObject.resetSessionTimer()
 
     Connections {
-        target: backendObject
-
+        target: root.backendObject
+        // 이중 인증 설정 준비 처리 함수
         function onTwoFactorSetupReady(manualKey, otpAuthUrl) {
             if (!root.visible || root.mode !== "setup")
                 return
@@ -57,28 +60,28 @@ Dialog {
             root.statusText = ""
             otpField.forceActiveFocus()
         }
-
+        // 이중 인증 설정 완료 처리 함수
         function onTwoFactorSetupCompleted() {
             if (!root.visible || root.mode !== "setup")
                 return
             root.busy = false
             root.close()
         }
-
+        // 이중 인증 설정 실패 처리 함수
         function onTwoFactorSetupFailed(error) {
             if (!root.visible || root.mode !== "setup")
                 return
             root.busy = false
             root.statusText = error
         }
-
+        // 이중 인증 비활성화 완료 처리 함수
         function onTwoFactorDisableCompleted() {
             if (!root.visible || root.mode !== "disable")
                 return
             root.busy = false
             root.close()
         }
-
+        // 이중 인증 비활성화 실패 처리 함수
         function onTwoFactorDisableFailed(error) {
             if (!root.visible || root.mode !== "disable")
                 return
@@ -117,7 +120,7 @@ Dialog {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: 14
-            text: root.mode === "setup" ? "OTP 생성" : "OTP 삭제"
+            text: root.mode === "setup" ? "2단계 인증 활성화" : "2단계 인증 비활성화"
             color: root.theme ? root.theme.textPrimary : "white"
             font.bold: true
             font.pixelSize: 14
@@ -137,8 +140,8 @@ Dialog {
             Text {
                 Layout.fillWidth: true
                 text: root.mode === "setup"
-                      ? "Google Authenticator 등에 아래 설정 키를 등록한 뒤, 앱에 표시된 현재 OTP 6자리를 입력하세요."
-                      : "현재 Authenticator 앱에 표시되는 OTP 6자리를 입력하면 2FA가 비활성화됩니다."
+                      ? "인증 앱으로 이 QR 코드를 스캔한 뒤, 앱에 표시된 6자리 OTP를 입력하세요."
+                      : "2단계 인증을 해제하려면 인증 앱에 표시된 현재 6자리 OTP를 입력하세요."
                 color: root.theme ? root.theme.textSecondary : "#a1a1aa"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 12
@@ -157,10 +160,47 @@ Dialog {
                     id: setupColumn
                     anchors.fill: parent
                     anchors.margins: 8
-                    spacing: 8
+                    spacing: 10
+
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: 300
+                        Layout.preferredHeight: 300
+                        radius: 10
+                        color: "white"
+                        border.color: root.theme ? root.theme.border : "#d4d4d8"
+                        border.width: 1
+                        clip: true
+
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 0
+                            asynchronous: false
+                            cache: false
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            source: root.qrCodeSource
+                            sourceSize.width: 300
+                            sourceSize.height: 300
+                        }
+
+                        BusyIndicator {
+                            anchors.centerIn: parent
+                            running: root.busy && root.qrCodeSource.length === 0
+                            visible: running
+                        }
+                    }
 
                     Text {
-                        text: "Manual Key"
+                        Layout.fillWidth: true
+                        text: "QR 스캔이 어려운 경우 아래 키를 직접 등록할 수 있습니다."
+                        color: root.theme ? root.theme.textSecondary : "#71717a"
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 12
+                    }
+
+                    Text {
+                        text: "수동 등록 키"
                         color: root.theme ? root.theme.accent : "#f97316"
                         font.bold: true
                         font.pixelSize: 12
@@ -170,7 +210,7 @@ Dialog {
                         Layout.fillWidth: true
                         readOnly: true
                         selectByMouse: true
-                        text: root.manualKey.length > 0 ? root.manualKey : "Generating..."
+                        text: root.manualKey.length > 0 ? root.manualKey : "생성 중..."
                         color: root.theme ? root.theme.textPrimary : "white"
                         placeholderTextColor: root.theme ? "#d1d5db" : "#6b7280"
                         background: Rectangle {
@@ -187,7 +227,7 @@ Dialog {
                 Layout.fillWidth: true
                 placeholderTextColor: root.theme ? "#d1d5db" : "#6b7280"
                 enabled: root.mode === "disable" || root.manualKey.length > 0
-                placeholderText: root.mode === "setup" ? "OTP 6 digits" : "Current OTP 6 digits"
+                placeholderText: root.mode === "setup" ? "6자리 OTP 입력" : "현재 6자리 OTP 입력"
                 inputMethodHints: Qt.ImhDigitsOnly
                 validator: RegularExpressionValidator { regularExpression: /[0-9]{0,6}/ }
                 color: root.theme ? root.theme.textPrimary : "white"
@@ -197,9 +237,10 @@ Dialog {
                                                       : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
-                    if (backendObject)
-                        backendObject.resetSessionTimer()
+                    if (root.backendObject)
+                        root.backendObject.resetSessionTimer()
                     root.statusText = ""
                 }
             }
@@ -227,17 +268,19 @@ Dialog {
             Item { Layout.fillWidth: true }
 
             Button {
-                text: "Close"
+                id: closeButton
+                text: "닫기"
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
-                    color: parent.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
+                    color: closeButton.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
                     border.color: root.theme ? root.theme.border : "#374151"
                     radius: 6
                 }
                 contentItem: Text {
-                    text: parent.text
+                    text: closeButton.text
                     color: root.theme ? root.theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -245,36 +288,38 @@ Dialog {
             }
 
             Button {
+                id: confirmButton
                 text: {
                     if (root.mode === "setup")
-                        return root.busy ? "Processing..." : "OTP 생성"
-                    return root.busy ? "Processing..." : "OTP 삭제"
+                        return root.busy ? "처리 중..." : "2단계 인증 활성화"
+                    return root.busy ? "처리 중..." : "2단계 인증 비활성화"
                 }
                 Layout.preferredWidth: 120
                 Layout.preferredHeight: 34
                 enabled: !root.busy && (root.mode === "disable" || root.manualKey.length > 0)
+                // 클릭 이벤트 처리 함수
                 onClicked: {
-                    if (backendObject)
-                        backendObject.resetSessionTimer()
+                    if (root.backendObject)
+                        root.backendObject.resetSessionTimer()
                     root.statusText = ""
                     root.busy = true
-                    if (!backendObject) {
+                    if (!root.backendObject) {
                         root.busy = false
-                        root.statusText = "Backend is not available."
+                        root.statusText = "백엔드를 사용할 수 없습니다."
                     } else if (root.mode === "setup") {
-                        backendObject.confirmTwoFactorSetup(otpField.text)
+                        root.backendObject.confirmTwoFactorSetup(otpField.text)
                     } else {
-                        backendObject.disableTwoFactor(otpField.text)
+                        root.backendObject.disableTwoFactor(otpField.text)
                     }
                 }
                 background: Rectangle {
-                    color: parent.enabled
-                           ? (parent.down ? "#ea580c" : (root.theme ? root.theme.accent : "#f97316"))
+                    color: confirmButton.enabled
+                           ? (confirmButton.down ? "#ea580c" : (root.theme ? root.theme.accent : "#f97316"))
                            : (root.theme ? root.theme.border : "#3f3f46")
                     radius: 6
                 }
                 contentItem: Text {
-                    text: parent.text
+                    text: confirmButton.text
                     color: "white"
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter

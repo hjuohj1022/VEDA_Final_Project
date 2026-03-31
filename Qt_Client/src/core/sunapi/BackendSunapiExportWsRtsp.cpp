@@ -1,7 +1,8 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 #include "internal/sunapi/BackendSunapiExportWsRtspService.h"
 #include "internal/core/Backend_p.h"
 
+// 재생 내보내기 RTSP 응답 처리 함수
 void Backend::playbackExportHandleRtspResponse(const QString &text,
                                                const QHash<int, QString> &setupCseqTrack,
                                                int &setupDoneCount,

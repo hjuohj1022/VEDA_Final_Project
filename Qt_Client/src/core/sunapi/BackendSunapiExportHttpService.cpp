@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportHttpService.h"
+#include "internal/sunapi/BackendSunapiExportHttpService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -12,6 +12,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+// 재생 내보내기 요청 함수
 void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, BackendPrivate *state, int channelIndex,
                                     const QString &dateText,
                                     const QString &startTimeText,
@@ -122,6 +123,7 @@ void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, Bac
         }
 
         const QString mode = createModes.at(idx);
+        // API URL 생성 함수
         const QUrl url = backend->buildApiUrl("/api/sunapi/export/create", {
             {"channel", QString::number(channelIndex)},
             {"start_time", startDt},
@@ -130,6 +132,7 @@ void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, Bac
             {"mode", mode}
         });
         qInfo() << "[SUNAPI][EXPORT] create request url=" << url;
+        // req 함수
         QNetworkRequest req(url);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         backend->applySslIfNeeded(req);
@@ -169,6 +172,7 @@ void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, Bac
             if (!downloadUrlText.isEmpty()) {
                 // download URL이 있어도 Crow 고정 API를 우선 사용한다.
                 if (!jobId.isEmpty()) {
+                    // API URL 생성 함수
                     const QUrl dlUrl = backend->buildApiUrl("/api/sunapi/export/download", {
                         {"job_id", jobId},
                         {"mode", mode}
@@ -206,10 +210,12 @@ void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, Bac
                     return;
                 }
 
+                // API URL 생성 함수
                 const QUrl pollUrl = backend->buildApiUrl("/api/sunapi/export/status", {
                     {"job_id", jobId},
                     {"mode", mode}
                 });
+                // 진행 Req 함수
                 QNetworkRequest pollReq(pollUrl);
                 backend->applySslIfNeeded(pollReq);
                 backend->applyAuthIfNeeded(pollReq);
@@ -248,6 +254,7 @@ void BackendSunapiExportHttpService::requestPlaybackExport(Backend *backend, Bac
                     }
 
                     if (done) {
+                        // API URL 생성 함수
                         const QUrl dlUrl = backend->buildApiUrl("/api/sunapi/export/download", {
                             {"job_id", jobId},
                             {"mode", mode}

@@ -11,6 +11,8 @@ pipeline {
         MAIL_SHARED_SECRET_CRED = 'crow-mail-shared-secret'
         MAIL_APP_SCRIPT_TIMEOUT_MS_CRED = 'crow-mail-app-script-timeout-ms'
         ADMIN_UNLOCK_KEY_CRED = 'crow-admin-unlock-key'
+        TELEGRAM_BOT_TOKEN_CRED = 'crow-telegram-bot-token'
+        TELEGRAM_CHAT_ID_CRED = 'crow-telegram-chat-id'
     }
 
     stages {
@@ -192,8 +194,10 @@ pipeline {
                         sh '''
                             set -euo pipefail
 
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-pvc.yaml
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-init.yaml
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-deploy.yaml
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/mariadb/mariadb-backup-cronjob.yaml
                             kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/mariadb
                             kubectl --kubeconfig="$KUBECONFIG" rollout status deployment/mariadb --timeout=180s
                         '''
@@ -280,7 +284,9 @@ pipeline {
                         string(credentialsId: MAIL_APP_SCRIPT_URL_CRED, variable: 'MAIL_APP_SCRIPT_URL'),
                         string(credentialsId: MAIL_SHARED_SECRET_CRED, variable: 'MAIL_SHARED_SECRET'),
                         string(credentialsId: MAIL_APP_SCRIPT_TIMEOUT_MS_CRED, variable: 'MAIL_APP_SCRIPT_TIMEOUT_MS'),
-                        string(credentialsId: ADMIN_UNLOCK_KEY_CRED, variable: 'ADMIN_UNLOCK_KEY')
+                        string(credentialsId: ADMIN_UNLOCK_KEY_CRED, variable: 'ADMIN_UNLOCK_KEY'),
+                        string(credentialsId: TELEGRAM_BOT_TOKEN_CRED, variable: 'TELEGRAM_BOT_TOKEN'),
+                        string(credentialsId: TELEGRAM_CHAT_ID_CRED, variable: 'TELEGRAM_CHAT_ID')
                     ]) {
                         sh '''
                             set -euo pipefail
@@ -297,14 +303,23 @@ EOF
 ADMIN_UNLOCK_KEY=$ADMIN_UNLOCK_KEY
 EOF
 
+                            tmp_telegram_env="$(mktemp)"
+                            cat > "$tmp_telegram_env" <<EOF
+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
+EOF
+
                             tmp_secret_yaml="$(mktemp)"
                             tmp_admin_secret_yaml="$(mktemp)"
-                            trap 'rm -f "$tmp_env" "$tmp_admin_env" "$tmp_secret_yaml" "$tmp_admin_secret_yaml"' EXIT
+                            tmp_telegram_secret_yaml="$(mktemp)"
+                            trap 'rm -f "$tmp_env" "$tmp_admin_env" "$tmp_telegram_env" "$tmp_secret_yaml" "$tmp_admin_secret_yaml" "$tmp_telegram_secret_yaml"' EXIT
 
                             kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-mail-secret --from-env-file="$tmp_env" --dry-run=client -o yaml > "$tmp_secret_yaml"
                             kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-admin-secret --from-env-file="$tmp_admin_env" --dry-run=client -o yaml > "$tmp_admin_secret_yaml"
+                            kubectl --kubeconfig="$KUBECONFIG" create secret generic crow-telegram-secret --from-env-file="$tmp_telegram_env" --dry-run=client -o yaml > "$tmp_telegram_secret_yaml"
                             kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_secret_yaml"
                             kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_admin_secret_yaml"
+                            kubectl --kubeconfig="$KUBECONFIG" apply -f "$tmp_telegram_secret_yaml"
 
                             kubectl --kubeconfig="$KUBECONFIG" apply -f RaspberryPi/k3s-cluster/crow_server/crow-server.yaml
                             kubectl --kubeconfig="$KUBECONFIG" rollout restart deployment/crow-server
