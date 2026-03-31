@@ -7,6 +7,7 @@
 #include <QWindow>
 
 #include "Backend.h"
+#include "ui/CaptureHelper.h"
 #include "ui/QrCodeImageProvider.h"
 
 // 애플리케이션 시작 함수
@@ -34,6 +35,7 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle("Basic");
 
     Backend backend;
+    CaptureHelper captureHelper;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("qrcode"), new QrCodeImageProvider());
 
@@ -48,6 +50,7 @@ int main(int argc, char *argv[])
     }
 
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("captureHelper", &captureHelper);
     engine.loadFromModule("Team3VideoReceiver", "Main");
 
     if (!appIcon.isNull()) {

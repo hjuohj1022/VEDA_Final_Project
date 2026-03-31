@@ -395,6 +395,389 @@ ApplicationWindow {
         property color accent: "#f97316"
     }
 
+    QtObject {
+        id: contestCaptureState
+        property bool running: false
+        property var steps: []
+        property int index: -1
+        property var currentStep: null
+        property string outputDir: ""
+        property var results: []
+        property bool awaitingSave: false
+        property double stepStartedMs: 0
+        property int pollTick: 0
+        property double lastWaitLogMs: 0
+        property string lastWaitDetail: ""
+    }
+    function captureLog(message) {
+        console.log("[CAPTURE]", message)
+    }
+    function captureWarn(message) {
+        console.warn("[CAPTURE]", message)
+    }
+    function forceResetContestCapture(reason) {
+        var why = String(reason || "manual reset")
+        captureWarn("force reset: " + why)
+        cleanupContestCaptureWorkbench()
+        resetContestCaptureState()
+        accountActionDialog.title = "캡처 상태 초기화"
+        accountActionDialog.text = "캡처 상태를 초기화했습니다.\n사유: " + why
+        accountActionDialog.open()
+    }
+    // 캡처용 파일 경로 생성 함수
+    function capturePathForFileName(fileName) {
+        var baseDir = String(contestCaptureState.outputDir || "")
+        if (baseDir.length === 0)
+            return fileName
+        return baseDir.replace(/\\/g, "/") + "/" + fileName
+    }
+    // 캡처 상태 초기화 함수
+    function resetContestCaptureState() {
+        captureLog("state reset")
+        contestCaptureState.running = false
+        contestCaptureState.steps = []
+        contestCaptureState.index = -1
+        contestCaptureState.currentStep = null
+        contestCaptureState.outputDir = ""
+        contestCaptureState.results = []
+        contestCaptureState.awaitingSave = false
+        contestCaptureState.stepStartedMs = 0
+        contestCaptureState.pollTick = 0
+        contestCaptureState.lastWaitLogMs = 0
+        contestCaptureState.lastWaitDetail = ""
+    }
+    // 숨김 캡처 워크벤치 정리 함수
+    function cleanupContestCaptureWorkbench() {
+        captureLog("cleanup workbench")
+        capturePollTimer.stop()
+        captureAdvanceTimer.stop()
+        captureWorkbenchHeader.closeAccountMenuForCapture()
+        captureWorkbenchTwoFactorDialog.close()
+        captureEventAlertPreview.closeDialog()
+        captureEventAlertPreview.captureMode = false
+        captureWorkbenchWindow.scene = ""
+        captureWorkbenchWindow.visible = false
+    }
+    // 캡처 결과 요약 생성 함수
+    function contestCaptureSummaryText() {
+        var results = contestCaptureState.results || []
+        var successCount = 0
+        var failureLines = []
+        for (var i = 0; i < results.length; ++i) {
+            var entry = results[i]
+            if (entry.success) {
+                successCount += 1
+            } else {
+                failureLines.push("- " + entry.label + ": " + entry.error)
+            }
+        }
+
+        var lines = []
+        lines.push("저장 위치")
+        lines.push(String(contestCaptureState.outputDir || ""))
+        lines.push("")
+        lines.push("성공: " + successCount + "/" + results.length)
+        if (failureLines.length > 0) {
+            lines.push("")
+            lines.push("실패 항목")
+            for (var j = 0; j < failureLines.length; ++j)
+                lines.push(failureLines[j])
+        }
+        return lines.join("\n")
+    }
+    // 캡처 작업 종료 함수
+    function finishContestCaptureBatch() {
+        var hadFailures = false
+        var results = contestCaptureState.results || []
+        for (var i = 0; i < results.length; ++i) {
+            if (!results[i].success) {
+                hadFailures = true
+                break
+            }
+        }
+
+        cleanupContestCaptureWorkbench()
+        captureLog("batch finished. failures=" + hadFailures + ", results=" + results.length)
+        accountActionDialog.title = hadFailures ? "공모전 캡처 완료 (일부 실패)" : "공모전 캡처 완료"
+        accountActionDialog.text = contestCaptureSummaryText()
+        accountActionDialog.open()
+        resetContestCaptureState()
+    }
+    // 현재 캡처 단계 마무리 함수
+    function finalizeContestCaptureStep(success, errorText, savedPath) {
+        capturePollTimer.stop()
+        var step = contestCaptureState.currentStep
+        if (!step)
+            return
+
+        if (success)
+            captureLog("step success: " + step.label + " -> " + String(savedPath || step.outputPath || ""))
+        else
+            captureWarn("step failed: " + step.label + " -> " + String(errorText || "unknown error"))
+
+        if (step.cleanup)
+            step.cleanup()
+
+        contestCaptureState.results.push({
+            label: step.label,
+            success: success,
+            error: String(errorText || ""),
+            path: String(savedPath || step.outputPath || "")
+        })
+
+        contestCaptureState.awaitingSave = false
+        contestCaptureState.currentStep = null
+        contestCaptureState.lastWaitLogMs = 0
+        contestCaptureState.lastWaitDetail = ""
+        captureAdvanceTimer.start()
+    }
+    // 다음 캡처 단계 시작 함수
+    function beginNextContestCaptureStep() {
+        contestCaptureState.index += 1
+        if (contestCaptureState.index >= contestCaptureState.steps.length) {
+            captureLog("all steps processed")
+            finishContestCaptureBatch()
+            return
+        }
+
+        var step = contestCaptureState.steps[contestCaptureState.index]
+        captureLog("begin step " + (contestCaptureState.index + 1) + "/" + contestCaptureState.steps.length
+                   + ": " + step.label)
+        contestCaptureState.currentStep = step
+        contestCaptureState.awaitingSave = false
+        contestCaptureState.stepStartedMs = Date.now()
+        contestCaptureState.pollTick = 0
+        contestCaptureState.lastWaitLogMs = 0
+        contestCaptureState.lastWaitDetail = ""
+        if (step.prepare)
+            step.prepare()
+        captureLog("step prepared: " + step.label)
+        capturePollTimer.start()
+    }
+    // 현재 캡처 단계 준비 상태 점검 함수
+    function pollCurrentContestCaptureStep() {
+        if (!contestCaptureState.running || contestCaptureState.awaitingSave || !contestCaptureState.currentStep)
+            return
+
+        var step = contestCaptureState.currentStep
+        var elapsedMs = Date.now() - contestCaptureState.stepStartedMs
+        contestCaptureState.pollTick += 1
+        if (step.failureReason) {
+            var failure = String(step.failureReason() || "")
+            if (failure.length > 0) {
+                captureWarn("step failureReason: " + step.label + " -> " + failure)
+                finalizeContestCaptureStep(false, failure, step.outputPath || "")
+                return
+            }
+        }
+
+        if (step.ready && !step.ready()) {
+            var waitDetail = "waiting: " + step.label
+                    + " elapsedMs=" + elapsedMs
+                    + " poll=" + contestCaptureState.pollTick
+                    + " awaitingSave=" + contestCaptureState.awaitingSave
+            if ((elapsedMs - contestCaptureState.lastWaitLogMs) >= 1000
+                    || contestCaptureState.lastWaitDetail !== waitDetail) {
+                captureLog(waitDetail)
+                contestCaptureState.lastWaitLogMs = elapsedMs
+                contestCaptureState.lastWaitDetail = waitDetail
+            }
+            if ((Date.now() - contestCaptureState.stepStartedMs) >= (step.timeoutMs || 3000)) {
+                captureWarn("step timeout: " + step.label)
+                finalizeContestCaptureStep(false,
+                                           step.timeoutError || (step.label + " 준비 시간이 초과되었습니다."),
+                                           step.outputPath || "")
+            }
+            return
+        }
+
+        capturePollTimer.stop()
+        var target = step.target ? step.target() : null
+        captureLog("resolved target for " + step.label + ": " + (target ? target : "null"))
+        if (!target) {
+            finalizeContestCaptureStep(false, step.label + " 캡처 대상 객체를 찾지 못했습니다.", step.outputPath || "")
+            return
+        }
+
+        contestCaptureState.awaitingSave = true
+        step.outputPath = capturePathForFileName(step.fileName)
+        captureLog("captureObject: " + step.label + " -> " + step.outputPath + " scale=" + (step.scale || 2.0))
+        captureHelper.captureObject(target, step.outputPath, step.scale || 2.0, 300)
+    }
+    // 공모전 제출용 캡처 단계 구성 함수
+    function buildContestCaptureSteps() {
+        return [
+            {
+                label: "계정/OTP 메뉴",
+                fileName: "AEGIS_Account_OTP_Menu.png",
+                scale: 4.0,
+                timeoutMs: 2500,
+                prepare: function() {
+                    captureWorkbenchWindow.scene = "accountMenu"
+                    captureWorkbenchHeader.closeAccountMenuForCapture()
+                    captureWorkbenchHeader.openAccountMenuForCapture()
+                },
+                ready: function() {
+                    return captureWorkbenchWindow.visible
+                            && captureWorkbenchHeader.captureAccountMenuPopup
+                            && captureWorkbenchHeader.captureAccountMenuPopup.opened
+                },
+                target: function() {
+                    return captureWorkbenchHeader.captureAccountMenuPopup
+                },
+                cleanup: function() {
+                    captureWorkbenchHeader.closeAccountMenuForCapture()
+                }
+            },
+            {
+                label: "OTP QR 등록 화면",
+                fileName: "AEGIS_OTP_QR_Setup.png",
+                scale: 3.0,
+                timeoutMs: 10000,
+                timeoutError: "OTP QR 등록 화면을 준비하지 못했습니다. 현재 계정의 OTP 활성화 상태를 확인해 주세요.",
+                prepare: function() {
+                    captureWorkbenchWindow.scene = "accountMenu"
+                    captureWorkbenchTwoFactorDialog.close()
+                    captureWorkbenchTwoFactorDialog.openForSetup()
+                },
+                ready: function() {
+                    return captureWorkbenchWindow.visible
+                            && captureWorkbenchTwoFactorDialog.visible
+                            && !captureWorkbenchTwoFactorDialog.busy
+                            && captureWorkbenchTwoFactorDialog.qrCodeSource.length > 0
+                },
+                failureReason: function() {
+                    if (!captureWorkbenchTwoFactorDialog.visible || captureWorkbenchTwoFactorDialog.busy)
+                        return ""
+                    if (captureWorkbenchTwoFactorDialog.qrCodeSource.length > 0)
+                        return ""
+                    return String(captureWorkbenchTwoFactorDialog.statusText || "")
+                },
+                target: function() {
+                    return captureWorkbenchTwoFactorDialog
+                },
+                cleanup: function() {
+                    captureWorkbenchTwoFactorDialog.close()
+                }
+            },
+            {
+                label: "회원가입 화면",
+                fileName: "AEGIS_Signup_Screen.png",
+                scale: 2.0,
+                timeoutMs: 2000,
+                prepare: function() {
+                    captureWorkbenchWindow.scene = "signup"
+                    captureWorkbenchSignupScreen.isLoggedIn = false
+                    captureWorkbenchSignupScreen.twoFactorRequired = false
+                    captureWorkbenchSignupScreen.signupMode = true
+                    captureWorkbenchSignupScreen.signupEmailCodeVisible = false
+                    captureWorkbenchSignupScreen.signupEmailVerified = false
+                },
+                ready: function() {
+                    return captureWorkbenchWindow.visible
+                            && captureWorkbenchSignupScreen.visible
+                            && captureWorkbenchSignupScreen.width > 0
+                            && captureWorkbenchSignupScreen.height > 0
+                },
+                target: function() {
+                    return captureWorkbenchSignupScreen
+                },
+                cleanup: function() {
+                    captureWorkbenchSignupScreen.signupMode = false
+                }
+            },
+            {
+                label: "H/W Control 패널",
+                fileName: "AEGIS_HW_Control_Panel.png",
+                scale: 5.0,
+                timeoutMs: 2500,
+                prepare: function() {
+                    captureWorkbenchWindow.scene = "hardware"
+                    captureWorkbenchSidebar.liveSidebarTab = 1
+                    captureWorkbenchSidebar.cameraSidebarTab = 1
+                },
+                ready: function() {
+                    return captureWorkbenchWindow.visible
+                            && captureWorkbenchSidebar.visible
+                            && captureWorkbenchSidebar.captureMotorControlPanel
+                            && captureWorkbenchSidebar.captureMotorControlPanel.visible
+                },
+                target: function() {
+                    return captureWorkbenchSidebar.captureMotorControlPanel
+                }
+            },
+            {
+                label: "이벤트 알림 화면",
+                fileName: "AEGIS_Event_Alert.png",
+                scale: 2.0,
+                timeoutMs: 2500,
+                prepare: function() {
+                    captureWorkbenchWindow.scene = "accountMenu"
+                    captureEventAlertPreview.captureMode = true
+                    captureEventAlertPreview.closeDialog()
+                    captureEventAlertPreview.openDialog()
+                },
+                ready: function() {
+                    return captureWorkbenchWindow.visible
+                            && captureEventAlertPreview.visible
+                            && captureEventAlertPreview.width > 0
+                            && captureEventAlertPreview.height > 0
+                },
+                target: function() {
+                    return captureEventAlertPreview
+                },
+                cleanup: function() {
+                    captureEventAlertPreview.closeDialog()
+                    captureEventAlertPreview.captureMode = false
+                }
+            }
+        ]
+    }
+    // 공모전 제출용 5종 캡처 시작 함수
+    function captureContestScreens() {
+        captureLog("captureContestScreens() called. loggedIn=" + backend.isLoggedIn
+                   + ", running=" + contestCaptureState.running)
+        if (contestCaptureState.running) {
+            captureWarn("capture request ignored because batch is already running")
+            return
+        }
+        if (!backend.isLoggedIn) {
+            captureWarn("capture request blocked because user is not logged in")
+            accountActionDialog.title = "공모전 캡처"
+            accountActionDialog.text = "계정/OTP 메뉴, OTP QR 등록 화면, H/W Control 패널, 이벤트 알림 화면은 로그인 상태가 필요합니다.\n로그인 후 다시 실행해 주세요."
+            accountActionDialog.open()
+            return
+        }
+
+        var outputDir = captureHelper.createTimestampedDirectory("AEGIS_Contest_Captures")
+        captureLog("output directory candidate: " + String(outputDir || ""))
+        if (String(outputDir || "").length === 0) {
+            captureWarn("failed to create output directory")
+            accountActionDialog.title = "공모전 캡처"
+            accountActionDialog.text = "캡처 저장 폴더를 만들지 못했습니다."
+            accountActionDialog.open()
+            return
+        }
+
+        contestCaptureState.running = true
+        contestCaptureState.steps = buildContestCaptureSteps()
+        contestCaptureState.index = -1
+        contestCaptureState.currentStep = null
+        contestCaptureState.outputDir = outputDir
+        contestCaptureState.results = []
+        contestCaptureState.awaitingSave = false
+        contestCaptureState.stepStartedMs = 0
+        contestCaptureState.pollTick = 0
+        contestCaptureState.lastWaitLogMs = 0
+        contestCaptureState.lastWaitDetail = ""
+
+        captureWorkbenchWindow.visible = true
+        captureWorkbenchWindow.scene = ""
+        captureLog("workbench visible. steps=" + contestCaptureState.steps.length)
+        backend.refreshTwoFactorStatus()
+        captureAdvanceTimer.start()
+    }
+
     title: "AEGIS Vision VMS"
     color: "transparent"
 
@@ -997,6 +1380,26 @@ ApplicationWindow {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+Shift+F12"
+        context: Qt.ApplicationShortcut
+        Component.onCompleted: captureLog("shortcut ready: Ctrl+Shift+F12")
+        onActivated: {
+            captureLog("shortcut activated: Ctrl+Shift+F12")
+            window.captureContestScreens()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+F11"
+        context: Qt.ApplicationShortcut
+        Component.onCompleted: captureLog("reset shortcut ready: Ctrl+Shift+F11")
+        onActivated: {
+            captureWarn("shortcut activated: Ctrl+Shift+F11")
+            window.forceResetContestCapture("shortcut Ctrl+Shift+F11")
+        }
+    }
+
     Connections {
         target: backend
         // 활성 카메라 변경 처리 함수
@@ -1183,6 +1586,21 @@ ApplicationWindow {
             exportProgressHideTimer.restart()
         }
     }
+
+    Connections {
+        target: captureHelper
+        // 캡처 저장 완료 처리 함수
+        function onCaptureFinished(path, success, error) {
+            if (success)
+                captureLog("capture finished: " + path)
+            else
+                captureWarn("capture failed: " + path + " error=" + String(error || ""))
+            if (!contestCaptureState.running || !contestCaptureState.awaitingSave)
+                return
+            finalizeContestCaptureStep(success, error, path)
+        }
+    }
+
     PlaybackExportSaveDialog {
         id: playbackExportSaveDialog
         hostWindow: window
@@ -1228,6 +1646,44 @@ ApplicationWindow {
         // 트리거 처리 함수
         onTriggered: {
             window.exportProgressVisible = false
+        }
+    }
+
+    Timer {
+        id: captureAdvanceTimer
+        interval: 150
+        repeat: false
+        running: false
+        // 다음 캡처 단계 시작 함수
+        onTriggered: {
+            captureLog("captureAdvanceTimer triggered. index=" + contestCaptureState.index
+                       + ", running=" + contestCaptureState.running)
+            beginNextContestCaptureStep()
+        }
+    }
+
+    Timer {
+        id: capturePollTimer
+        interval: 120
+        repeat: true
+        running: false
+        // 현재 캡처 단계 점검 함수
+        onTriggered: pollCurrentContestCaptureStep()
+    }
+
+    Timer {
+        id: captureWatchdogTimer
+        interval: 2000
+        repeat: true
+        running: contestCaptureState.running
+        onTriggered: {
+            var stepLabel = contestCaptureState.currentStep ? contestCaptureState.currentStep.label : "(none)"
+            captureLog("watchdog running=" + contestCaptureState.running
+                       + " index=" + contestCaptureState.index
+                       + " step=" + stepLabel
+                       + " awaitingSave=" + contestCaptureState.awaitingSave
+                       + " advanceActive=" + captureAdvanceTimer.running
+                       + " pollActive=" + capturePollTimer.running)
         }
     }
 
@@ -1313,6 +1769,85 @@ ApplicationWindow {
     SystemSpecsDialog {
         id: systemSpecsDialog
         theme: window.appTheme
+    }
+
+    ApplicationWindow {
+        id: captureWorkbenchWindow
+        width: 1280
+        height: 720
+        minimumWidth: 1280
+        minimumHeight: 720
+        maximumWidth: 1280
+        maximumHeight: 720
+        visible: false
+        x: window.x + 32
+        y: window.y + 32
+        opacity: 0.02
+        flags: Qt.Tool | Qt.FramelessWindowHint
+        color: theme.bgPrimary
+        title: "AEGIS Capture Workbench"
+        property bool isDarkMode: window.isDarkMode
+        property string scene: ""
+
+        Rectangle {
+            anchors.fill: parent
+            color: theme.bgPrimary
+        }
+
+        Header {
+            id: captureWorkbenchHeader
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 56
+            visible: captureWorkbenchWindow.scene === "accountMenu"
+            theme: window.appTheme
+            isDarkMode: window.isDarkMode
+            isLoggedIn: backend.isLoggedIn
+            twoFactorEnabled: backend.twoFactorEnabled
+            userId: backend.userId
+            currentSection: 0
+            sessionRemainingSeconds: backend.sessionRemainingSeconds
+            eventAlertActive: backend.eventAlertActive
+            eventAlertUnread: backend.eventAlertUnread
+            exportProgressVisible: false
+            exportProgressPercent: 0
+            exportProgressText: ""
+        }
+
+        LoginScreen {
+            id: captureWorkbenchSignupScreen
+            anchors.fill: parent
+            visible: captureWorkbenchWindow.scene === "signup"
+            theme: window.appTheme
+            isLoggedIn: false
+            signupMode: true
+            twoFactorRequired: false
+        }
+
+        Sidebar {
+            id: captureWorkbenchSidebar
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            width: 256
+            visible: captureWorkbenchWindow.scene === "hardware"
+            theme: window.appTheme
+            backendObject: backend
+        }
+
+        TwoFactorDialog {
+            id: captureWorkbenchTwoFactorDialog
+            theme: window.appTheme
+            backendObject: backend
+        }
+    }
+
+    EventAlertDialog {
+        id: captureEventAlertPreview
+        theme: window.appTheme
+        hostWindow: captureWorkbenchWindow
+        captureMode: false
     }
 
     Window {

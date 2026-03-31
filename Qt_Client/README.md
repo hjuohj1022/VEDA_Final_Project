@@ -194,7 +194,8 @@
 - 프로필 메뉴를 열 때마다 `GET /2fa/status`를 호출해 서버 기준 2FA 상태를 동기화
 - 2FA 미사용 계정은 `OTP 생성`만, 사용 중인 계정은 `OTP 삭제`만 노출
 - `OTP 생성` 다이얼로그
-  - `POST /2fa/setup/init`으로 `manual_key`를 수신
+  - `POST /2fa/setup/init`으로 `manual_key`, `otpauth_url`, `expires_in`을 수신
+  - `otpauth_url`은 클라이언트 로컬 `qrcodegen`으로 QR 코드 렌더링
   - Authenticator 앱 등록 후 `POST /2fa/setup/confirm`으로 활성화 완료
   - 성공 후 현재 로그인은 유지되고, 메뉴 상태만 다시 동기화
 - `OTP 삭제` 다이얼로그
@@ -210,6 +211,7 @@
   - `src/ui/qml/dialogs/TwoFactorDialog.qml`
   - `src/ui/qml/dialogs/AccountDeleteDialog.qml`
   - `src/core/auth/BackendAuthRequestService.cpp`
+  - 상세 문서: `../docs/2fa_qr_setup_flow.md`
 
 ### 6-2. 로그인 인터페이스 개선
 - 비밀번호 입력칸 우측에 표시/숨김 토글(눈 아이콘) 추가

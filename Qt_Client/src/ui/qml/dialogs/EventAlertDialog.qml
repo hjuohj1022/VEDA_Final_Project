@@ -6,6 +6,7 @@ Window {
     id: root
     property var theme
     property var hostWindow
+    property bool captureMode: false
     property string statusText: "이벤트 대기 중"
     property bool statusError: false
     property int selectedHistoryIndex: 0
@@ -100,7 +101,8 @@ Window {
                    : "현재 수신된 이벤트가 없습니다."
         statusError = false
         visible = true
-        backend.markEventAlertRead()
+        if (!root.captureMode)
+            backend.markEventAlertRead()
     }
     // 다이얼로그 닫기 함수
     function closeDialog() {
@@ -114,7 +116,8 @@ Window {
             x = hostWindow.x + (hostWindow.width - width) / 2
             y = hostWindow.y + (hostWindow.height - height) / 2
         }
-        backend.markEventAlertRead()
+        if (!root.captureMode)
+            backend.markEventAlertRead()
     }
 
     component ActionButton: Button {
