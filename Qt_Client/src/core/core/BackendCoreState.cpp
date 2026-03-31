@@ -51,16 +51,19 @@ int Backend::eventAlertPresetMotor2Angle() const { return BackendCoreStateServic
 int Backend::eventAlertPresetMotor3Angle() const { return BackendCoreStateService::eventAlertPresetMotor3Angle(d_ptr.get()); }
 bool Backend::eventAlertPresetLaserEnabled() const { return BackendCoreStateService::eventAlertPresetLaserEnabled(d_ptr.get()); }
 
+// Active Cameras 설정 함수
 void Backend::setActiveCameras(int count)
 {
     BackendCoreStateService::setActiveCameras(this, d_ptr.get(), count);
 }
 
+// 현재 Fps 설정 함수
 void Backend::setCurrentFps(int fps)
 {
     BackendCoreStateService::setCurrentFps(this, d_ptr.get(), fps);
 }
 
+// Latency 설정 함수
 void Backend::setLatency(int ms)
 {
     BackendCoreStateService::setLatency(this, d_ptr.get(), ms);

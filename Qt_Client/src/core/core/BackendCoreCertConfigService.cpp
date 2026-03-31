@@ -11,11 +11,13 @@
 #include <QSettings>
 namespace {
 
+// 기본 인증서 Directory 경로 처리 함수
 QString defaultCertDirectoryPath()
 {
     return QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("certs")));
 }
 
+// Directory 경로 정리 함수
 QString normalizeDirectoryPath(const QString &path)
 {
     const QString trimmed = path.trimmed();
@@ -25,6 +27,7 @@ QString normalizeDirectoryPath(const QString &path)
     return QDir::cleanPath(QDir(trimmed).absolutePath());
 }
 
+// 화면 Directory 경로 처리 함수
 QString displayDirectoryPath(const QString &absolutePath)
 {
     const QString normalizedPath = normalizeDirectoryPath(absolutePath);
@@ -44,6 +47,7 @@ QString displayDirectoryPath(const QString &absolutePath)
     return normalizedPath;
 }
 
+// reload Security Configuration 처리 함수
 void reloadSecurityConfiguration(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -63,6 +67,7 @@ void reloadSecurityConfiguration(Backend *backend, BackendPrivate *state)
 
 } // namespace
 
+// 인증서 Directory Override 로드 함수
 void BackendCoreCertConfigService::loadCertDirectoryOverride(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
@@ -77,6 +82,7 @@ void BackendCoreCertConfigService::loadCertDirectoryOverride(Backend *backend, B
         normalizeDirectoryPath(settings.value(QStringLiteral("security/cert_directory_path")).toString());
 }
 
+// 인증서 Directory 경로 처리 함수
 QString BackendCoreCertConfigService::certDirectoryPath(const BackendPrivate *state)
 {
     if (!state) {
@@ -89,11 +95,13 @@ QString BackendCoreCertConfigService::certDirectoryPath(const BackendPrivate *st
     return defaultCertDirectoryPath();
 }
 
+// 인증서 Directory 화면 경로 처리 함수
 QString BackendCoreCertConfigService::certDirectoryDisplayPath(const BackendPrivate *state)
 {
     return displayDirectoryPath(certDirectoryPath(state));
 }
 
+// resolve Certificate 경로 처리 함수
 QString BackendCoreCertConfigService::resolveCertificatePath(const BackendPrivate *state, const QString &rawPath)
 {
     const QString overrideDir = state ? normalizeDirectoryPath(state->m_certDirectoryOverride) : QString();
@@ -143,6 +151,7 @@ bool BackendCoreCertConfigService::updateCertDirectoryPath(Backend *backend,
     return true;
 }
 
+// 인증서 Directory 경로 초기화 함수
 bool BackendCoreCertConfigService::resetCertDirectoryPath(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {

@@ -7,6 +7,7 @@
 #include <QSettings>
 #include <QUrl>
 
+// RTSP Ip 설정 함수
 void BackendRtspConfigService::setRtspIp(Backend *backend, BackendPrivate *state, const QString &ip)
 {
     const QString trimmed = ip.trimmed();
@@ -27,6 +28,7 @@ void BackendRtspConfigService::setRtspIp(Backend *backend, BackendPrivate *state
     emit backend->rtspIpChanged();
 }
 
+// RTSP 포트 설정 함수
 void BackendRtspConfigService::setRtspPort(Backend *backend, BackendPrivate *state, const QString &port)
 {
     const QString trimmed = port.trimmed();
@@ -111,6 +113,7 @@ QString BackendRtspConfigService::buildRtspUrl(const Backend *backend,
     return QString("%1://%2%3:%4%5").arg(scheme, authPrefix, state->m_rtspIp, state->m_rtspPort, path);
 }
 
+// RTSP Ip 갱신 함수
 bool BackendRtspConfigService::updateRtspIp(Backend *backend, BackendPrivate *state, const QString &ip)
 {
     const QString trimmed = ip.trimmed();
@@ -243,6 +246,7 @@ bool BackendRtspConfigService::updateRtspConfig(Backend *backend,
     return true;
 }
 
+// RTSP 설정 To 환경 초기화 함수
 bool BackendRtspConfigService::resetRtspConfigToEnv(Backend *backend, BackendPrivate *state)
 {
     const QString envIp = state->m_env.value("RTSP_IP", "127.0.0.1").trimmed();
@@ -298,6 +302,7 @@ bool BackendRtspConfigService::updateRtspCredentials(Backend *backend,
     return true;
 }
 
+// use 환경 RTSP Credentials 처리 함수
 void BackendRtspConfigService::useEnvRtspCredentials(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);

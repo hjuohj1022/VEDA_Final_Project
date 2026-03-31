@@ -17,7 +17,7 @@ Dialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
+    // 다이얼로그 열기 함수
     function openDialog() {
         statusText = ""
         busy = false
@@ -28,19 +28,19 @@ Dialog {
         if (backendObject)
             backendObject.refreshTwoFactorStatus()
     }
-
+    // 열림 처리 함수
     onOpened: if (backendObject) backendObject.resetSessionTimer()
 
     Connections {
         target: backendObject
-
+        // 계정 삭제 완료 처리 함수
         function onAccountDeleteCompleted() {
             if (!root.visible)
                 return
             root.busy = false
             root.close()
         }
-
+        // 계정 삭제 실패 처리 함수
         function onAccountDeleteFailed(error) {
             if (!root.visible)
                 return
@@ -119,6 +119,7 @@ Dialog {
                                                            : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
                     if (backendObject)
                         backendObject.resetSessionTimer()
@@ -142,6 +143,7 @@ Dialog {
                                                       : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
                     if (backendObject)
                         backendObject.resetSessionTimer()
@@ -175,6 +177,7 @@ Dialog {
                 text: "취소"
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
@@ -194,6 +197,7 @@ Dialog {
                 Layout.preferredWidth: 120
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: {
                     if (!backendObject) {
                         root.statusText = "Backend is not available."

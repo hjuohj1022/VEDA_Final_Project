@@ -67,6 +67,7 @@ Rectangle {
         hoverEnabled: true
         enabled: iconBtn.enabledButton
         cursorShape: iconBtn.enabledButton ? Qt.PointingHandCursor : Qt.ArrowCursor
+        // 클릭 이벤트 처리 함수
         onClicked: {
             backend.resetSessionTimer()
             iconBtn.clicked()

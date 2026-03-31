@@ -105,6 +105,7 @@ bool BackendCoreApiService::isSunapiBodyError(Backend *backend,
         || bodyLower.contains("unsupported")
         || bodyLower.contains("not support")
         || bodyLower.contains("invalid")
+        // body Lower starts 기반 처리 함수
         || bodyLower.startsWith("ng")) {
         if (reason) {
             *reason = trimmed.left(160);

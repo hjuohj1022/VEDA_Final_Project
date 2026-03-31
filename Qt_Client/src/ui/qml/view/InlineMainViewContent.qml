@@ -40,6 +40,7 @@ Item {
                             ? ((backend.rtspIp, backend.rtspPort),
                                backend.buildRtspUrl(root.cameraIndex, false))
                             : ""
+                    // 더블 클릭 처리 함수
                     onDoubleClicked: {
                         root.requestClose()
                     }

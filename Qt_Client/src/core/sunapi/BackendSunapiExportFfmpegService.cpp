@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportFfmpegService.h"
+#include "internal/sunapi/BackendSunapiExportFfmpegService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -18,6 +18,7 @@
 #include <memory>
 
 namespace {
+// FFmpeg 실행 파일 경로 확인 함수
 QString resolveFfmpegBinary(const QMap<QString, QString> &env)
 {
     const QString configured = env.value("PLAYBACK_EXPORT_FFMPEG_PATH").trimmed();
@@ -48,6 +49,7 @@ QString resolveFfmpegBinary(const QMap<QString, QString> &env)
 }
 }
 
+// 재생 FFmpeg 백업 내보내기 시작 함수
 bool BackendSunapiExportFfmpegService::startPlaybackExportViaFfmpegBackup(
     Backend *backend,
     BackendPrivate *state,
@@ -79,6 +81,7 @@ bool BackendSunapiExportFfmpegService::startPlaybackExportViaFfmpegBackup(
     state->m_playbackExportOutPath = ffOutPath;
     state->m_playbackExportFinalPath = ffOutPath;
 
+    // API JSON 요청 생성 함수
     QNetworkRequest sessionReq = backend->makeApiJsonRequest("/api/sunapi/export/session", {
         {"channel", QString::number(channelIndex)},
         {"date", dateText.trimmed()},
@@ -261,6 +264,7 @@ bool BackendSunapiExportFfmpegService::startPlaybackExportViaFfmpegBackup(
         }
 
         const int ffmpegTimeoutMs = qMax(5000, state->m_env.value("PLAYBACK_EXPORT_FFMPEG_TIMEOUT_MS", "20000").toInt());
+        // proc Guard 함수
         QPointer<QProcess> procGuard(proc);
         QTimer::singleShot(ffmpegTimeoutMs,
                            backend,

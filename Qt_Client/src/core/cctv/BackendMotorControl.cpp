@@ -31,6 +31,7 @@ bool Backend::motorSetSpeed(int motor, int speed)
     return BackendMotorControlService::motorSetSpeed(this, d_ptr.get(), motor, speed);
 }
 
+// 모터 중앙 배치 함수
 bool Backend::motorCenter(int angle)
 {
     return BackendMotorControlService::motorCenter(this, d_ptr.get(), angle);
@@ -42,26 +43,31 @@ bool Backend::motorStopAll()
     return BackendMotorControlService::motorStopAll(this, d_ptr.get());
 }
 
+// 모터 Emergency 처리 함수
 bool Backend::motorEmergency()
 {
     return BackendMotorControlService::motorEmergency(this, d_ptr.get());
 }
 
+// 레이저 이벤트 처리 함수
 bool Backend::laserOn()
 {
     return BackendMotorControlService::laserOn(this, d_ptr.get());
 }
 
+// 레이저 Off 처리 함수
 bool Backend::laserOff()
 {
     return BackendMotorControlService::laserOff(this, d_ptr.get());
 }
 
+// 레이저 조회 함수
 bool Backend::laserStatus()
 {
     return BackendMotorControlService::laserStatus(this, d_ptr.get());
 }
 
+// 레이저 활성화 설정 함수
 bool Backend::laserSetEnabled(bool enabled)
 {
     return BackendMotorControlService::laserSetEnabled(this, d_ptr.get(), enabled);

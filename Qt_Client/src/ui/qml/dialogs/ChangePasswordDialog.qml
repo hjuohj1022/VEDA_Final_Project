@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
@@ -18,7 +18,7 @@ Dialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
+    // 새 비밀번호 복잡도 검증 함수
     function validateNewPasswordComplexity(password) {
         // 비밀번호 복잡도 규칙 검증
         if (password.length < 8)
@@ -33,7 +33,7 @@ Dialog {
             return "비밀번호에는 특수문자가 1개 이상 포함되어야 합니다."
         return ""
     }
-
+    // 다이얼로그 열기 함수
     function openDialog() {
         // 다이얼로그 초기화 후 표시
         statusText = ""
@@ -45,12 +45,12 @@ Dialog {
         open()
         currentPasswordField.forceActiveFocus()
     }
-
+    // 열림 처리 함수
     onOpened: if (backendObject) backendObject.resetSessionTimer()
 
     Connections {
         target: backendObject
-
+        // 비밀번호 변경 완료 처리 함수
         function onPasswordChangeCompleted() {
             if (!root.visible)
                 return
@@ -58,7 +58,7 @@ Dialog {
             root.statusText = ""
             root.close()
         }
-
+        // 비밀번호 변경 실패 처리 함수
         function onPasswordChangeFailed(error) {
             if (!root.visible)
                 return
@@ -141,6 +141,7 @@ Dialog {
                                       : (root.theme ? root.theme.border : "#27272a")
                         radius: 6
                     }
+                    // 텍스트 편집 처리 함수
                     onTextEdited: {
                         if (backendObject)
                             backendObject.resetSessionTimer()
@@ -154,6 +155,7 @@ Dialog {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 32
                     height: 32
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.currentPasswordVisible = !root.currentPasswordVisible
                     contentItem: Item {
                         Text {
@@ -199,6 +201,7 @@ Dialog {
                                       : (root.theme ? root.theme.border : "#27272a")
                         radius: 6
                     }
+                    // 텍스트 편집 처리 함수
                     onTextEdited: {
                         if (backendObject)
                             backendObject.resetSessionTimer()
@@ -212,6 +215,7 @@ Dialog {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 32
                     height: 32
+                    // 클릭 이벤트 처리 함수
                     onClicked: root.newPasswordVisible = !root.newPasswordVisible
                     contentItem: Item {
                         Text {
@@ -273,6 +277,7 @@ Dialog {
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
@@ -292,6 +297,7 @@ Dialog {
                 Layout.preferredWidth: 132
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: {
                     if (!backendObject) {
                         root.statusText = "Backend is not available."

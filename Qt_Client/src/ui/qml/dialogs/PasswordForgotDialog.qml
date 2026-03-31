@@ -17,8 +17,7 @@ Dialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
-    // 비밀번호 재설정 요청 다이얼로그 초기화 함수
+    // 다이얼로그 열기 함수
     function openDialog(initialId) {
         statusText = ""
         busy = false
@@ -31,7 +30,7 @@ Dialog {
             userIdField.forceActiveFocus()
         }
     }
-
+    // 이메일 형식 검증 함수
     function validateEmail(email) {
         const trimmed = email.trim()
         if (trimmed.length === 0)
@@ -42,7 +41,7 @@ Dialog {
             return "이메일 형식이 올바르지 않습니다."
         return ""
     }
-
+    // 비밀번호 재설정 요청 전송 함수
     function submitRequest() {
         if (!backendObject) {
             root.statusText = "Backend is not available."
@@ -67,7 +66,7 @@ Dialog {
 
     Connections {
         target: backendObject
-
+        // 비밀번호 재설정 요청 완료 처리 함수
         function onPasswordResetRequested(message, debugCode) {
             if (!root.visible)
                 return
@@ -78,7 +77,7 @@ Dialog {
             root.close()
             root.resetRequested(requestedId, requestedEmail, debugCode, message)
         }
-
+        // 비밀번호 재설정 요청 실패 처리 함수
         function onPasswordResetRequestFailed(error) {
             if (!root.visible)
                 return
@@ -156,6 +155,7 @@ Dialog {
                                   : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: root.statusText = ""
             }
 
@@ -173,7 +173,9 @@ Dialog {
                                   : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: root.statusText = ""
+                // 입력 확정 처리 함수
                 onAccepted: root.submitRequest()
             }
 
@@ -204,6 +206,7 @@ Dialog {
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
@@ -224,6 +227,7 @@ Dialog {
                 Layout.preferredWidth: 124
                 Layout.preferredHeight: 34
                 enabled: !root.busy
+                // 클릭 이벤트 처리 함수
                 onClicked: root.submitRequest()
                 background: Rectangle {
                     color: parent.enabled

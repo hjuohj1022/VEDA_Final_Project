@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as C
@@ -25,23 +25,23 @@ Item {
     Layout.fillHeight: visible
     Layout.preferredHeight: visible ? 1 : 0
     Layout.minimumHeight: visible ? 1 : 0
-
+    // 선택 모터 조회 함수
     function selectedMotor() {
         return Number(motorCombo.currentText)
     }
-
+    // 선택 각도 조회 함수
     function selectedAngle() {
         return Number(angleField.text)
     }
-
+    // 선택 속도 조회 함수
     function selectedSpeed() {
         return Number(speedField.text)
     }
-
+    // 선택 방향 조회 함수
     function selectedDirection() {
         return directionCombo.currentIndex === 0 ? "left" : "right"
     }
-
+    // 각도 입력값 정리 함수
     function sanitizeAngle(raw) {
         var t = String(raw || "").replace(/[^0-9]/g, "")
         if (t.length === 0)
@@ -53,7 +53,7 @@ Item {
             n = 180
         return String(n)
     }
-
+    // 속도 입력값 정리 함수
     function sanitizeSpeed(raw) {
         var t = String(raw || "").replace(/[^0-9]/g, "")
         if (t.length === 0)
@@ -65,7 +65,7 @@ Item {
             n = 10
         return String(n)
     }
-
+    // 제어 상태 메시지 정리 함수
     function simplifyControlStatusMessage(message) {
         var text = String(message || "").replace(/\s+/g, " ").trim()
         if (text.length === 0)
@@ -102,17 +102,17 @@ Item {
 
         return text
     }
-
+    // 누름 유지 방향 조회 함수
     function holdDirection(motor) {
         return holdDirectionByMotor[motor] || ""
     }
-
+    // 누름 유지 동작 여부 확인 함수
     function hasActiveHold() {
         return holdDirection(1).length > 0
                 || holdDirection(2).length > 0
                 || holdDirection(3).length > 0
     }
-
+    // 누름 유지 방향 설정 함수
     function setHoldDirection(motor, direction) {
         var next = {
             1: holdDirectionByMotor[1] || "",
@@ -122,7 +122,7 @@ Item {
         next[motor] = direction
         holdDirectionByMotor = next
     }
-
+    // 모터 누름 유지 시작 함수
     function startMotorHold(motor, direction) {
         if (!motorBackend)
             return
@@ -140,7 +140,7 @@ Item {
         motorBackend.motorPress(motor, direction)
         setHoldDirection(motor, direction)
     }
-
+    // 모터 누름 유지 중지 함수
     function stopMotorHold(motor) {
         if (holdDirection(motor).length === 0 || !motorBackend)
             return
@@ -148,14 +148,14 @@ Item {
         motorBackend.motorRelease(motor)
         setHoldDirection(motor, "")
     }
-
+    // 전체 모터 누름 유지 중지 함수
     function stopAllMotorHolds() {
         stopMotorHold(1)
         stopMotorHold(2)
         stopMotorHold(3)
         pressedHoldMotors = []
     }
-
+    // 선택 모터 누름 유지 시작 함수
     function startSelectedMotorHolds() {
         var motorId = selectedMotor()
         var direction = selectedDirection()
@@ -164,14 +164,14 @@ Item {
         statusText = "Motor hold active - M" + motorId + ":" + (direction === "left" ? "L" : "R")
         statusError = false
     }
-
+    // 누름 모터 유지 해제 함수
     function releasePressedMotorHolds() {
         var motors = pressedHoldMotors || []
         for (var i = 0; i < motors.length; ++i)
             stopMotorHold(motors[i])
         pressedHoldMotors = []
     }
-
+    // 레이저 활성 상태 동기화 함수
     function syncLaserEnabledFromMessage(message) {
         var text = String(message || "").toLowerCase()
         if (text.indexOf("laser on success") === 0) {
@@ -193,7 +193,7 @@ Item {
             laserEnabled = false
         }
     }
-
+    // 가시성 변경 처리 함수
     onVisibleChanged: {
         if (!visible)
             stopAllMotorHolds()
@@ -447,8 +447,11 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 누름 이벤트 처리 함수
                             onPressed: root.startSelectedMotorHolds()
+                            // 해제 이벤트 처리 함수
                             onReleased: root.releasePressedMotorHolds()
+                            // 취소 이벤트 처리 함수
                             onCanceled: root.releasePressedMotorHolds()
                         }
 
@@ -461,6 +464,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -512,6 +516,7 @@ Item {
                                     border.width: 1
                                     radius: 6
                                 }
+                                // 텍스트 편집 처리 함수
                                 onTextEdited: {
                                     var s = root.sanitizeSpeed(text)
                                     if (s !== text) {
@@ -532,6 +537,7 @@ Item {
                             Layout.minimumHeight: root.controlElementHeight
                             Layout.alignment: Qt.AlignBottom
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -582,6 +588,7 @@ Item {
                                     border.width: 1
                                     radius: 6
                                 }
+                                // 텍스트 편집 처리 함수
                                 onTextEdited: {
                                     var s = root.sanitizeAngle(text)
                                     if (s !== text) {
@@ -602,6 +609,7 @@ Item {
                             Layout.minimumHeight: root.controlElementHeight
                             Layout.alignment: Qt.AlignBottom
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -626,6 +634,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -644,6 +653,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -695,6 +705,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -711,6 +722,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -727,6 +739,7 @@ Item {
                             Layout.preferredHeight: root.controlElementHeight
                             Layout.minimumHeight: root.controlElementHeight
                             enabled: !!motorBackend
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (!motorBackend)
                                     return
@@ -763,6 +776,7 @@ Item {
 
     Connections {
         target: backend
+        // 카메라 제어 메시지 처리 함수
         function onCameraControlMessage(message, isError) {
             if (!root.visible)
                 return

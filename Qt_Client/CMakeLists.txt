@@ -104,7 +104,11 @@ qt_add_executable(Team3VideoReceiver
     src/core/stream/BackendStreamingWsService.cpp
     src/core/thermal/BackendThermal.cpp
     src/core/thermal/BackendThermalService.cpp
+    src/third_party/qrcodegen/qrcodegen.cpp
+    src/ui/qrcode/QrCodeImageProvider.cpp
     include/core/Backend.h
+    include/ui/QrCodeImageProvider.h
+    src/third_party/qrcodegen/qrcodegen.hpp
     .env
 )
 
@@ -171,6 +175,7 @@ target_include_directories(Team3VideoReceiver
     PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/include/core
+        ${CMAKE_SOURCE_DIR}/src/third_party/qrcodegen
 )
 
 target_link_libraries(Team3VideoReceiver

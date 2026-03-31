@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as C
@@ -12,7 +12,7 @@ Item {
     Layout.preferredHeight: visible ? 500 : 0
     Layout.maximumHeight: visible ? 500 : 0
     Layout.minimumHeight: visible ? 500 : 0
-
+    // 재생 시간 입력값 동기화 함수
     function syncTimeFields() {
         if (!store)
             return
@@ -23,7 +23,7 @@ Item {
         playbackMinuteField.text = parts[1]
         playbackSecondField.text = parts[2]
     }
-
+    // 내보내기 시작 시간 입력값 동기화 함수
     function syncExportStartFields() {
         if (!store)
             return
@@ -34,7 +34,7 @@ Item {
         playbackExportStartMinuteField.text = parts[1]
         playbackExportStartSecondField.text = parts[2]
     }
-
+    // 내보내기 종료 시간 입력값 동기화 함수
     function syncExportEndFields() {
         if (!store)
             return
@@ -57,12 +57,16 @@ Item {
 
     Connections {
         target: store
+        // 재생 날짜 텍스트 변경 처리 함수
         function onPlaybackDateTextChanged() {
             if (playbackDateTextField.text !== store.playbackDateText)
                 playbackDateTextField.text = store.playbackDateText
         }
+        // 재생 시간 텍스트 변경 처리 함수
         function onPlaybackTimeTextChanged() { syncTimeFields() }
+        // 내보내기 시작 시간 텍스트 변경 처리 함수
         function onPlaybackExportStartTextChanged() { syncExportStartFields() }
+        // 내보내기 종료 시간 텍스트 변경 처리 함수
         function onPlaybackExportEndTextChanged() { syncExportEndFields() }
     }
 
@@ -115,7 +119,7 @@ Item {
                             border.color: (store.playbackChannelIndex === index) ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#52525b")
                             color: (store.playbackChannelIndex === index) ? (channelBtn.down ? "#ea580c" : (theme ? theme.accent : "#f97316")) : (channelBtn.down ? (theme ? theme.bgSecondary : "#09090b") : (theme ? theme.bgComponent : "#18181b"))
                         }
-
+                        // 클릭 이벤트 처리 함수
                         onClicked: store.selectPlaybackChannel(index)
                     }
                 }
@@ -139,6 +143,7 @@ Item {
                         border.width: 1
                         radius: 6
                     }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         store.playbackDateText = text
                         if (!store.syncDateFromField()) {
@@ -156,6 +161,7 @@ Item {
                     theme: root.theme
                     Layout.preferredWidth: 50
                     enabled: !store.playbackRunning && !store.playbackPending
+                    // 클릭 이벤트 처리 함수
                     onClicked: store.playbackCalendarVisible = !store.playbackCalendarVisible
                 }
 
@@ -164,6 +170,7 @@ Item {
                     compact: true
                     theme: root.theme
                     Layout.preferredWidth: 58
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         store.requestTimelineIfValid()
                         store.requestMonthDays()
@@ -193,6 +200,7 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.preferredWidth: 34
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (store.playbackViewMonth === 0) {
                                     store.playbackViewMonth = 11
@@ -216,6 +224,7 @@ Item {
                             compact: true
                             theme: root.theme
                             Layout.preferredWidth: 34
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 if (store.playbackViewMonth === 11) {
                                     store.playbackViewMonth = 0
@@ -285,6 +294,7 @@ Item {
                                         var d = index - first + 1
                                         return d >= 1 && d <= store.daysInViewMonth()
                                     }
+                                    // 클릭 이벤트 처리 함수
                                     onClicked: {
                                         var first = store.firstDayOffset()
                                         var d = index - first + 1
@@ -318,6 +328,7 @@ Item {
                         border.width: 1
                         radius: 6
                     }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         var hh = parseInt(playbackHourField.text, 10)
                         var mm = parseInt(playbackMinuteField.text, 10)
@@ -347,6 +358,7 @@ Item {
                         border.width: 1
                         radius: 6
                     }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         var hh = parseInt(playbackHourField.text, 10)
                         var mm = parseInt(playbackMinuteField.text, 10)
@@ -376,6 +388,7 @@ Item {
                         border.width: 1
                         radius: 6
                     }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         var hh = parseInt(playbackHourField.text, 10)
                         var mm = parseInt(playbackMinuteField.text, 10)
@@ -399,6 +412,7 @@ Item {
                     accentStyle: true
                     theme: root.theme
                     enabled: !store.playbackRunning && !store.playbackPending && store.playbackTimeInRange
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         if (!store.syncDateFromField() || !store.syncSecondsFromFields())
                             return
@@ -420,6 +434,7 @@ Item {
                     Layout.fillWidth: true
                     theme: root.theme
                     enabled: store.playbackRunning && !store.playbackPending
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         store.playbackRunning = false
                         store.playbackPending = false
@@ -466,6 +481,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportStartHourField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportStartFromFields(parseInt(playbackExportStartHourField.text, 10), parseInt(playbackExportStartMinuteField.text, 10), parseInt(playbackExportStartSecondField.text, 10))) {
                             var p = store.playbackExportStartText.split(":")
@@ -483,6 +499,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportStartMinuteField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportStartFromFields(parseInt(playbackExportStartHourField.text, 10), parseInt(playbackExportStartMinuteField.text, 10), parseInt(playbackExportStartSecondField.text, 10))) {
                             var p = store.playbackExportStartText.split(":")
@@ -500,6 +517,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportStartSecondField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportStartFromFields(parseInt(playbackExportStartHourField.text, 10), parseInt(playbackExportStartMinuteField.text, 10), parseInt(playbackExportStartSecondField.text, 10))) {
                             var p = store.playbackExportStartText.split(":")
@@ -524,6 +542,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportEndHourField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportEndFromFields(parseInt(playbackExportEndHourField.text, 10), parseInt(playbackExportEndMinuteField.text, 10), parseInt(playbackExportEndSecondField.text, 10))) {
                             var p = store.playbackExportEndText.split(":")
@@ -541,6 +560,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportEndMinuteField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportEndFromFields(parseInt(playbackExportEndHourField.text, 10), parseInt(playbackExportEndMinuteField.text, 10), parseInt(playbackExportEndSecondField.text, 10))) {
                             var p = store.playbackExportEndText.split(":")
@@ -558,6 +578,7 @@ Item {
                     color: theme ? theme.textPrimary : "white"
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: playbackExportEndSecondField.activeFocus ? theme.accent : theme.border; border.width: 1; radius: 6 }
+                    // 편집 완료 처리 함수
                     onEditingFinished: {
                         if (!store.syncExportEndFromFields(parseInt(playbackExportEndHourField.text, 10), parseInt(playbackExportEndMinuteField.text, 10), parseInt(playbackExportEndSecondField.text, 10))) {
                             var p = store.playbackExportEndText.split(":")
@@ -577,6 +598,7 @@ Item {
                          && store.isValidHmsText(store.playbackExportStartText)
                          && store.isValidHmsText(store.playbackExportEndText)
                          && (store.playbackExportStartText <= store.playbackExportEndText)
+                // 클릭 이벤트 처리 함수
                 onClicked: {
                     if (!store.syncDateFromField()) return
                     if (!store.isValidHmsText(store.playbackExportStartText) || !store.isValidHmsText(store.playbackExportEndText)) return

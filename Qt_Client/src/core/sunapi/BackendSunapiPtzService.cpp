@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiPtzService.h"
+#include "internal/sunapi/BackendSunapiPtzService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -7,6 +7,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
+// Sunapi PTZ 포커스 명령 전송 함수
 bool BackendSunapiPtzService::sendSunapiPtzFocusCommand(Backend *backend,
                                                         BackendPrivate *state,
                                                         int cameraIndex,
@@ -23,6 +24,7 @@ bool BackendSunapiPtzService::sendSunapiPtzFocusCommand(Backend *backend,
         return false;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/ptz/focus", {
         { "channel", QString::number(cameraIndex) },
         { "command", command }
@@ -58,38 +60,52 @@ bool BackendSunapiPtzService::sendSunapiPtzFocusCommand(Backend *backend,
     return true;
 }
 
+// Sunapi 줌 인 함수
 bool BackendSunapiPtzService::sunapiZoomIn(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "zoom_in", "Zoom In");
 }
 
+// Sunapi 줌 아웃 함수
 bool BackendSunapiPtzService::sunapiZoomOut(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "zoom_out", "Zoom Out");
 }
 
+// Sunapi 줌 중지 함수
 bool BackendSunapiPtzService::sunapiZoomStop(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "zoom_stop", "Zoom Stop");
 }
 
+// Sunapi 포커스 근거리 이동 함수
 bool BackendSunapiPtzService::sunapiFocusNear(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "focus_near", "Focus Near");
 }
 
+// Sunapi 포커스 원거리 이동 함수
 bool BackendSunapiPtzService::sunapiFocusFar(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "focus_far", "Focus Far");
 }
 
+// Sunapi 포커스 중지 함수
 bool BackendSunapiPtzService::sunapiFocusStop(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "focus_stop", "Focus Stop");
 }
 
+// Sunapi 단순 자동 포커스 함수
 bool BackendSunapiPtzService::sunapiSimpleAutoFocus(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
+    // Sunapi PTZ 포커스 명령 전송 함수
     return sendSunapiPtzFocusCommand(backend, state, cameraIndex, "autofocus", "Auto Focus");
 }
 

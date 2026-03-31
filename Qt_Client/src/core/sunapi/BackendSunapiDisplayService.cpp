@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiDisplayService.h"
+#include "internal/sunapi/BackendSunapiDisplayService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -9,11 +9,13 @@
 #include <QRegularExpression>
 
 namespace {
+// 정수 범위 제한 함수
 int clampInt(int value, int minValue, int maxValue)
 {
     return qMax(minValue, qMin(maxValue, value));
 }
 
+// 본문 값 추출 함수
 QString extractValue(const QString &body, const QStringList &keys)
 {
     for (const QString &k : keys) {
@@ -57,6 +59,7 @@ QString extractValue(const QString &body, const QStringList &keys)
     return {};
 }
 
+// 불리언 문자열 파싱 함수
 bool parseBoolString(const QString &text, bool fallback)
 {
     const QString v = text.trimmed().toLower();
@@ -68,6 +71,7 @@ bool parseBoolString(const QString &text, bool fallback)
 }
 } // namespace
 
+// Sunapi 화면 설정 로드 함수
 void BackendSunapiDisplayService::sunapiLoadDisplaySettings(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
     if (cameraIndex < 0) {
@@ -79,6 +83,7 @@ void BackendSunapiDisplayService::sunapiLoadDisplaySettings(Backend *backend, Ba
         return;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/display/settings", {
         { "channel", QString::number(cameraIndex) }
     });
@@ -163,6 +168,7 @@ void BackendSunapiDisplayService::sunapiLoadDisplaySettings(Backend *backend, Ba
     });
 }
 
+// Sunapi 화면 설정 적용 함수
 bool BackendSunapiDisplayService::sunapiSetDisplaySettings(Backend *backend,
                                                            BackendPrivate *state,
                                                            int cameraIndex,
@@ -187,6 +193,7 @@ bool BackendSunapiDisplayService::sunapiSetDisplaySettings(Backend *backend,
     const int sat = clampInt(colorLevel, 1, 100);
     const QString sharpEnabled = sharpnessEnabled ? "true" : "false";
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/display/settings", {
         { "channel", QString::number(cameraIndex) },
         { "contrast", QString::number(c) },
@@ -249,6 +256,7 @@ bool BackendSunapiDisplayService::sunapiSetDisplaySettings(Backend *backend,
     return true;
 }
 
+// Sunapi 화면 설정 초기화 함수
 bool BackendSunapiDisplayService::sunapiResetDisplaySettings(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
     if (cameraIndex < 0) {
@@ -260,6 +268,7 @@ bool BackendSunapiDisplayService::sunapiResetDisplaySettings(Backend *backend, B
         return false;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/display/reset", {
         { "channel", QString::number(cameraIndex) }
     });

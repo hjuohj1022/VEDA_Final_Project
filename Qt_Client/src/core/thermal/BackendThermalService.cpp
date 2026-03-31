@@ -43,6 +43,7 @@ enum class ThermalFrameEncoding {
     Scaled8
 };
 
+// normalized 열화상 경로 처리 함수
 static QString normalizedThermalPath(const QString &rawPath, const QString &fallback)
 {
     QString path = rawPath.trimmed();
@@ -55,6 +56,7 @@ static QString normalizedThermalPath(const QString &rawPath, const QString &fall
     return path;
 }
 
+// uses 열화상 WebSocket 전송 처리 함수
 static bool usesThermalWsTransport(const BackendPrivate *state)
 {
     if (!state) {
@@ -65,24 +67,28 @@ static bool usesThermalWsTransport(const BackendPrivate *state)
     return transport != "mqtt";
 }
 
+// 열화상 경로 시작 함수
 static QString thermalStartPath(const BackendPrivate *state)
 {
     return normalizedThermalPath(state ? state->m_env.value("THERMAL_START_PATH") : QString(),
                                  QStringLiteral("/thermal/control/start"));
 }
 
+// 열화상 경로 중지 함수
 static QString thermalStopPath(const BackendPrivate *state)
 {
     return normalizedThermalPath(state ? state->m_env.value("THERMAL_STOP_PATH") : QString(),
                                  QStringLiteral("/thermal/control/stop"));
 }
 
+// 열화상 WebSocket 경로 처리 함수
 static QString thermalWsPath(const BackendPrivate *state)
 {
     return normalizedThermalPath(state ? state->m_env.value("THERMAL_WS_PATH") : QString(),
                                  QStringLiteral("/thermal/stream"));
 }
 
+// 열화상 프레임 타임아웃 Ms 처리 함수
 static qint64 thermalFrameTimeoutMs(const BackendPrivate *state)
 {
     if (!state) {
@@ -98,6 +104,7 @@ static qint64 thermalFrameTimeoutMs(const BackendPrivate *state)
     return std::clamp(configured, kMinThermalFrameTimeoutMs, kMaxThermalFrameTimeoutMs);
 }
 
+// 열화상 Max Inflight Frames 처리 함수
 static int thermalMaxInflightFrames(const BackendPrivate *state)
 {
     if (!state) {
@@ -113,6 +120,7 @@ static int thermalMaxInflightFrames(const BackendPrivate *state)
     return std::clamp(configured, kMinInflightThermalFrames, kMaxInflightThermalFrames);
 }
 
+// 열화상 현재 Assembly 상태 정리 함수
 static void clearThermalCurrentAssemblyState(BackendPrivate *state)
 {
     if (!state) {
@@ -127,6 +135,7 @@ static void clearThermalCurrentAssemblyState(BackendPrivate *state)
     state->m_thermalFrameChunks.clear();
 }
 
+// 열화상 Assembly 상태 초기화 함수
 static void resetThermalAssemblyState(BackendPrivate *state)
 {
     if (!state) {
@@ -143,6 +152,7 @@ static void resetThermalAssemblyState(BackendPrivate *state)
     state->m_thermalDisplayFps = 0.0;
 }
 
+// 열화상 정보 텍스트 설정 함수
 static void setThermalInfoText(Backend *backend, BackendPrivate *state, const QString &text)
 {
     if (!backend || !state || state->m_thermalInfoText == text) {
@@ -152,6 +162,7 @@ static void setThermalInfoText(Backend *backend, BackendPrivate *state, const QS
     emit backend->thermalInfoTextChanged();
 }
 
+// 열화상 WebSocket URL 생성 함수
 static QUrl buildThermalWsUrl(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(state);
@@ -173,6 +184,7 @@ static QUrl buildThermalWsUrl(Backend *backend, BackendPrivate *state)
     return wsUrl;
 }
 
+// 열화상 WebSocket 연결 해제 함수
 static void disconnectThermalWs(Backend *backend, BackendPrivate *state, bool expectedStop)
 {
     Q_UNUSED(backend);
@@ -187,11 +199,13 @@ static void disconnectThermalWs(Backend *backend, BackendPrivate *state, bool ex
     }
 
     if (state->m_thermalWs->state() == QAbstractSocket::ConnectedState
+        // 상태 m 열화상 WebSocket 상태 처리 함수
         || state->m_thermalWs->state() == QAbstractSocket::ConnectingState) {
         state->m_thermalWs->close();
     }
 }
 
+// 열화상 WebSocket 확인 함수
 static void ensureThermalWs(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || state->m_thermalWs) {
@@ -264,6 +278,7 @@ static void ensureThermalWs(Backend *backend, BackendPrivate *state)
     });
 }
 
+// 열화상 WebSocket 열기 함수
 static void openThermalWs(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -285,6 +300,7 @@ static void openThermalWs(Backend *backend, BackendPrivate *state)
     }
 
     if (state->m_thermalWs->state() == QAbstractSocket::ConnectedState
+        // 상태 m 열화상 WebSocket 상태 처리 함수
         || state->m_thermalWs->state() == QAbstractSocket::ConnectingState) {
         state->m_thermalStopExpected = true;
         state->m_thermalWs->abort();
@@ -306,6 +322,7 @@ static void openThermalWs(Backend *backend, BackendPrivate *state)
     state->m_thermalWs->open(request);
 }
 
+// 열화상 중지 요청 전송 함수
 static void postThermalStopRequest(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || !state->m_manager) {
@@ -353,11 +370,13 @@ struct ThermalChunkHeader {
     bool hasFrameId = false;
 };
 
+// Reasonable 청크 상단 확인 함수
 static bool isReasonableChunkHeader(const ThermalChunkHeader &header)
 {
     return header.total > 0 && header.total <= kThermalChunkLimit && header.idx < header.total;
 }
 
+// 열화상 청크 상단 파싱 함수
 static bool parseThermalChunkHeader(const QByteArray &message, ThermalChunkHeader *header)
 {
     if (!header || message.isEmpty()) {
@@ -408,6 +427,7 @@ static bool parseThermalChunkHeader(const QByteArray &message, ThermalChunkHeade
     return false;
 }
 
+// 열화상 Assembly Buffer 생성 함수
 static ThermalAssemblyBuffer makeThermalAssemblyBuffer(const ThermalChunkHeader &header, int frameKey, qint64 nowMs)
 {
     ThermalAssemblyBuffer buffer;
@@ -421,6 +441,7 @@ static ThermalAssemblyBuffer makeThermalAssemblyBuffer(const ThermalChunkHeader 
     return buffer;
 }
 
+// 로그 Incomplete 열화상 프레임 Drop 처리 함수
 static void logIncompleteThermalFrameDrop(const ThermalAssemblyBuffer &frame)
 {
     qWarning() << "[THERMAL] drop incomplete frame id=" << frame.frameId
@@ -428,6 +449,7 @@ static void logIncompleteThermalFrameDrop(const ThermalAssemblyBuffer &frame)
                << "/" << frame.totalChunksExpected;
 }
 
+// 열화상 현재 Assembly 상태 동기화 함수
 static void syncThermalCurrentAssemblyState(BackendPrivate *state)
 {
     if (!state || state->m_thermalAssemblyBuffers.isEmpty()) {
@@ -458,6 +480,7 @@ static void syncThermalCurrentAssemblyState(BackendPrivate *state)
     state->m_thermalFrameChunks.clear();
 }
 
+// prune 만료 열화상 Assembly Buffers 처리 함수
 static void pruneExpiredThermalAssemblyBuffers(BackendPrivate *state, qint64 nowMs)
 {
     if (!state) {
@@ -482,6 +505,7 @@ static void pruneExpiredThermalAssemblyBuffers(BackendPrivate *state, qint64 now
     }
 }
 
+// trim 열화상 Assembly Buffers 처리 함수
 static void trimThermalAssemblyBuffers(BackendPrivate *state)
 {
     if (!state) {
@@ -502,6 +526,7 @@ static void trimThermalAssemblyBuffers(BackendPrivate *state)
     }
 }
 
+// resolve 열화상 프레임 키 처리 함수
 static int resolveThermalFrameKey(BackendPrivate *state, const ThermalChunkHeader &header)
 {
     if (!state) {
@@ -525,6 +550,7 @@ static int resolveThermalFrameKey(BackendPrivate *state, const ThermalChunkHeade
     return state->m_thermalLegacyFrameSequence;
 }
 
+// Jet 색상 처리 함수
 static QRgb jetColor(unsigned char value)
 {
     const int v = static_cast<int>(value);
@@ -552,6 +578,7 @@ static QRgb jetColor(unsigned char value)
     return qRgb(r, g, b);
 }
 
+// Iron 색상 처리 함수
 static QRgb ironColor(unsigned char value)
 {
     const int v = static_cast<int>(value);
@@ -584,6 +611,7 @@ static QRgb ironColor(unsigned char value)
     return qRgb(r, g, b);
 }
 
+// percentile 조회 함수
 static int percentileValue(std::vector<int> values, int p)
 {
     if (values.empty())
@@ -598,12 +626,14 @@ static int percentileValue(std::vector<int> values, int p)
     return values[idx];
 }
 
+// 열화상 Encoding 라벨 처리 함수
 static QString thermalEncodingLabel(ThermalFrameEncoding encoding)
 {
     return (encoding == ThermalFrameEncoding::Raw16) ? QStringLiteral("16-bit") : QStringLiteral("8-bit");
 }
 } // namespace
 
+// 열화상 스트림 시작 함수
 void BackendThermalService::startThermalStream(Backend *backend, BackendPrivate *state)
 {
     if (state->m_thermalStreaming) {
@@ -680,6 +710,7 @@ void BackendThermalService::startThermalStream(Backend *backend, BackendPrivate 
     qInfo() << "[THERMAL] start request sent via API:" << thermalStartPath(state);
 }
 
+// 열화상 스트림 중지 함수
 void BackendThermalService::stopThermalStream(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_thermalStreaming) {
@@ -707,6 +738,7 @@ void BackendThermalService::stopThermalStream(Backend *backend, BackendPrivate *
     qInfo() << "[THERMAL] stream stopped via MQTT";
 }
 
+// 열화상 팔레트 설정 함수
 void BackendThermalService::setThermalPalette(Backend *backend, BackendPrivate *state, const QString &palette)
 {
     QString normalized = palette.trimmed();
@@ -725,6 +757,7 @@ void BackendThermalService::setThermalPalette(Backend *backend, BackendPrivate *
     emit backend->thermalPaletteChanged();
 }
 
+// 열화상 자동 범위 설정 함수
 void BackendThermalService::setThermalAutoRange(Backend *backend, BackendPrivate *state, bool enabled)
 {
     if (state->m_thermalAutoRange == enabled) {
@@ -734,6 +767,7 @@ void BackendThermalService::setThermalAutoRange(Backend *backend, BackendPrivate
     emit backend->thermalAutoRangeChanged();
 }
 
+// 열화상 자동 범위 창 Percent 설정 함수
 void BackendThermalService::setThermalAutoRangeWindowPercent(Backend *backend, BackendPrivate *state, int percent)
 {
     int normalized = percent;
@@ -748,6 +782,7 @@ void BackendThermalService::setThermalAutoRangeWindowPercent(Backend *backend, B
     emit backend->thermalAutoRangeWindowPercentChanged();
 }
 
+// 열화상 수동 범위 설정 함수
 void BackendThermalService::setThermalManualRange(Backend *backend, BackendPrivate *state, int minValue, int maxValue)
 {
     int nextMin = std::max(0, minValue);
@@ -763,6 +798,7 @@ void BackendThermalService::setThermalManualRange(Backend *backend, BackendPriva
     emit backend->thermalManualRangeChanged();
 }
 
+// 열화상 청크 메시지 처리 함수
 void BackendThermalService::handleThermalChunkMessage(Backend *backend, BackendPrivate *state, const QByteArray &message)
 {
     const bool debugThermal = (state->m_env.value("THERMAL_DEBUG", "0").trimmed() == "1");

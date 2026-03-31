@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import "../playback"
@@ -12,7 +12,7 @@ Item {
     property var cameraStates: [false, false, false, false]
     property var cameraFpsValues: [0, 0, 0, 0]
     signal openMainViewRequested(int cameraIndex)
-
+    // 활성 카메라 수 재계산 함수
     function recountActiveCameras() {
         var count = 0
         for (var i = 0; i < cameraStates.length; i++) {
@@ -20,7 +20,7 @@ Item {
         }
         backend.activeCameras = count
     }
-
+    // 현재 FPS 재계산 함수
     function recountCurrentFps() {
         var sum = 0
         var count = 0
@@ -34,14 +34,14 @@ Item {
         }
         backend.currentFps = count > 0 ? Math.round(sum / count) : 0
     }
-
+    // 카메라 상태 초기화 함수
     function resetCameraStates() {
         cameraStates = [false, false, false, false]
         cameraFpsValues = [0, 0, 0, 0]
         recountActiveCameras()
         recountCurrentFps()
     }
-
+    // 활성 상태 변경 처리 함수
     onIsActiveChanged: {
         if (!isActive) {
             resetCameraStates()
@@ -74,7 +74,7 @@ Item {
                         ? ((backend.rtspIp, backend.rtspPort),
                            backend.buildRtspUrl(index, true))
                         : ""
-
+                // 카메라 상태 변경 처리 함수
                 onCameraStateChanged: function(cameraIndex, isLive) {
                     if (cameraIndex < 0 || cameraIndex >= root.cameraStates.length) {
                         return
@@ -89,7 +89,7 @@ Item {
                     root.recountActiveCameras()
                     root.recountCurrentFps()
                 }
-
+                // 카메라 FPS 변경 처리 함수
                 onCameraFpsChanged: function(cameraIndex, fps) {
                     if (cameraIndex < 0 || cameraIndex >= root.cameraFpsValues.length) {
                         return
@@ -100,7 +100,7 @@ Item {
                     root.cameraFpsValues[cameraIndex] = fps
                     root.recountCurrentFps()
                 }
-
+                // 더블 클릭 처리 함수
                 onDoubleClicked: {
                     root.openMainViewRequested(cameraIndex)
                 }

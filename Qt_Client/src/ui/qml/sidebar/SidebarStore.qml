@@ -43,20 +43,24 @@ Item {
     signal requestPlaybackExport(int channelIndex, string dateText, string startTimeText, string endTimeText)
     signal requestPlaybackPause()
     signal requestPlaybackResume()
-
+    // 두 자리 숫자 포맷 함수
     function pad2(v) { return (v < 10 ? "0" : "") + v }
+    // 재생 날짜 포맷 함수
     function formatPlaybackDate() {
         return playbackSelectedDate.getFullYear() + "-" + pad2(playbackSelectedDate.getMonth() + 1) + "-" + pad2(playbackSelectedDate.getDate())
     }
+    // 재생 시간 포맷 함수
     function formatPlaybackTime() {
         var s = playbackCurrentSeconds >= 0 ? playbackCurrentSeconds : 0
         return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
     }
+    // 초 기준 시간 동기화 함수
     function syncTimeFromSeconds(sec) {
         var s = Math.max(0, Math.min(86399, Math.floor(sec)))
         playbackCurrentSeconds = s
         playbackTimeText = pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
     }
+    // 입력 필드 시간 동기화 함수
     function syncSecondsFromFields() {
         var parts = playbackTimeText.split(":")
         if (parts.length !== 3)
@@ -72,6 +76,7 @@ Item {
         playbackTimeText = pad2(h) + ":" + pad2(m) + ":" + pad2(s)
         return true
     }
+    // 입력 필드 날짜 동기화 함수
     function syncDateFromField() {
         var t = playbackDateText.trim()
         var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t)
@@ -89,6 +94,7 @@ Item {
         playbackDateText = formatPlaybackDate()
         return true
     }
+    // 시분초 텍스트 유효성 확인 함수
     function isValidHmsText(t) {
         var m = /^(\d{2}):(\d{2}):(\d{2})$/.exec((t || "").trim())
         if (!m) return false
@@ -97,10 +103,12 @@ Item {
         var s = parseInt(m[3], 10)
         return h >= 0 && h <= 23 && mm >= 0 && mm <= 59 && s >= 0 && s <= 59
     }
+    // 초 시분초 변환 함수
     function secToHms(sec) {
         var s = Math.max(0, Math.min(86399, Math.floor(sec)))
         return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
     }
+    // 내보내기 범위 적용 함수
     function applyExportRangeFromSecond(sec) {
         var startSec = Math.max(0, Math.min(86399, Math.floor(sec)))
         var endSec = Math.max(startSec, Math.min(86399, startSec + 300))
@@ -143,27 +151,32 @@ Item {
         playbackExportStartText = secToHms(startSec)
         playbackExportEndText = secToHms(endSec)
     }
+    // 내보내기 시작 시간 동기화 함수
     function syncExportStartFromFields(hh, mm, ss) {
         if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59)
             return false
         playbackExportStartText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
         return true
     }
+    // 내보내기 종료 시간 동기화 함수
     function syncExportEndFromFields(hh, mm, ss) {
         if (isNaN(hh) || isNaN(mm) || isNaN(ss) || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59)
             return false
         playbackExportEndText = pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss)
         return true
     }
+    // 유효한 타임라인 요청 함수
     function requestTimelineIfValid() {
         if (!syncDateFromField())
             return
         requestPlaybackTimeline(playbackChannelIndex, playbackDateText)
     }
+    // 월간 일자 요청 함수
     function requestMonthDays() {
         playbackRecordedDays = []
         requestPlaybackMonthDays(playbackChannelIndex, playbackViewYear, playbackViewMonth + 1)
     }
+    // 재생 채널 선택 함수
     function selectPlaybackChannel(index) {
         var i = Math.max(0, Math.min(3, Number(index)))
         if (playbackChannelIndex === i)
@@ -172,6 +185,7 @@ Item {
         requestTimelineIfValid()
         requestMonthDays()
     }
+    // 녹화 일자 여부 확인 함수
     function isRecordedDay(day) {
         if (!playbackRecordedDays || playbackRecordedDays.length === 0)
             return false
@@ -181,12 +195,14 @@ Item {
         }
         return false
     }
+    // 현재 뷰 오늘 일자 확인 함수
     function isTodayInViewDay(day) {
         var now = new Date()
         return now.getFullYear() === playbackViewYear
             && now.getMonth() === playbackViewMonth
             && now.getDate() === day
     }
+    // 초 단위 녹화 여부 확인 함수
     function isSecondRecorded(sec) {
         if (!playbackSegments || playbackSegments.length === 0)
             return false
@@ -202,6 +218,7 @@ Item {
         }
         return false
     }
+    // 타임라인 정보 갱신 함수
     function updateTimelineInfo() {
         if (!playbackSegments || playbackSegments.length === 0) {
             playbackTimelineInfoText = "녹화 구간 없음"
@@ -261,6 +278,7 @@ Item {
             playbackTimeInRange = false
         }
     }
+    // 재생 시작 적용 함수
     function applyPlaybackStart(dateText, timeText) {
         var d = new Date(dateText + "T00:00:00")
         if (!isNaN(d.getTime())) {
@@ -282,21 +300,26 @@ Item {
             applyExportRangeFromSecond(playbackCurrentSeconds)
         }
     }
+    // 현재 뷰 월간 일자 수 계산 함수
     function daysInViewMonth() {
         return new Date(playbackViewYear, playbackViewMonth + 1, 0).getDate()
     }
+    // 첫 요일 오프셋 계산 함수
     function firstDayOffset() {
         return new Date(playbackViewYear, playbackViewMonth, 1).getDay()
     }
+    // 월간 라벨 생성 함수
     function monthLabel() {
         var m = playbackViewMonth + 1
         return playbackViewYear + "-" + pad2(m)
     }
+    // 선택 카메라 제목 생성 함수
     function selectedCameraTitle() {
         if (selectedCameraIndex < 0 || selectedCameraIndex >= cameraNames.length)
             return "Camera"
         return "Cam " + (selectedCameraIndex + 1) + " - " + cameraNames[selectedCameraIndex]
     }
+    // 표시 설정 적용 함수
     function applyDisplaySettings() {
         if (!showCameraControls || selectedCameraIndex < 0 || !backend)
             return
@@ -308,17 +331,20 @@ Item {
                     displayColorLevel,
                     displaySharpnessEnabled)
     }
+    // 표시 설정 갱신 함수
     function refreshDisplaySettings() {
         if (!showCameraControls || selectedCameraIndex < 0 || !backend)
             return
         backend.sunapiLoadDisplaySettings(selectedCameraIndex)
     }
+    // 카메라 제어 상태 타이머 재시작 함수
     function restartCameraControlStatusTimer() {
         controlStatusTimer.restart()
     }
 
     Connections {
         target: store.backend ? store.backend : null
+        // 카메라 제어 메시지 처리 함수
         function onCameraControlMessage(message, isError) {
             if (!store.showCameraControls)
                 return
@@ -326,6 +352,7 @@ Item {
             store.cameraControlError = isError
             controlStatusTimer.restart()
         }
+        // 표시 설정 변경 처리 함수
         function onDisplaySettingsChanged() {
             store.displayContrast = backend.displayContrast
             store.displayBrightness = backend.displayBrightness
@@ -339,6 +366,7 @@ Item {
         id: controlStatusTimer
         interval: 3000
         repeat: false
+        // 트리거 처리 함수
         onTriggered: {
             store.cameraControlStatus = ""
             store.cameraControlError = false
@@ -349,6 +377,7 @@ Item {
         id: displaySettingsRefreshTimer
         interval: 80
         repeat: false
+        // 트리거 처리 함수
         onTriggered: store.refreshDisplaySettings()
     }
 
@@ -357,9 +386,10 @@ Item {
         interval: 1000
         repeat: true
         running: store.showPlaybackControls && store.playbackRunning && !store.playbackPending
+        // 트리거 처리 함수
         onTriggered: store.syncTimeFromSeconds(store.playbackCurrentSeconds + 1)
     }
-
+    // 카메라 제어 패널 표시 상태 변경 처리 함수
     onShowCameraControlsChanged: {
         if (!showCameraControls && mapModeEnabled && backend) {
             backend.stopCctv3dMapSequence()
@@ -370,6 +400,7 @@ Item {
             displaySettingsRefreshTimer.restart()
         }
     }
+    // 선택 카메라 변경 처리 함수
     onSelectedCameraIndexChanged: {
         if (mapModeEnabled && backend) {
             backend.stopCctv3dMapSequence()
@@ -382,6 +413,7 @@ Item {
             displaySettingsRefreshTimer.restart()
         }
     }
+    // 재생 제어 패널 표시 상태 변경 처리 함수
     onShowPlaybackControlsChanged: {
         if (showPlaybackControls && playbackCurrentSeconds < 0) {
             var now = new Date()
@@ -399,12 +431,16 @@ Item {
             requestMonthDays()
         }
     }
+    // 재생 보기 연도 변경 처리 함수
     onPlaybackViewYearChanged: if (showPlaybackControls) requestMonthDays()
+    // 재생 보기 월 변경 처리 함수
     onPlaybackViewMonthChanged: if (showPlaybackControls) requestMonthDays()
+    // 재생 현재 시간 변경 처리 함수
     onPlaybackCurrentSecondsChanged: {
         playbackTimeInRange = isSecondRecorded(playbackCurrentSeconds >= 0 ? playbackCurrentSeconds : 0)
         updateTimelineInfo()
     }
+    // 재생 시간 텍스트 변경 처리 함수
     onPlaybackTimeTextChanged: {
         if (!store.playbackRunning && !store.playbackPending && store.isValidHmsText(store.playbackTimeText)) {
             if (!store.isValidHmsText(store.playbackExportStartText))
@@ -413,5 +449,6 @@ Item {
                 store.playbackExportEndText = store.playbackTimeText
         }
     }
+    // 재생 구간 변경 처리 함수
     onPlaybackSegmentsChanged: updateTimelineInfo()
 }

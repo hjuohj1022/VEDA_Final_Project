@@ -12,6 +12,7 @@
 #include <QUrl>
 
 namespace {
+// Hex 정리 함수
 QString normalizeHex(const QString &input)
 {
     QString s = input;
@@ -23,6 +24,7 @@ QString normalizeHex(const QString &input)
 }
 } // namespace
 
+// 스트리밍 WebSocket 연결 함수
 void BackendStreamingWsService::streamingWsConnect(Backend *backend, BackendPrivate *state)
 {
     const QUrl apiBase(backend->serverUrl());
@@ -79,6 +81,7 @@ void BackendStreamingWsService::streamingWsConnect(Backend *backend, BackendPriv
             }
         });
     } else if (state->m_streamingWs->state() == QAbstractSocket::ConnectedState
+               // 상태 m 스트리밍 WebSocket 상태 처리 함수
                || state->m_streamingWs->state() == QAbstractSocket::ConnectingState) {
         state->m_streamingWs->abort();
     }
@@ -91,6 +94,7 @@ void BackendStreamingWsService::streamingWsConnect(Backend *backend, BackendPriv
     state->m_streamingWs->open(wsUrl);
 }
 
+// 스트리밍 WebSocket 연결 해제 함수
 void BackendStreamingWsService::streamingWsDisconnect(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
@@ -98,11 +102,13 @@ void BackendStreamingWsService::streamingWsDisconnect(Backend *backend, BackendP
         return;
     }
     if (state->m_streamingWs->state() == QAbstractSocket::ConnectedState
+        // 상태 m 스트리밍 WebSocket 상태 처리 함수
         || state->m_streamingWs->state() == QAbstractSocket::ConnectingState) {
         state->m_streamingWs->close();
     }
 }
 
+// 스트리밍 WebSocket Hex 전송 함수
 bool BackendStreamingWsService::streamingWsSendHex(Backend *backend, BackendPrivate *state, QString hexPayload)
 {
     if (!state->m_streamingWs || state->m_streamingWs->state() != QAbstractSocket::ConnectedState) {
@@ -127,6 +133,7 @@ bool BackendStreamingWsService::streamingWsSendHex(Backend *backend, BackendPriv
     return true;
 }
 
+// 재생 WebSocket 일시정지 함수
 bool BackendStreamingWsService::playbackWsPause(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_playbackWsActive || state->m_playbackWsUri.isEmpty() || state->m_playbackWsSession.isEmpty()) {
@@ -157,6 +164,7 @@ bool BackendStreamingWsService::playbackWsPause(Backend *backend, BackendPrivate
     return ok;
 }
 
+// 재생 WebSocket 재생 함수
 bool BackendStreamingWsService::playbackWsPlay(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_playbackWsActive || state->m_playbackWsUri.isEmpty() || state->m_playbackWsSession.isEmpty()) {

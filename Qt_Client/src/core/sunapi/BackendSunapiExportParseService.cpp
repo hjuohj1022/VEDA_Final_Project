@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportParseService.h"
+#include "internal/sunapi/BackendSunapiExportParseService.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -6,6 +6,7 @@
 #include <QJsonValue>
 #include <QRegularExpression>
 
+// Sunapi 내보내기 키값 추출 함수
 QString BackendSunapiExportParseService::sunapiExportExtractKvValue(const QString &text, const QStringList &keys)
 {
     for (const QString &k : keys) {
@@ -20,6 +21,7 @@ QString BackendSunapiExportParseService::sunapiExportExtractKvValue(const QStrin
     return QString();
 }
 
+// Sunapi 내보내기 JSON 문자열 추출 함수
 QString BackendSunapiExportParseService::sunapiExportExtractJsonString(const QJsonObject &obj, const QStringList &keys)
 {
     for (const QString &k : keys) {
@@ -39,6 +41,7 @@ QString BackendSunapiExportParseService::sunapiExportExtractJsonString(const QJs
     return QString();
 }
 
+// Sunapi 내보내기 시분초 초 단위 변환 함수
 int BackendSunapiExportParseService::sunapiExportParseHmsToSec(const QString &hms)
 {
     const QRegularExpression re("^(\\d{2}):(\\d{2}):(\\d{2})$");
@@ -55,6 +58,7 @@ int BackendSunapiExportParseService::sunapiExportParseHmsToSec(const QString &hm
     return (h * 3600) + (mm * 60) + s;
 }
 
+// Sunapi 내보내기 생성 응답 파싱 함수
 bool BackendSunapiExportParseService::sunapiExportParseCreateReply(const QByteArray &body,
                                                                     QString *jobId,
                                                                     QString *downloadUrl,
@@ -120,6 +124,7 @@ bool BackendSunapiExportParseService::sunapiExportParseCreateReply(const QByteAr
     return false;
 }
 
+// Sunapi 내보내기 진행 응답 파싱 함수
 void BackendSunapiExportParseService::sunapiExportParsePollReply(const QByteArray &body,
                                                                   int *progress,
                                                                   bool *done,

@@ -24,26 +24,31 @@ struct EventControlSpec
     bool laserEnabled = false;
 };
 
+// Angle 제한 함수
 int clampAngle(int angle)
 {
     return qBound(0, angle, 180);
 }
 
+// emit 이벤트 알림 상태 Changed 처리 함수
 void emitEventAlertStateChanged(Backend *backend)
 {
     emit backend->eventAlertStateChanged();
 }
 
+// emit 이벤트 알림 Preset Changed 처리 함수
 void emitEventAlertPresetChanged(Backend *backend)
 {
     emit backend->eventAlertPresetChanged();
 }
 
+// emit 이벤트 알림 이력 Changed 처리 함수
 void emitEventAlertHistoryChanged(Backend *backend)
 {
     emit backend->eventAlertHistoryChanged();
 }
 
+// preset 제어 처리 함수
 EventControlSpec presetControl(const BackendPrivate *state)
 {
     EventControlSpec spec;
@@ -54,6 +59,7 @@ EventControlSpec presetControl(const BackendPrivate *state)
     return spec;
 }
 
+// 이벤트 제어 조회 함수
 EventControlSpec currentEventControl(const BackendPrivate *state)
 {
     EventControlSpec spec;
@@ -64,6 +70,7 @@ EventControlSpec currentEventControl(const BackendPrivate *state)
     return spec;
 }
 
+// 이벤트 제어 Override 정리 함수
 void clearEventControlOverride(BackendPrivate *state)
 {
     state->m_eventAlertHasControlOverride = false;
@@ -73,6 +80,7 @@ void clearEventControlOverride(BackendPrivate *state)
     state->m_eventAlertLaserEnabled = false;
 }
 
+// Angle 값 파싱 함수
 bool parseAngleValue(const QJsonValue &value, int currentValue, int *target)
 {
     if (!target) {
@@ -96,6 +104,7 @@ bool parseAngleValue(const QJsonValue &value, int currentValue, int *target)
     return true;
 }
 
+// 불리언 값 파싱 함수
 bool parseBoolValue(const QJsonValue &value, bool fallback)
 {
     if (value.isBool()) {
@@ -116,6 +125,7 @@ bool parseBoolValue(const QJsonValue &value, bool fallback)
     return fallback;
 }
 
+// Unsigned Long 값 파싱 함수
 qulonglong parseUnsignedLongLongValue(const QJsonValue &value, qulonglong fallback = 0)
 {
     if (value.isDouble()) {
@@ -132,6 +142,7 @@ qulonglong parseUnsignedLongLongValue(const QJsonValue &value, qulonglong fallba
     return fallback;
 }
 
+// 문자열 값 파싱 함수
 QString parseStringValue(const QJsonObject &obj, const QString &key, const QString &fallback, bool lowercase = false)
 {
     QString text = obj.value(key).toString().trimmed();
@@ -141,6 +152,7 @@ QString parseStringValue(const QJsonObject &obj, const QString &key, const QStri
     return lowercase ? text.toLower() : text;
 }
 
+// 제어 Keys 확인 함수
 bool hasControlKeys(const QJsonObject &obj)
 {
     return obj.contains("motor1Angle")
@@ -149,6 +161,7 @@ bool hasControlKeys(const QJsonObject &obj)
         || obj.contains("laserEnabled");
 }
 
+// 제어 요약 처리 함수
 QString controlSummary(const EventControlSpec &spec)
 {
     return QString("M1=%1, M2=%2, M3=%3, Laser=%4")
@@ -158,6 +171,7 @@ QString controlSummary(const EventControlSpec &spec)
         .arg(spec.laserEnabled ? "ON" : "OFF");
 }
 
+// 제어 적용 함수
 bool applyControl(Backend *backend, const EventControlSpec &spec, const QString &reason)
 {
     bool ok = true;
@@ -174,12 +188,14 @@ bool applyControl(Backend *backend, const EventControlSpec &spec, const QString 
     return ok;
 }
 
+// 이벤트 Received At 포맷 함수
 QString formatEventReceivedAt()
 {
     // 새 이벤트 수신 시각을 사용자에게 그대로 보여주기 위한 문자열
     return QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
 }
 
+// 열화상 이벤트 제목 포맷 함수
 QString formatThermalEventTitle(const QJsonObject &obj, const QString &fallback)
 {
     const QString title = parseStringValue(obj, "title", fallback, false);
@@ -189,6 +205,7 @@ QString formatThermalEventTitle(const QJsonObject &obj, const QString &fallback)
     return title;
 }
 
+// 열화상 이벤트 메시지 포맷 함수
 QString formatThermalEventMessage(const QJsonObject &obj, const QString &fallback)
 {
     const QJsonObject thermalObj = obj.value("thermal").toObject();
@@ -260,6 +277,7 @@ QVariantMap makeEventHistoryItem(const QString &source,
 
 } // namespace
 
+// mark 이벤트 알림 Read 처리 함수
 void BackendCoreEventService::markEventAlertRead(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || !state->m_eventAlertUnread) {
@@ -270,6 +288,7 @@ void BackendCoreEventService::markEventAlertRead(Backend *backend, BackendPrivat
     emitEventAlertStateChanged(backend);
 }
 
+// 이벤트 알림 정리 함수
 void BackendCoreEventService::clearEventAlert(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -319,6 +338,7 @@ void BackendCoreEventService::updateEventAlertPreset(Backend *backend,
     emitEventAlertPresetChanged(backend);
 }
 
+// 이벤트 알림 제어 적용 함수
 bool BackendCoreEventService::applyEventAlertControl(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -365,6 +385,7 @@ bool BackendCoreEventService::applyEventAlertControl(Backend *backend, BackendPr
     return true;
 }
 
+// 이벤트 알림 제어 중지 함수
 bool BackendCoreEventService::stopEventAlertControl(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {
@@ -383,6 +404,7 @@ bool BackendCoreEventService::stopEventAlertControl(Backend *backend, BackendPri
     return stopRequested;
 }
 
+// 이벤트 알림 메시지 처리 함수
 void BackendCoreEventService::handleEventAlertMessage(Backend *backend, BackendPrivate *state, const QByteArray &message)
 {
     if (!backend || !state) {
