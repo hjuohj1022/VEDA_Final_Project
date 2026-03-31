@@ -29,12 +29,11 @@ Item {
     property bool isLoggedIn: backend.isLoggedIn
     property bool twoFactorRequired: backend.twoFactorRequired
     signal requestReturnLiveView()
-
-    // Windows API 기반 Lock 상태 즉시 조회
+    // 키보드 잠금 표시 갱신 함수
     function refreshKeyboardLockIndicators() {
         capsLockOn = backend.isCapsLockOn()
     }
-    
+    // 로그인 실행 함수
     function triggerSignIn() {
         if (root.signupMode || backend.loginLocked) {
             return
@@ -45,7 +44,7 @@ Item {
         }
         backend.login(idField.text, pwField.text)
     }
-
+    // 회원가입 실행 함수
     function triggerSignUp() {
         if (!root.signupMode || backend.twoFactorRequired) {
             return
@@ -87,8 +86,7 @@ Item {
         }
         backend.registerUser(idField.text, pwField.text, emailField.text)
     }
-
-    // FolderDialog가 돌려준 file URL을 로컬 경로로 바꾼다.
+    // URL 로컬 경로 변환 함수
     function urlToLocalPath(u) {
         var s = String(u || "")
         if (s.indexOf("file:///") === 0) {
@@ -102,8 +100,7 @@ Item {
         }
         return s
     }
-
-    // 현재 인증서 폴더를 FolderDialog 초기 위치로 맞춘다.
+    // 로컬 경로 파일 URL 변환 함수
     function localPathToFileUrl(path) {
         var s = String(path || "")
         if (s.length === 0)
@@ -115,7 +112,6 @@ Item {
             return "file://" + encodeURI(normalized)
         return normalized
     }
-
     // 회원가입 비밀번호 복잡도 검증 함수
     function validateSignupPasswordComplexity(password) {
         if (password.length < 8) {
@@ -135,7 +131,6 @@ Item {
         }
         return ""
     }
-
     // 회원가입 이메일 형식 검증 함수
     function validateSignupEmail(email) {
         const trimmed = email.trim()
@@ -150,7 +145,6 @@ Item {
         }
         return ""
     }
-
     // 회원가입 이메일 인증 상태 초기화 함수
     function resetSignupEmailVerificationState() {
         signupEmailCodeVisible = false
@@ -162,8 +156,7 @@ Item {
             emailCodeField.text = ""
         }
     }
-
-    // 현재 입력값 기준 이메일 인증 완료 여부 확인 함수
+    // 현재 회원가입 이메일 인증 상태 확인 함수
     function isCurrentSignupEmailVerified() {
         return signupEmailVerified
                 && signupEmailVerifiedId === idField.text.trim()
@@ -175,6 +168,7 @@ Item {
         interval: 150
         repeat: true
         running: !root.isLoggedIn
+        // 트리거 처리 함수
         onTriggered: root.refreshKeyboardLockIndicators()
     }
 
@@ -249,7 +243,9 @@ Item {
                         border.color: idField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                         radius: 6
                     }
+                    // 입력 확정 처리 함수
                     onAccepted: triggerSignIn()
+                    // 텍스트 변경 처리 함수
                     onTextChanged: {
                         if (root.signupMode && (root.signupEmailCodeVisible || root.signupEmailVerified)) {
                             root.resetSignupEmailVerificationState()
@@ -279,6 +275,7 @@ Item {
                             border.color: emailField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 텍스트 변경 처리 함수
                         onTextChanged: {
                             if (root.signupEmailCodeVisible || root.signupEmailVerified) {
                                 root.resetSignupEmailVerificationState()
@@ -309,6 +306,7 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (idField.text.trim().length === 0) {
                                 errorDialog.title = "회원가입 실패"
@@ -354,6 +352,7 @@ Item {
                             border.color: emailCodeField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 입력 확정 처리 함수
                         onAccepted: {
                             if (text.trim().length > 0) {
                                 backend.confirmEmailVerification(idField.text, emailField.text, text.trim())
@@ -381,6 +380,7 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (emailCodeField.text.trim().length === 0) {
                                 errorDialog.title = "회원가입 실패"
@@ -426,6 +426,7 @@ Item {
                             border.color: pwField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 입력 확정 처리 함수
                         onAccepted: {
                             if (root.signupMode) {
                                 pwConfirmField.forceActiveFocus()
@@ -441,6 +442,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 32
                         height: 32
+                        // 클릭 이벤트 처리 함수
                         onClicked: root.primaryPasswordVisible = !root.primaryPasswordVisible
                         contentItem: Item {
                             Text {
@@ -490,6 +492,7 @@ Item {
                             border.color: pwConfirmField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 입력 확정 처리 함수
                         onAccepted: triggerSignUp()
                     }
 
@@ -499,6 +502,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 32
                         height: 32
+                        // 클릭 이벤트 처리 함수
                         onClicked: root.confirmPasswordVisible = !root.confirmPasswordVisible
                         contentItem: Item {
                             Text {
@@ -553,6 +557,7 @@ Item {
                         height: forgotPasswordLink.implicitHeight
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // 클릭 이벤트 처리 함수
                         onClicked: passwordForgotDialog.openDialog(idField.text)
                     }
                 }
@@ -647,6 +652,7 @@ Item {
                             border.color: otpField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 입력 확정 처리 함수
                         onAccepted: triggerSignIn()
                     }
                 }
@@ -675,7 +681,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-                    
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         triggerSignIn()
                     }
@@ -703,7 +709,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         if (!root.signupMode) {
                             root.signupMode = true
@@ -740,6 +746,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.cancelTwoFactorLogin()
                         otpField.text = ""
@@ -765,7 +772,9 @@ Item {
                             border.color: adminUnlockField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                             radius: 6
                         }
+                        // 텍스트 변경 처리 함수
                         onTextChanged: root.adminUnlockCode = text
+                        // 입력 확정 처리 함수
                         onAccepted: {
                             backend.adminUnlock(text)
                         }
@@ -777,6 +786,7 @@ Item {
                     height: 38
                     scale: down ? 0.97 : 1.0
                     Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.adminUnlock(adminUnlockField.text)
                     }
@@ -816,7 +826,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-                    
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         if (backend.twoFactorRequired) {
                             otpField.text = ""
@@ -855,7 +865,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         certFolderDialog.currentFolder = root.localPathToFileUrl(backend.certDirectoryPath)
                         certFolderDialog.open()
@@ -916,6 +926,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         root.signupMode = false
                         idField.text = ""
@@ -1004,7 +1015,7 @@ Item {
     // 백엔드 시그널 연결
     Connections {
         target: backend
-
+        // 로그인 상태 변경 처리 함수
         function onIsLoggedInChanged() {
             if (!backend.isLoggedIn) {
                 idField.text = ""
@@ -1020,7 +1031,7 @@ Item {
                 backend.stopThermalStream()
             }
         }
-
+        // 이중 인증 필요 상태 변경 처리 함수
         function onTwoFactorRequiredChanged() {
             if (backend.twoFactorRequired) {
                 otpField.text = ""
@@ -1029,25 +1040,25 @@ Item {
                 otpField.text = ""
             }
         }
-
+        // 로그인 잠금 상태 변경 처리 함수
         function onLoginLockChanged() {
             if (!backend.loginLocked && backend.loginFailedAttempts === 0) {
                 adminUnlockField.text = ""
                 root.adminUnlockCode = ""
             }
         }
-        
+        // 로그인 실패 처리 함수
         function onLoginFailed(error) {
             errorDialog.title = backend.twoFactorRequired ? "OTP Verification Failed" : "Login Failed"
             errorDialog.text = error
             errorDialog.open()
         }
-        
+        // 로그인 성공 처리 함수
         function onLoginSuccess() {
             otpField.text = ""
             backend.startThermalStream()
         }
-
+        // 회원가입 성공 처리 함수
         function onRegisterSuccess(message) {
             errorDialog.title = "회원가입"
             errorDialog.text = message
@@ -1062,32 +1073,32 @@ Item {
             root.primaryPasswordVisible = false
             root.confirmPasswordVisible = false
         }
-
+        // 회원가입 실패 처리 함수
         function onRegisterFailed(error) {
             errorDialog.title = "회원가입 실패"
             errorDialog.text = error
             errorDialog.open()
         }
-
+        // 이메일 인증 요청 처리 함수
         function onEmailVerificationRequested(message, _debugToken) {
             root.signupEmailCodeVisible = true
             root.signupEmailStatusText = message
         }
-
+        // 이메일 인증 요청 실패 처리 함수
         function onEmailVerificationRequestFailed(error) {
             root.signupEmailStatusText = ""
             errorDialog.title = "Email Verification Failed"
             errorDialog.text = error
             errorDialog.open()
         }
-
+        // 이메일 인증 완료 처리 함수
         function onEmailVerificationConfirmed(message) {
             root.signupEmailVerified = true
             root.signupEmailVerifiedId = idField.text.trim()
             root.signupEmailVerifiedAddress = emailField.text.trim()
             root.signupEmailStatusText = message
         }
-
+        // 이메일 인증 완료 실패 처리 함수
         function onEmailVerificationConfirmFailed(error) {
             root.signupEmailVerified = false
             root.signupEmailVerifiedId = ""
@@ -1110,6 +1121,7 @@ Item {
         id: passwordForgotDialog
         theme: root.theme
         backendObject: backend
+        // 재설정 요청 처리 함수
         onResetRequested: function(userId, email, debugCode, message) {
             passwordResetDialog.openDialog(userId, email, debugCode, message)
         }
@@ -1119,6 +1131,7 @@ Item {
         id: passwordResetDialog
         theme: root.theme
         backendObject: backend
+        // 재설정 완료 처리 함수
         onResetCompleted: function(message) {
             errorDialog.title = "비밀번호 재설정"
             errorDialog.text = message && message.length > 0
@@ -1131,7 +1144,7 @@ Item {
     FolderDialog {
         id: certFolderDialog
         title: "인증서 폴더 선택"
-
+        // 입력 확정 처리 함수
         onAccepted: {
             var selectedPath = root.urlToLocalPath(selectedFolder)
             if (!selectedPath || selectedPath.length === 0)

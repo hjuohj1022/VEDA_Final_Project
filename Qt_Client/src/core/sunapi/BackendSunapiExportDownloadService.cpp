@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportDownloadService.h"
+#include "internal/sunapi/BackendSunapiExportDownloadService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -9,12 +9,14 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
+// 재생 내보내기 다운로드 시작 함수
 void BackendSunapiExportDownloadService::playbackExportStartDownload(Backend *backend,
                                                                      BackendPrivate *state,
                                                                      const QUrl &downloadUrl,
                                                                      const QString &outPath)
 {
     emit backend->playbackExportProgress(95, "내보내기 파일 다운로드 시작");
+    // req 함수
     QNetworkRequest req(downloadUrl);
     backend->applySslIfNeeded(req);
     QNetworkReply *dl = state->m_manager->get(req);
@@ -42,6 +44,7 @@ void BackendSunapiExportDownloadService::playbackExportStartDownload(Backend *ba
             return;
         }
         const QByteArray bytes = dl->readAll();
+        // 아웃 함수
         QFile out(outPath);
         const QFileInfo fi(outPath);
         QDir().mkpath(fi.absolutePath());

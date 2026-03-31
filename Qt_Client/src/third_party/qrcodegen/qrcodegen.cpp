@@ -49,11 +49,13 @@ QrSegment::Mode::Mode(int mode, int cc0, int cc1, int cc2) :
 }
 
 
+// Mode Bits 조회 함수
 int QrSegment::Mode::getModeBits() const {
 	return modeBits;
 }
 
 
+// num Char Count Bits 처리 함수
 int QrSegment::Mode::numCharCountBits(int ver) const {
 	return numBitsCharCount[(ver + 7) / 17];
 }
@@ -66,6 +68,7 @@ const QrSegment::Mode QrSegment::Mode::KANJI       (0x8,  8, 10, 12);
 const QrSegment::Mode QrSegment::Mode::ECI         (0x7,  0,  0,  0);
 
 
+// Bytes 생성 함수
 QrSegment QrSegment::makeBytes(const vector<uint8_t> &data) {
 	if (data.size() > static_cast<unsigned int>(INT_MAX))
 		throw std::length_error("Data too long");
@@ -76,6 +79,7 @@ QrSegment QrSegment::makeBytes(const vector<uint8_t> &data) {
 }
 
 
+// Numeric 생성 함수
 QrSegment QrSegment::makeNumeric(const char *digits) {
 	BitBuffer bb;
 	int accumData = 0;
@@ -99,6 +103,7 @@ QrSegment QrSegment::makeNumeric(const char *digits) {
 }
 
 
+// Alphanumeric 생성 함수
 QrSegment QrSegment::makeAlphanumeric(const char *text) {
 	BitBuffer bb;
 	int accumData = 0;
@@ -122,6 +127,7 @@ QrSegment QrSegment::makeAlphanumeric(const char *text) {
 }
 
 
+// Segments 생성 함수
 vector<QrSegment> QrSegment::makeSegments(const char *text) {
 	// Select the most efficient segment encoding automatically
 	vector<QrSegment> result;
@@ -140,6 +146,7 @@ vector<QrSegment> QrSegment::makeSegments(const char *text) {
 }
 
 
+// Eci 생성 함수
 QrSegment QrSegment::makeEci(long assignVal) {
 	BitBuffer bb;
 	if (assignVal < 0)
@@ -176,6 +183,7 @@ QrSegment::QrSegment(const Mode &md, int numCh, std::vector<bool> &&dt) :
 }
 
 
+// Total Bits 조회 함수
 int QrSegment::getTotalBits(const vector<QrSegment> &segs, int version) {
 	int result = 0;
 	for (const QrSegment &seg : segs) {
@@ -193,6 +201,7 @@ int QrSegment::getTotalBits(const vector<QrSegment> &segs, int version) {
 }
 
 
+// Numeric 확인 함수
 bool QrSegment::isNumeric(const char *text) {
 	for (; *text != '\0'; text++) {
 		char c = *text;
@@ -203,6 +212,7 @@ bool QrSegment::isNumeric(const char *text) {
 }
 
 
+// Alphanumeric 확인 함수
 bool QrSegment::isAlphanumeric(const char *text) {
 	for (; *text != '\0'; text++) {
 		if (std::strchr(ALPHANUMERIC_CHARSET, *text) == nullptr)
@@ -212,16 +222,19 @@ bool QrSegment::isAlphanumeric(const char *text) {
 }
 
 
+// Mode 조회 함수
 const QrSegment::Mode &QrSegment::getMode() const {
 	return *mode;
 }
 
 
+// Num Chars 조회 함수
 int QrSegment::getNumChars() const {
 	return numChars;
 }
 
 
+// Data 조회 함수
 const std::vector<bool> &QrSegment::getData() const {
 	return data;
 }
@@ -244,12 +257,14 @@ int QrCode::getFormatBits(Ecc ecl) {
 }
 
 
+// encode 텍스트 처리 함수
 QrCode QrCode::encodeText(const char *text, Ecc ecl) {
 	vector<QrSegment> segs = QrSegment::makeSegments(text);
 	return encodeSegments(segs, ecl);
 }
 
 
+// encode 바이너리 처리 함수
 QrCode QrCode::encodeBinary(const vector<uint8_t> &data, Ecc ecl) {
 	vector<QrSegment> segs{QrSegment::makeBytes(data)};
 	return encodeSegments(segs, ecl);
@@ -359,31 +374,37 @@ QrCode::QrCode(int ver, Ecc ecl, const vector<uint8_t> &dataCodewords, int msk) 
 }
 
 
+// Version 조회 함수
 int QrCode::getVersion() const {
 	return version;
 }
 
 
+// Size 조회 함수
 int QrCode::getSize() const {
 	return size;
 }
 
 
+// 오류 Correction Level 조회 함수
 QrCode::Ecc QrCode::getErrorCorrectionLevel() const {
 	return errorCorrectionLevel;
 }
 
 
+// Mask 조회 함수
 int QrCode::getMask() const {
 	return mask;
 }
 
 
+// Module 조회 함수
 bool QrCode::getModule(int x, int y) const {
 	return 0 <= x && x < size && 0 <= y && y < size && module(x, y);
 }
 
 
+// Function Patterns 렌더링 함수
 void QrCode::drawFunctionPatterns() {
 	// Draw horizontal and vertical timing patterns
 	for (int i = 0; i < size; i++) {
@@ -413,6 +434,7 @@ void QrCode::drawFunctionPatterns() {
 }
 
 
+// Format Bits 렌더링 함수
 void QrCode::drawFormatBits(int msk) {
 	// Calculate error correction code and pack bits
 	int data = getFormatBits(errorCorrectionLevel) << 3 | msk;  // errCorrLvl is uint2, msk is uint3
@@ -440,6 +462,7 @@ void QrCode::drawFormatBits(int msk) {
 }
 
 
+// Version 렌더링 함수
 void QrCode::drawVersion() {
 	if (version < 7)
 		return;
@@ -462,6 +485,7 @@ void QrCode::drawVersion() {
 }
 
 
+// Finder Pattern 렌더링 함수
 void QrCode::drawFinderPattern(int x, int y) {
 	for (int dy = -4; dy <= 4; dy++) {
 		for (int dx = -4; dx <= 4; dx++) {
@@ -474,6 +498,7 @@ void QrCode::drawFinderPattern(int x, int y) {
 }
 
 
+// Alignment Pattern 렌더링 함수
 void QrCode::drawAlignmentPattern(int x, int y) {
 	for (int dy = -2; dy <= 2; dy++) {
 		for (int dx = -2; dx <= 2; dx++)
@@ -482,6 +507,7 @@ void QrCode::drawAlignmentPattern(int x, int y) {
 }
 
 
+// Function Module 설정 함수
 void QrCode::setFunctionModule(int x, int y, bool isDark) {
 	size_t ux = static_cast<size_t>(x);
 	size_t uy = static_cast<size_t>(y);
@@ -490,11 +516,13 @@ void QrCode::setFunctionModule(int x, int y, bool isDark) {
 }
 
 
+// module 처리 함수
 bool QrCode::module(int x, int y) const {
 	return modules.at(static_cast<size_t>(y)).at(static_cast<size_t>(x));
 }
 
 
+// add Ecc And Interleave 처리 함수
 vector<uint8_t> QrCode::addEccAndInterleave(const vector<uint8_t> &data) const {
 	if (data.size() != static_cast<unsigned int>(getNumDataCodewords(version, errorCorrectionLevel)))
 		throw std::invalid_argument("Invalid argument");
@@ -533,6 +561,7 @@ vector<uint8_t> QrCode::addEccAndInterleave(const vector<uint8_t> &data) const {
 }
 
 
+// Codewords 렌더링 함수
 void QrCode::drawCodewords(const vector<uint8_t> &data) {
 	if (data.size() != static_cast<unsigned int>(getNumRawDataModules(version) / 8))
 		throw std::invalid_argument("Invalid argument");
@@ -560,6 +589,7 @@ void QrCode::drawCodewords(const vector<uint8_t> &data) {
 }
 
 
+// Mask 적용 함수
 void QrCode::applyMask(int msk) {
 	if (msk < 0 || msk > 7)
 		throw std::domain_error("Mask value out of range");
@@ -584,6 +614,7 @@ void QrCode::applyMask(int msk) {
 }
 
 
+// Penalty Score 조회 함수
 long QrCode::getPenaltyScore() const {
 	long result = 0;
 	
@@ -661,6 +692,7 @@ long QrCode::getPenaltyScore() const {
 }
 
 
+// Alignment Pattern Positions 조회 함수
 vector<int> QrCode::getAlignmentPatternPositions() const {
 	if (version == 1)
 		return vector<int>();
@@ -676,6 +708,7 @@ vector<int> QrCode::getAlignmentPatternPositions() const {
 }
 
 
+// Num Raw Data Modules 조회 함수
 int QrCode::getNumRawDataModules(int ver) {
 	if (ver < MIN_VERSION || ver > MAX_VERSION)
 		throw std::domain_error("Version number out of range");
@@ -691,6 +724,7 @@ int QrCode::getNumRawDataModules(int ver) {
 }
 
 
+// Num Data Codewords 조회 함수
 int QrCode::getNumDataCodewords(int ver, Ecc ecl) {
 	return getNumRawDataModules(ver) / 8
 		- ECC_CODEWORDS_PER_BLOCK    [static_cast<int>(ecl)][ver]
@@ -698,6 +732,7 @@ int QrCode::getNumDataCodewords(int ver, Ecc ecl) {
 }
 
 
+// reed Solomon Divisor 계산 함수
 vector<uint8_t> QrCode::reedSolomonComputeDivisor(int degree) {
 	if (degree < 1 || degree > 255)
 		throw std::domain_error("Degree out of range");
@@ -723,6 +758,7 @@ vector<uint8_t> QrCode::reedSolomonComputeDivisor(int degree) {
 }
 
 
+// reed Solomon Remainder 계산 함수
 vector<uint8_t> QrCode::reedSolomonComputeRemainder(const vector<uint8_t> &data, const vector<uint8_t> &divisor) {
 	vector<uint8_t> result(divisor.size());
 	for (uint8_t b : data) {  // Polynomial division
@@ -736,6 +772,7 @@ vector<uint8_t> QrCode::reedSolomonComputeRemainder(const vector<uint8_t> &data,
 }
 
 
+// reed Solomon Multiply 처리 함수
 uint8_t QrCode::reedSolomonMultiply(uint8_t x, uint8_t y) {
 	// Russian peasant multiplication
 	int z = 0;
@@ -748,6 +785,7 @@ uint8_t QrCode::reedSolomonMultiply(uint8_t x, uint8_t y) {
 }
 
 
+// finder Penalty Count Patterns 처리 함수
 int QrCode::finderPenaltyCountPatterns(const std::array<int,7> &runHistory) const {
 	int n = runHistory.at(1);
 	assert(n <= size * 3);
@@ -757,6 +795,7 @@ int QrCode::finderPenaltyCountPatterns(const std::array<int,7> &runHistory) cons
 }
 
 
+// finder Penalty Terminate And Count 처리 함수
 int QrCode::finderPenaltyTerminateAndCount(bool currentRunColor, int currentRunLength, std::array<int,7> &runHistory) const {
 	if (currentRunColor) {  // Terminate dark run
 		finderPenaltyAddHistory(currentRunLength, runHistory);
@@ -768,6 +807,7 @@ int QrCode::finderPenaltyTerminateAndCount(bool currentRunColor, int currentRunL
 }
 
 
+// finder Penalty Add 이력 처리 함수
 void QrCode::finderPenaltyAddHistory(int currentRunLength, std::array<int,7> &runHistory) const {
 	if (runHistory.at(0) == 0)
 		currentRunLength += size;  // Add light border to initial run
@@ -776,6 +816,7 @@ void QrCode::finderPenaltyAddHistory(int currentRunLength, std::array<int,7> &ru
 }
 
 
+// Bit 조회 함수
 bool QrCode::getBit(long x, int i) {
 	return ((x >> i) & 1) != 0;
 }
@@ -816,9 +857,11 @@ data_too_long::data_too_long(const std::string &msg) :
 /*---- Class BitBuffer ----*/
 
 BitBuffer::BitBuffer()
+	// vector 불리언 처리 함수
 	: std::vector<bool>() {}
 
 
+// append Bits 처리 함수
 void BitBuffer::appendBits(std::uint32_t val, int len) {
 	if (len < 0 || len > 31 || val >> len != 0)
 		throw std::domain_error("Value out of range");

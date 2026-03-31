@@ -22,10 +22,13 @@ void BackendRtspPlaybackService::preparePlaybackRtsp(Backend *backend,
         return;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest sessionReq = backend->makeApiJsonRequest("/api/sunapi/playback/session", {
+        // number 처리 함수
         {"channel", QString::number(channelIndex)},
         {"date", date},
         {"time", time},
+        // 상태 m 환경 조회 함수
         {"rtsp_port", state->m_env.value("SUNAPI_RTSP_PORT", "554").trimmed()}
     });
     backend->applyAuthIfNeeded(sessionReq);

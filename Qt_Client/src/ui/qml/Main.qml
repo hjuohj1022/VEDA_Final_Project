@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -97,12 +97,12 @@ ApplicationWindow {
         property int exportProgressPercent: 0
         property string exportProgressText: ""
     }
-
+    // 카메라 위치 이름 조회 함수
     function cameraLocationName(index) {
         if (index < 0 || index >= cameraNames.length) return "Camera"
         return cameraNames[index]
     }
-
+    // 클라이언트 시스템 사양 표시 함수
     function showClientSystemSpecs() {
         if (!backend.isLoggedIn)
             return
@@ -112,8 +112,7 @@ ApplicationWindow {
         }
         systemSpecsDialog.showWithData(clientSystemSpecsCache)
     }
-
-    // 시작 오버레이 카메라 준비 상태 계산
+    // 시작 오버레이 카메라 준비 상태 갱신 함수
     function refreshStartupCameraReady() {
         if (!streamPrewarmEnabled) {
             startupCameraReady = true
@@ -121,8 +120,7 @@ ApplicationWindow {
         }
         startupCameraReady = backend.activeCameras >= startupCameraTarget
     }
-
-    // 시작 오버레이 상태 문구 갱신
+    // 시작 오버레이 상태 문구 갱신 함수
     function updateStartupStatusText() {
         if (startupOverlayDismissed) {
             startupStatusText = "로그인 화면 준비 완료"
@@ -147,8 +145,7 @@ ApplicationWindow {
         var count = Math.max(0, backend.activeCameras)
         startupStatusText = "카메라 스트림 준비 중... (" + count + "/" + startupCameraTarget + ")"
     }
-
-    // 시작 오버레이 표시/해제 상태 갱신
+    // 시작 오버레이 상태 갱신 함수
     function updateStartupOverlayState() {
         if (startupOverlayDismissed) {
             startupOverlayVisible = false
@@ -166,7 +163,7 @@ ApplicationWindow {
             }
         }
     }
-
+    // URL 로컬 경로 변환 함수
     function urlToLocalPath(u) {
         var s = String(u || "")
         if (s.indexOf("file:///") === 0) {
@@ -180,7 +177,7 @@ ApplicationWindow {
         }
         return s
     }
-
+    // 재생 세션 정리 함수
     function teardownPlaybackSession() {
         if (!rightSidebar) {
             playbackSourceUrl = ""
@@ -193,14 +190,14 @@ ApplicationWindow {
         setSidebarPlaybackState(false, false)
         playbackSourceUrl = ""
     }
-
+    // 사이드바 재생 상태 설정 함수
     function setSidebarPlaybackState(running, pending) {
         if (!rightSidebar)
             return
         rightSidebar.playbackRunning = running
         rightSidebar.playbackPending = pending
     }
-
+    // 재생 탐색 적용 함수
     function applyPlaybackSeek(seconds) {
         if (!rightSidebar)
             return
@@ -215,26 +212,26 @@ ApplicationWindow {
             backend.preparePlaybackRtsp(rightSidebar.playbackChannelIndex, d, t)
         }
     }
-
+    // 재생 채널 적용 가능 여부 확인 함수
     function canApplyPlaybackChannel(channelIndex) {
         if (!rightSidebar || !rightSidebar.showPlaybackControls)
             return false
         return channelIndex === rightSidebar.playbackChannelIndex
     }
-
+    // 재생 타임라인 구간 적용 함수
     function applyPlaybackTimelineSegments(channelIndex, segments) {
         if (!canApplyPlaybackChannel(channelIndex))
             return false
         rightSidebar.playbackSegments = segments
         return true
     }
-
+    // 재생 타임라인 구간 정리 함수
     function clearPlaybackTimelineSegments() {
         if (!rightSidebar || !rightSidebar.showPlaybackControls)
             return
         rightSidebar.playbackSegments = []
     }
-
+    // 재생 녹화 일자 적용 함수
     function applyPlaybackRecordedDays(channelIndex, yearMonth, days) {
         if (!canApplyPlaybackChannel(channelIndex))
             return false
@@ -244,13 +241,13 @@ ApplicationWindow {
         rightSidebar.playbackRecordedDays = days
         return true
     }
-
+    // 재생 녹화 일자 정리 함수
     function clearPlaybackRecordedDays() {
         if (!rightSidebar || !rightSidebar.showPlaybackControls)
             return
         rightSidebar.playbackRecordedDays = []
     }
-
+    // RTSP 연결 확인 시작 함수
     function startRtspConnectCheck(resetStats) {
         if (resetStats === undefined)
             resetStats = true
@@ -266,7 +263,7 @@ ApplicationWindow {
         rtspConnectTimeout.restart()
         rtspConnectPoll.start()
     }
-
+    // RTSP 연결 확인 중지 함수
     function stopRtspConnectCheck() {
         rtspConnecting = false
         rtspConnectSuccessStreak = 0
@@ -278,7 +275,7 @@ ApplicationWindow {
         rtspConnectPoll.stop()
         rtspConnectTimeout.stop()
     }
-
+    // RTSP 설정 팝업 닫기 함수
     function closeRtspSettingsPopup() {
         stopRtspConnectCheck()
         rtspConfigError = ""
@@ -287,7 +284,7 @@ ApplicationWindow {
             rtspSettingsPopup.closeDialog()
         }
     }
-
+    // RTSP 프로브 시작 함수
     function startRtspProbe(ip, portText, useCustomAuth, username, password) {
         stopRtspConnectCheck()
         pendingRtspIp = ip
@@ -300,7 +297,7 @@ ApplicationWindow {
         rtspConfigError = "RTSP 서버 확인 중..."
         backend.probeRtspEndpoint(ip, portText, 1200)
     }
-
+    // IPv4 형식 확인 함수
     function isValidIpv4(ip) {
         var parts = ip.trim().split(".")
         if (parts.length !== 4) return false
@@ -311,7 +308,7 @@ ApplicationWindow {
         }
         return true
     }
-
+    // 사설 IPv4 확인 함수
     function isPrivateIpv4(ip) {
         var parts = ip.trim().split(".")
         if (parts.length !== 4) return false
@@ -327,9 +324,9 @@ ApplicationWindow {
         startupBootReady = true
         updateStartupOverlayState()
     }
-
+    // 스트림 사전 준비 사용 여부 변경 처리 함수
     onStreamPrewarmEnabledChanged: updateStartupOverlayState()
-
+    // IPv4 입력 정리 함수
     function sanitizeIpv4Input(raw) {
         var txt = raw.replace(/[^0-9.]/g, "")
         var parts = txt.split(".")
@@ -352,7 +349,7 @@ ApplicationWindow {
         }
         return parts.join(".")
     }
-
+    // 포트 입력 정리 함수
     function sanitizePortInput(raw) {
         var txt = raw.replace(/[^0-9]/g, "")
         if (txt.length === 0) return ""
@@ -365,7 +362,7 @@ ApplicationWindow {
         }
         return txt
     }
-
+    // 이동 기준 세션 초기화 함수
     function resetSessionFromMove(x, y) {
         var now = Date.now()
         if (lastMoveX < 0 || lastMoveY < 0) {
@@ -496,6 +493,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // 클릭 이벤트 처리 함수
                         onClicked: window.showMinimized()
                     }
                 }
@@ -522,6 +520,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // 클릭 이벤트 처리 함수
                         onClicked: window.close()
                     }
                 }
@@ -530,6 +529,7 @@ ApplicationWindow {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton
+                // 누름 이벤트 처리 함수
                 onPressed: (mouse) => {
                     if (mouse.button === Qt.LeftButton) window.startSystemMove()
                 }
@@ -553,35 +553,46 @@ ApplicationWindow {
             exportProgressVisible: window.exportProgressVisible
             exportProgressPercent: window.exportProgressPercent
             exportProgressText: window.exportProgressText
+            // 테마 전환 처리 함수
             onToggleTheme: window.isDarkMode = !window.isDarkMode
+            // 로그인 요청 처리 함수
             onRequestLogin: stackLayout.currentIndex = 1
+            // 로그아웃 요청 처리 함수
             onRequestLogout: {
                 inlineMainViewVisible = false
                 inlineMainCameraIndex = -1
                 backend.logout()
                 stackLayout.currentIndex = 1
             }
+            // 이중 인증 설정 요청 처리 함수
             onRequestTwoFactorSetup: {
                 twoFactorDialog.openForSetup()
             }
+            // 이중 인증 비활성화 요청 처리 함수
             onRequestTwoFactorDisable: {
                 twoFactorDialog.openForDisable()
             }
+            // 계정 삭제 요청 처리 함수
             onRequestAccountDelete: {
                 accountDeleteDialog.openDialog()
             }
+            // 비밀번호 변경 요청 처리 함수
             onRequestPasswordChange: {
                 changePasswordDialog.openDialog()
             }
+            // 홈 요청 처리 함수
             onRequestHome: {
                 window.showClientSystemSpecs()
             }
+            // RTSP 설정 요청 처리 함수
             onRequestRtspSettings: {
                 rtspSettingsPopup.prepareAndShow()
             }
+            // 이벤트 알림 요청 처리 함수
             onRequestEventAlert: {
                 eventAlertDialog.openDialog()
             }
+            // 내보내기 취소 요청 처리 함수
             onRequestExportCancel: {
                 backend.cancelPlaybackExport()
             }
@@ -659,6 +670,7 @@ ApplicationWindow {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: backend.isLoggedIn
+                                            // 클릭 이벤트 처리 함수
                                             onClicked: {
                                                 backend.resetSessionTimer()
                                                 window.inlineMainViewVisible = false
@@ -703,6 +715,7 @@ ApplicationWindow {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: backend.isLoggedIn
+                                            // 클릭 이벤트 처리 함수
                                             onClicked: {
                                                 backend.resetSessionTimer()
                                                 window.inlineMainViewVisible = false
@@ -744,6 +757,7 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
+                                            // 클릭 이벤트 처리 함수
                                             onClicked: {
                                                 backend.resetSessionTimer()
                                                 window.inlineMainViewVisible = false
@@ -768,6 +782,7 @@ ApplicationWindow {
                                 currentIndex: backend.isLoggedIn
                                               ? (window.inlineMainViewVisible ? 3 : 0)
                                               : 1
+                                // 현재 인덱스 변경 처리 함수
                                 onCurrentIndexChanged: {
                                     if (window.lastStackIndex === 2 && currentIndex !== 2) {
                                         window.teardownPlaybackSession()
@@ -785,6 +800,7 @@ ApplicationWindow {
                                     // 인라인 메인뷰 오픈 상태에서도 서브스트림 유지
                                     isActive: (backend.isLoggedIn || (window.streamPrewarmEnabled && !backend.isLoggedIn))
                                     visible: stackLayout.currentIndex === 0
+                                    // 메인 뷰 열기 요청 처리 함수
                                     onOpenMainViewRequested: function(cameraIndex) {
                                         window.inlineMainCameraIndex = cameraIndex
                                         window.inlineMainViewVisible = true
@@ -795,6 +811,7 @@ ApplicationWindow {
                                 ThermalContent {
                                     id: loginScreen
                                     theme: window.appTheme
+                                    // 실시간 화면 복귀 요청 처리 함수
                                     onRequestReturnLiveView: {
                                         stackLayout.currentIndex = 0
                                         backend.stopThermalStream()
@@ -809,6 +826,7 @@ ApplicationWindow {
                                     playbackCurrentSeconds: rightSidebar.playbackCurrentSeconds
                                     playbackSegments: rightSidebar.playbackSegments
                                     playbackTimelineInfoText: rightSidebar.playbackTimelineInfoText
+                                    // 탐색 요청 처리 함수
                                     onSeekRequested: function(seconds) {
                                         window.applyPlaybackSeek(seconds)
                                     }
@@ -822,6 +840,7 @@ ApplicationWindow {
                                     mapModeEnabled: rightSidebar.mapModeEnabled
                                     cameraIndex: window.inlineMainCameraIndex
                                     locationName: window.cameraLocationName(window.inlineMainCameraIndex)
+                                    // 닫기 요청 처리 함수
                                     onRequestClose: {
                                         window.inlineMainViewVisible = false
                                         window.inlineMainCameraIndex = -1
@@ -846,6 +865,7 @@ ApplicationWindow {
                 showThermalControls: backend.isLoggedIn && stackLayout.currentIndex === 1
                 selectedCameraIndex: window.inlineMainViewVisible ? window.inlineMainCameraIndex : -1
                 cameraNames: window.cameraNames
+                // 카메라 이름 변경 요청 처리 함수
                 onRequestCameraNameChange: function(cameraIndex, name) {
                     if (cameraIndex < 0 || cameraIndex >= window.cameraNames.length)
                         return
@@ -853,6 +873,7 @@ ApplicationWindow {
                     next[cameraIndex] = name
                     window.cameraNames = next
                 }
+                // 재생 요청 처리 함수
                 onRequestPlayback: function(channelIndex, dateText, timeText) {
                     if (dateText.length === 0 || timeText.length === 0) {
                         console.warn("[PLAYBACK] date/time is empty")
@@ -863,18 +884,23 @@ ApplicationWindow {
                     window.playbackSourceUrl = ""
                     backend.preparePlaybackRtsp(channelIndex, dateText, timeText)
                 }
+                // 재생 타임라인 요청 처리 함수
                 onRequestPlaybackTimeline: function(channelIndex, dateText) {
                     backend.loadPlaybackTimeline(channelIndex, dateText)
                 }
+                // 재생 월간 녹화 일자 요청 처리 함수
                 onRequestPlaybackMonthDays: function(channelIndex, year, month) {
                     backend.loadPlaybackMonthRecordedDays(channelIndex, year, month)
                 }
+                // 재생 일시정지 요청 처리 함수
                 onRequestPlaybackPause: {
                     playbackScreen.pausePlayback()
                 }
+                // 재생 재개 요청 처리 함수
                 onRequestPlaybackResume: {
                     playbackScreen.resumePlayback()
                 }
+                // 재생 내보내기 요청 처리 함수
                 onRequestPlaybackExport: function(channelIndex, dateText, startTimeText, endTimeText) {
                     pendingExportChannel = channelIndex
                     pendingExportDate = dateText
@@ -951,10 +977,12 @@ ApplicationWindow {
 
     TapHandler {
         acceptedButtons: Qt.AllButtons
+        // 탭 입력 처리 함수
         onTapped: backend.resetSessionTimer()
     }
 
     HoverHandler {
+        // 포인트 변경 처리 함수
         onPointChanged: {
             var p = point.position
             resetSessionFromMove(p.x, p.y)
@@ -962,6 +990,7 @@ ApplicationWindow {
     }
 
     WheelHandler {
+        // 휠 입력 처리 함수
         onWheel: (event) => {
             backend.resetSessionTimer()
             event.accepted = false
@@ -970,11 +999,13 @@ ApplicationWindow {
 
     Connections {
         target: backend
+        // 활성 카메라 변경 처리 함수
         function onActiveCamerasChanged() {
             if (window.startupOverlayDismissed)
                 return
             window.updateStartupOverlayState()
         }
+        // 로그인 상태 변경 처리 함수
         function onIsLoggedInChanged() {
             if (!backend.isLoggedIn) {
                 inlineMainViewVisible = false
@@ -989,28 +1020,33 @@ ApplicationWindow {
                                      ? (inlineMainViewVisible ? 3 : 0)
                                      : 1
         }
+        // 이중 인증 설정 완료 처리 함수
         function onTwoFactorSetupCompleted() {
             backend.refreshTwoFactorStatus()
             accountActionDialog.title = "OTP 생성"
             accountActionDialog.text = "OTP가 성공적으로 활성화되었습니다.\n현재 로그인은 유지되며, 다음 로그인부터 OTP 인증이 필요합니다."
             accountActionDialog.open()
         }
+        // 이중 인증 비활성화 완료 처리 함수
         function onTwoFactorDisableCompleted() {
             backend.refreshTwoFactorStatus()
             accountActionDialog.title = "OTP 삭제"
             accountActionDialog.text = "OTP가 성공적으로 비활성화되었습니다.\n현재 로그인은 유지됩니다."
             accountActionDialog.open()
         }
+        // 계정 삭제 완료 처리 함수
         function onAccountDeleteCompleted() {
             accountActionDialog.title = "회원탈퇴"
             accountActionDialog.text = "계정이 삭제되었습니다.\n로그인 화면으로 이동합니다."
             accountActionDialog.open()
         }
+        // 비밀번호 변경 완료 처리 함수
         function onPasswordChangeCompleted() {
             accountActionDialog.title = "비밀번호 변경"
             accountActionDialog.text = "비밀번호가 성공적으로 변경되었습니다."
             accountActionDialog.open()
         }
+        // 세션 만료 처리 함수
         function onSessionExpired() {
             inlineMainViewVisible = false
             inlineMainCameraIndex = -1
@@ -1021,6 +1057,7 @@ ApplicationWindow {
             eventAlertDialog.closeDialog()
             stackLayout.currentIndex = 1
         }
+        // RTSP 프로브 완료 처리 함수
         function onRtspProbeFinished(success, error) {
             if (!window.rtspConnecting || window.pendingRtspIp.length === 0) {
                 return
@@ -1065,32 +1102,40 @@ ApplicationWindow {
                 window.rtspConfigError = "IP/포트 형식을 확인해 주세요."
             }
         }
+        // 재생 준비 완료 처리 함수
         function onPlaybackPrepared(url) {
             window.playbackSourceUrl = url
             window.setSidebarPlaybackState(true, false)
             console.log("[PLAYBACK] source:", window.playbackSourceUrl)
         }
+        // 재생 준비 실패 처리 함수
         function onPlaybackPrepareFailed(error) {
             window.setSidebarPlaybackState(false, false)
             console.warn("[PLAYBACK] prepare failed:", error)
         }
+        // 재생 타임라인 로드 완료 처리 함수
         function onPlaybackTimelineLoaded(channelIndex, dateText, segments) {
             window.applyPlaybackTimelineSegments(channelIndex, segments)
         }
+        // 재생 타임라인 실패 처리 함수
         function onPlaybackTimelineFailed(error) {
             window.clearPlaybackTimelineSegments()
             console.warn("[PLAYBACK][TIMELINE]", error)
         }
+        // 재생 월간 녹화 일자 로드 완료 처리 함수
         function onPlaybackMonthRecordedDaysLoaded(channelIndex, yearMonth, days) {
             window.applyPlaybackRecordedDays(channelIndex, yearMonth, days)
         }
+        // 재생 월간 녹화 일자 실패 처리 함수
         function onPlaybackMonthRecordedDaysFailed(error) {
             window.clearPlaybackRecordedDays()
             console.warn("[PLAYBACK][MONTH_DAYS]", error)
         }
+        // 스트리밍 웹소켓 상태 변경 처리 함수
         function onStreamingWsStateChanged(state) {
             console.log("[PLAYBACK][WS] state:", state)
         }
+        // 스트리밍 웹소켓 프레임 처리 함수
         function onStreamingWsFrame(direction, hexPayload) {
             if (direction === "recv-bin") {
                 // 로그 노이즈 방지: RTP 바이너리 프레임은 생략하고 RTSP 제어응답만 출력
@@ -1102,9 +1147,11 @@ ApplicationWindow {
                 preview = preview.slice(0, 96) + "..."
             console.log("[PLAYBACK][WS]", direction, preview)
         }
+        // 스트리밍 웹소켓 오류 처리 함수
         function onStreamingWsError(error) {
             console.warn("[PLAYBACK][WS] error:", error)
         }
+        // 재생 내보내기 시작 처리 함수
         function onPlaybackExportStarted(message) {
             console.log("[PLAYBACK][EXPORT]", message)
             exportProgressHideTimer.stop()
@@ -1112,6 +1159,7 @@ ApplicationWindow {
             window.exportProgressPercent = 0
             window.exportProgressText = message
         }
+        // 재생 내보내기 진행 처리 함수
         function onPlaybackExportProgress(percent, message) {
             console.log("[PLAYBACK][EXPORT]", percent + "%", message)
             exportProgressHideTimer.stop()
@@ -1119,6 +1167,7 @@ ApplicationWindow {
             window.exportProgressPercent = Math.max(0, Math.min(100, percent))
             window.exportProgressText = message
         }
+        // 재생 내보내기 완료 처리 함수
         function onPlaybackExportFinished(path) {
             console.log("[PLAYBACK][EXPORT] saved:", path)
             window.exportProgressVisible = true
@@ -1126,6 +1175,7 @@ ApplicationWindow {
             window.exportProgressText = "내보내기 완료"
             exportProgressHideTimer.restart()
         }
+        // 재생 내보내기 실패 처리 함수
         function onPlaybackExportFailed(error) {
             console.warn("[PLAYBACK][EXPORT]", error)
             window.exportProgressVisible = true
@@ -1136,6 +1186,7 @@ ApplicationWindow {
     PlaybackExportSaveDialog {
         id: playbackExportSaveDialog
         hostWindow: window
+        // 저장 확인 처리 함수
         onSaveConfirmed: function(savePath) {
             backend.requestPlaybackExport(window.pendingExportChannel,
                                           window.pendingExportDate,
@@ -1150,6 +1201,7 @@ ApplicationWindow {
         interval: 1500
         repeat: false
         running: true
+        // 트리거 처리 함수
         onTriggered: {
             startupMinElapsed = true
             updateStartupOverlayState()
@@ -1161,6 +1213,7 @@ ApplicationWindow {
         interval: startupMaxWaitMs
         repeat: false
         running: true
+        // 트리거 처리 함수
         onTriggered: {
             startupTimeoutElapsed = true
             updateStartupOverlayState()
@@ -1172,6 +1225,7 @@ ApplicationWindow {
         interval: 3500
         repeat: false
         running: false
+        // 트리거 처리 함수
         onTriggered: {
             window.exportProgressVisible = false
         }
@@ -1182,6 +1236,7 @@ ApplicationWindow {
         interval: 250
         repeat: true
         running: false
+        // 트리거 처리 함수
         onTriggered: {
             if (!window.rtspConnecting) {
                 stop()
@@ -1210,6 +1265,7 @@ ApplicationWindow {
         interval: window.rtspConnectTimeoutMs
         repeat: false
         running: false
+        // 트리거 처리 함수
         onTriggered: {
             if (!window.rtspConnecting)
                 return
@@ -1277,11 +1333,11 @@ ApplicationWindow {
         property real lastDragY: 0
         property int dragSendIntervalMs: 90
         property double lastDragSendMs: 0
-
+        // 값 범위 제한 함수
         function clamp(v, lo, hi) {
             return Math.max(lo, Math.min(hi, v))
         }
-
+        // 각도 순환 보정 함수
         function wrapDeg(v) {
             while (v > 180.0)
                 v -= 360.0
@@ -1289,7 +1345,7 @@ ApplicationWindow {
                 v += 360.0
             return v
         }
-
+        // 뷰 갱신 전송 함수
         function sendViewUpdate(force) {
             if (!visible)
                 return
@@ -1299,7 +1355,7 @@ ApplicationWindow {
             lastDragSendMs = now
             backend.updateCctv3dMapView(viewRx, viewRy)
         }
-
+        // 닫기 처리 함수
         onClosing: function(close) {
             if (rightSidebar.mapModeEnabled) {
                 backend.stopCctv3dMapSequence()
@@ -1307,7 +1363,7 @@ ApplicationWindow {
             }
             close.accepted = true
         }
-
+        // 가시성 변경 처리 함수
         onVisibleChanged: {
             if (visible) {
                 lastDragSendMs = 0
@@ -1394,6 +1450,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                // 클릭 이벤트 처리 함수
                                 onClicked: cctv3dMapDebugWindow.showMinimized()
                             }
                         }
@@ -1420,6 +1477,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                // 클릭 이벤트 처리 함수
                                 onClicked: cctv3dMapDebugWindow.close()
                             }
                         }
@@ -1429,6 +1487,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
                         z: -1
+                        // 누름 이벤트 처리 함수
                         onPressed: function(mouse) {
                             if (mouse.button === Qt.LeftButton)
                                 cctv3dMapDebugWindow.startSystemMove()
@@ -1475,6 +1534,7 @@ ApplicationWindow {
                             compact: true
                             theme: window.appTheme
                             enabled: rightSidebar.mapModeEnabled
+                            // 클릭 이벤트 처리 함수
                             onClicked: backend.pauseCctv3dMapSequence()
                         }
 
@@ -1483,6 +1543,7 @@ ApplicationWindow {
                             compact: true
                             theme: window.appTheme
                             enabled: rightSidebar.mapModeEnabled
+                            // 클릭 이벤트 처리 함수
                             onClicked: backend.resumeCctv3dMapSequence()
                         }
 
@@ -1492,6 +1553,7 @@ ApplicationWindow {
                             accentStyle: true
                             theme: window.appTheme
                             enabled: rightSidebar.mapModeEnabled
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 backend.stopCctv3dMapSequence()
                                 rightSidebar.mapModeEnabled = false
@@ -1527,7 +1589,7 @@ ApplicationWindow {
                         hoverEnabled: true
                         acceptedButtons: Qt.LeftButton
                         cursorShape: Qt.OpenHandCursor
-
+                        // 누름 이벤트 처리 함수
                         onPressed: function(mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return
@@ -1535,18 +1597,18 @@ ApplicationWindow {
                             cctv3dMapDebugWindow.lastDragX = mouse.x
                             cctv3dMapDebugWindow.lastDragY = mouse.y
                         }
-
+                        // 해제 이벤트 처리 함수
                         onReleased: function(mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return
                             cctv3dMapDebugWindow.dragging = false
                             cctv3dMapDebugWindow.sendViewUpdate(true)
                         }
-
+                        // 취소 이벤트 처리 함수
                         onCanceled: {
                             cctv3dMapDebugWindow.dragging = false
                         }
-
+                        // 위치 변경 처리 함수
                         onPositionChanged: function(mouse) {
                             if (!cctv3dMapDebugWindow.dragging)
                                 return

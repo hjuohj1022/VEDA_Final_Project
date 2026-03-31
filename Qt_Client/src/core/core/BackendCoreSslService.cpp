@@ -17,6 +17,7 @@
 
 namespace {
 
+// 인증서 설정 오류 메시지 생성 함수
 QString buildCertConfigErrorMessage(const BackendPrivate *state)
 {
     const QString certDir = BackendCoreCertConfigService::certDirectoryPath(state);
@@ -27,6 +28,7 @@ QString buildCertConfigErrorMessage(const BackendPrivate *state)
 
 } // namespace
 
+// 설정 SSL Configuration 처리 함수
 void BackendCoreSslService::setupSslConfiguration(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);

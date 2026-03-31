@@ -12,7 +12,7 @@ Item {
     Layout.preferredHeight: visible ? 500 : 0
     Layout.maximumHeight: visible ? 500 : 0
     Layout.minimumHeight: visible ? 500 : 0
-
+    // 팔레트 선택 동기화 함수
     function syncPalette() {
         if (!thermalBackend)
             return
@@ -25,6 +25,7 @@ Item {
 
     Connections {
         target: thermalBackend ? thermalBackend : null
+        // 열화상 팔레트 변경 처리 함수
         function onThermalPaletteChanged() { root.syncPalette() }
     }
 
@@ -79,6 +80,7 @@ Item {
                             font.pixelSize: 12
                             anchors.centerIn: parent
                         }
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (!thermalBackend)
                                 return
@@ -139,7 +141,7 @@ Item {
                             anchors.rightMargin: 9
                             anchors.verticalCenter: parent.verticalCenter
                         }
-
+                        // 활성화 처리 함수
                         onActivated: {
                             if (thermalBackend)
                                 thermalBackend.setThermalPalette(currentText)
@@ -191,7 +193,7 @@ Item {
                                 Behavior on x { NumberAnimation { duration: 120 } }
                             }
                         }
-
+                        // 토글 처리 함수
                         onToggled: {
                             if (thermalBackend)
                                 thermalBackend.setThermalAutoRange(checked)
@@ -220,7 +222,7 @@ Item {
                         stepSize: 1
                         enabled: thermalBackend ? thermalBackend.thermalAutoRange : false
                         value: thermalBackend ? thermalBackend.thermalAutoRangeWindowPercent : 96
-
+                        // 이동 처리 함수
                         onMoved: {
                             if (thermalBackend)
                                 thermalBackend.setThermalAutoRangeWindowPercent(Math.round(value))
@@ -278,7 +280,7 @@ Item {
                         stepSize: 10
                         enabled: thermalBackend ? !thermalBackend.thermalAutoRange : false
                         value: thermalBackend ? thermalBackend.thermalManualMin : 7000
-
+                        // 이동 처리 함수
                         onMoved: {
                             if (thermalBackend)
                                 thermalBackend.setThermalManualRange(value, maxSlider.value)
@@ -332,7 +334,7 @@ Item {
                         stepSize: 10
                         enabled: thermalBackend ? !thermalBackend.thermalAutoRange : false
                         value: thermalBackend ? thermalBackend.thermalManualMax : 10000
-
+                        // 이동 처리 함수
                         onMoved: {
                             if (thermalBackend)
                                 thermalBackend.setThermalManualRange(minSlider.value, value)

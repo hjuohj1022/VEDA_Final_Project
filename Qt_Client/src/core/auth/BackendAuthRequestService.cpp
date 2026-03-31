@@ -16,11 +16,13 @@
 
 namespace {
 
+// 응답 텍스트 반환 함수
 QString responseText(const QByteArray &responseBody)
 {
     return QString::fromUtf8(responseBody).trimmed();
 }
 
+// 로그인 잠금 상태 초기화 함수
 void resetLoginLockState(Backend *backend, BackendPrivate *state)
 {
     if (state->m_loginFailedAttempts != 0 || state->m_loginLocked) {
@@ -30,6 +32,7 @@ void resetLoginLockState(Backend *backend, BackendPrivate *state)
     }
 }
 
+// 대기 중인 이중 인증 상태 정리 함수
 void clearPendingTwoFactorState(Backend *backend, BackendPrivate *state, bool notify)
 {
     const bool hadTwoFactorState = state->m_twoFactorRequired || !state->m_preAuthToken.isEmpty();
@@ -42,6 +45,7 @@ void clearPendingTwoFactorState(Backend *backend, BackendPrivate *state, bool no
     }
 }
 
+// 이중 인증 활성화 상태 설정 함수
 void setTwoFactorEnabledState(Backend *backend, BackendPrivate *state, bool enabled)
 {
     if (state->m_twoFactorEnabled == enabled) {
@@ -86,6 +90,7 @@ void finalizeAuthenticatedLogin(Backend *backend,
     emit backend->loginSuccess();
 }
 
+// 서버 사용 불가 상태 확인 함수
 bool isServerUnavailable(int statusCode, QNetworkReply::NetworkError netError)
 {
     return (netError == QNetworkReply::ConnectionRefusedError
@@ -98,12 +103,14 @@ bool isServerUnavailable(int statusCode, QNetworkReply::NetworkError netError)
             || statusCode >= 500);
 }
 
+// SSL 실패 상태 확인 함수
 bool isSslFailure(QNetworkReply::NetworkError netError)
 {
     return (netError == QNetworkReply::SslHandshakeFailedError
             || netError == QNetworkReply::UnknownNetworkError);
 }
 
+// 만료된 이중 인증 챌린지 확인 함수
 bool isExpiredTwoFactorChallenge(int statusCode, const QString &bodyText)
 {
     return statusCode == 404
@@ -112,6 +119,7 @@ bool isExpiredTwoFactorChallenge(int statusCode, const QString &bodyText)
            || bodyText.contains("user not found", Qt::CaseInsensitive);
 }
 
+// 클라이언트 비밀번호 복잡도 검증 함수
 QString validatePasswordComplexityForClient(const QString &password)
 {
     // 비밀번호 변경/회원가입 공통 복잡도 규칙 검증
@@ -134,6 +142,7 @@ QString validatePasswordComplexityForClient(const QString &password)
     return QString();
 }
 
+// 클라이언트 이메일 형식 검증 함수
 QString validateEmailForClient(const QString &email)
 {
     // 회원가입 이메일 형식 사전 검증
@@ -154,6 +163,7 @@ QString validateEmailForClient(const QString &email)
 
 } // namespace
 
+// 관리자 잠금 해제 처리 함수
 bool BackendAuthRequestService::adminUnlock(Backend *backend, BackendPrivate *state, QString adminCode)
 {
     const QString trimmedCode = adminCode.trimmed();
@@ -207,6 +217,7 @@ bool BackendAuthRequestService::adminUnlock(Backend *backend, BackendPrivate *st
     return true;
 }
 
+// 로그인 함수
 void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, QString id, QString pw)
 {
     const QString trimmedId = id.trimmed();
@@ -352,6 +363,7 @@ void BackendAuthRequestService::login(Backend *backend, BackendPrivate *state, Q
     });
 }
 
+// 이중 인증 OTP 검증 함수
 void BackendAuthRequestService::verifyTwoFactorOtp(Backend *backend, BackendPrivate *state, QString otp)
 {
     const QString trimmedOtp = otp.trimmed();
@@ -470,6 +482,7 @@ void BackendAuthRequestService::verifyTwoFactorOtp(Backend *backend, BackendPriv
     });
 }
 
+// 이중 인증 상태 갱신 함수
 void BackendAuthRequestService::refreshTwoFactorStatus(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_isLoggedIn || state->m_authToken.trimmed().isEmpty()) {
@@ -517,6 +530,7 @@ void BackendAuthRequestService::refreshTwoFactorStatus(Backend *backend, Backend
     });
 }
 
+// 이중 인증 설정 시작 함수
 void BackendAuthRequestService::startTwoFactorSetup(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_isLoggedIn || state->m_authToken.trimmed().isEmpty()) {
@@ -572,6 +586,7 @@ void BackendAuthRequestService::startTwoFactorSetup(Backend *backend, BackendPri
     });
 }
 
+// 이중 인증 설정 확정 함수
 void BackendAuthRequestService::confirmTwoFactorSetup(Backend *backend, BackendPrivate *state, QString otp)
 {
     static const QRegularExpression sixDigits("^\\d{6}$");
@@ -626,6 +641,7 @@ void BackendAuthRequestService::confirmTwoFactorSetup(Backend *backend, BackendP
     });
 }
 
+// 이중 인증 비활성화 함수
 void BackendAuthRequestService::disableTwoFactor(Backend *backend, BackendPrivate *state, QString otp)
 {
     static const QRegularExpression sixDigits("^\\d{6}$");
@@ -684,6 +700,7 @@ void BackendAuthRequestService::disableTwoFactor(Backend *backend, BackendPrivat
     });
 }
 
+// 계정 삭제 함수
 void BackendAuthRequestService::deleteAccount(Backend *backend, BackendPrivate *state, QString password, QString otp)
 {
     static const QRegularExpression sixDigits("^\\d{6}$");
@@ -750,6 +767,7 @@ void BackendAuthRequestService::deleteAccount(Backend *backend, BackendPrivate *
     });
 }
 
+// 비밀번호 변경 함수
 void BackendAuthRequestService::changePassword(Backend *backend, BackendPrivate *state, QString currentPassword, QString newPassword)
 {
     // 로그인 상태 비밀번호 변경 요청 처리
@@ -822,6 +840,7 @@ void BackendAuthRequestService::changePassword(Backend *backend, BackendPrivate 
     });
 }
 
+// 비밀번호 재설정 요청 함수
 void BackendAuthRequestService::requestPasswordReset(Backend *backend, BackendPrivate *state, QString id, QString email)
 {
     // 비밀번호 재설정 코드 발급 요청 처리
@@ -968,6 +987,7 @@ void BackendAuthRequestService::resetPasswordWithCode(Backend *backend,
     });
 }
 
+// 이메일 인증 요청 함수
 void BackendAuthRequestService::requestEmailVerification(Backend *backend, BackendPrivate *state, QString id, QString email)
 {
     // 회원가입 이메일 인증 코드 발급 요청 처리
@@ -1115,6 +1135,7 @@ void BackendAuthRequestService::confirmEmailVerification(Backend *backend,
     });
 }
 
+// 사용자 회원가입 함수
 void BackendAuthRequestService::registerUser(Backend *backend, BackendPrivate *state, QString id, QString pw, QString email)
 {
     const QString trimmedId = id.trimmed();

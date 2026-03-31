@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
@@ -15,7 +15,7 @@ Item {
     Layout.fillHeight: visible
     Layout.preferredHeight: visible ? 1 : 0
     Layout.minimumHeight: visible ? 1 : 0
-
+    // 클라이언트 정보 갱신 함수
     function refreshClientInfo() {
         var info = backend.getClientSystemInfo()
         if (!info) {
@@ -28,7 +28,7 @@ Item {
             lastCpuPercent = Math.round(cpu)
         }
     }
-
+    // 클라이언트 주요 값 조회 함수
     function clientMainValue() {
         if (!clientInfoReady && lastCpuPercent < 0) {
             return "Initializing"
@@ -38,7 +38,7 @@ Item {
         }
         return "CPU " + lastCpuPercent + "%"
     }
-
+    // GiB 문자열 파싱 함수
     function parseGiB(text) {
         if (!text || typeof text !== "string") {
             return NaN
@@ -49,7 +49,7 @@ Item {
         }
         return Number(m[1])
     }
-
+    // 클라이언트 보조 문구 생성 함수
     function clientSubText() {
         if (!clientInfoReady) {
             return "Initializing"
@@ -70,8 +70,7 @@ Item {
         var gpu = (clientInfo.gpuModel && clientInfo.gpuModel.length > 0) ? clientInfo.gpuModel : "GPU Unknown"
         return ramText + " · " + gpu
     }
-
-    // 상태 텍스트별 카드 색상 계산
+    // 상태 색상 반환 함수
     function statusColor(status) {
         if (status === "GOOD") {
             return "#22c55e"
@@ -84,8 +83,7 @@ Item {
         }
         return (theme ? theme.textSecondary : "#a1a1aa")
     }
-
-    // API 상태 판정
+    // API 상태 문구 생성 함수
     function apiStatusText() {
         if (backend.isLoggedIn) {
             return "GOOD"
@@ -95,8 +93,7 @@ Item {
         }
         return "DOWN"
     }
-
-    // RTSP 상태 판정
+    // RTSP 상태 문구 생성 함수
     function rtspStatusText() {
         if (backend.activeCameras <= 0) {
             return "DOWN"
@@ -109,8 +106,7 @@ Item {
         }
         return "DEGRADED"
     }
-
-    // MQTT 상태 판정
+    // MQTT 상태 문구 생성 함수
     function mqttStatusText() {
         var status = (backend.networkStatus || "").toLowerCase().trim()
         if (status.length === 0) {
@@ -124,7 +120,7 @@ Item {
         }
         return "DEGRADED"
     }
-
+    // 가시성 변경 처리 함수
     onVisibleChanged: {
         if (visible) {
             refreshClientInfo()
@@ -137,6 +133,7 @@ Item {
         interval: 2000
         repeat: true
         running: root.visible
+        // 트리거 처리 함수
         onTriggered: root.refreshClientInfo()
     }
 
@@ -171,6 +168,7 @@ Item {
                     interval: 1000
                     running: true
                     repeat: true
+                    // 트리거 처리 함수
                     onTriggered: {
                         var arr = chartRoot.dataHistory
                         if (arr.length > 20) arr.shift()
@@ -205,6 +203,7 @@ Item {
                         id: chartCanvas
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        // 그리기 처리 함수
                         onPaint: {
                             var ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)

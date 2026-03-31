@@ -14,6 +14,7 @@ namespace {
 constexpr int kQuietZoneModules = 4;
 constexpr int kMinimumImageSize = 220;
 
+// QR 코드 렌더링 함수
 void renderQrCode(const qrcodegen::QrCode &qr, int imageSize, QImage *image)
 {
     if (!image) {
@@ -49,10 +50,12 @@ void renderQrCode(const qrcodegen::QrCode &qr, int imageSize, QImage *image)
 } // namespace
 
 QrCodeImageProvider::QrCodeImageProvider()
+    // Q 빠른 이미지 제공자 초기화 함수
     : QQuickImageProvider(QQuickImageProvider::Image)
 {
 }
 
+// 이미지 요청 함수
 QImage QrCodeImageProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
     const QString text = QUrl::fromPercentEncoding(id.toUtf8());

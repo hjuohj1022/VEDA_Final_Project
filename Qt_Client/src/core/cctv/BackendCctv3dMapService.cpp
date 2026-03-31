@@ -41,11 +41,13 @@ constexpr qint64 kCctv3dMapStopMinIntervalMs = 3000;
 constexpr qint64 kCctv3dMapRenderIntervalMs = 66;
 constexpr int kCctv3dMapMaxWsBufferBytes = 64 * 1024 * 1024;
 
+// 스킴 기본 포트 조회 함수
 int defaultPortForScheme(const QString &scheme)
 {
     return (scheme.compare("https", Qt::CaseInsensitive) == 0) ? 443 : 80;
 }
 
+// 동일 API 출처 확인 함수
 bool sameApiOrigin(const QUrl &requestUrl, const QUrl &apiBase)
 {
     if (!requestUrl.isValid() || !apiBase.isValid()) {
@@ -59,6 +61,7 @@ bool sameApiOrigin(const QUrl &requestUrl, const QUrl &apiBase)
     return sameScheme && sameHost && samePort;
 }
 
+// CCTV 인증 헤더 적용 함수
 void applyCctvAuthIfNeeded(Backend *backend, BackendPrivate *state, QNetworkRequest &request)
 {
     if (!backend || !state) {
@@ -76,6 +79,7 @@ void applyCctvAuthIfNeeded(Backend *backend, BackendPrivate *state, QNetworkRequ
     request.setRawHeader("Authorization", QByteArray("Bearer ") + state->m_authToken.toUtf8());
 }
 
+// CCTV SSL 설정 적용 함수
 void applyCctvSslIfNeeded(BackendPrivate *state, QNetworkRequest &request)
 {
     if (!state) {
@@ -89,6 +93,7 @@ void applyCctvSslIfNeeded(BackendPrivate *state, QNetworkRequest &request)
     }
 }
 
+// CCTV SSL 오류 무시 연결 함수
 void attachCctvIgnoreSslErrors(BackendPrivate *state, QNetworkReply *reply, const QString &tag)
 {
     if (!reply || !state) {
@@ -135,6 +140,7 @@ QNetworkRequest makeCctvApiJsonRequest(Backend *backend,
     return request;
 }
 
+// CCTV 제어 API 결과 파싱 함수
 bool parseCctvControlApiResult(const QString &body, bool httpOk, QString *outApiStatus, QString *outApiMessage)
 {
     QString apiStatus;
@@ -166,6 +172,7 @@ bool parseCctvControlApiResult(const QString &body, bool httpOk, QString *outApi
     return httpOk && !apiReportedError;
 }
 
+// Png Data URL 생성 함수
 QByteArray buildPngDataUrl(const QImage &image)
 {
     QByteArray png;
@@ -175,6 +182,7 @@ QByteArray buildPngDataUrl(const QImage &image)
     return QByteArray("data:image/png;base64,") + png.toBase64();
 }
 
+// 이미지 From Payload 로드 함수
 bool loadImageFromPayload(const QByteArray &payload, QImage *outImage, int *outOffset)
 {
     if (!outImage || payload.isEmpty()) {
@@ -234,6 +242,7 @@ struct ParsedPcFrame {
     QByteArray imageBytes;
 };
 
+// read Le U32 처리 함수
 quint32 readLeU32(const char *p)
 {
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(p));
@@ -344,6 +353,7 @@ bool peekPcFrameHeader(const QByteArray &buffer,
     return true;
 }
 
+// try Consume Rgbd 프레임 처리 함수
 bool tryConsumeRgbdFrame(QByteArray *buffer, ParsedRgbdFrame *out)
 {
     if (!buffer || !out) {
@@ -372,6 +382,7 @@ bool tryConsumeRgbdFrame(QByteArray *buffer, ParsedRgbdFrame *out)
     return true;
 }
 
+// try Consume Pc 프레임 처리 함수
 bool tryConsumePcFrame(QByteArray *buffer, ParsedPcFrame *out)
 {
     if (!buffer || !out) {
@@ -601,6 +612,7 @@ bool renderRgbdPointCloudImage(const QByteArray &depthBytes,
     return true;
 }
 
+// Cctv3d 맵 From Cached Rgbd 렌더링 함수
 void renderCctv3dMapFromCachedRgbd(Backend *backend, BackendPrivate *state, bool force)
 {
     if (!backend || !state) {
@@ -632,6 +644,7 @@ void renderCctv3dMapFromCachedRgbd(Backend *backend, BackendPrivate *state, bool
     emit backend->cctv3dMapFrameDataUrlChanged();
 }
 
+// 줌 Moving 상태 파싱 함수
 bool parseZoomMovingState(const QString &body, int channel, bool *known, bool *moving)
 {
     if (!known || !moving) {
@@ -674,6 +687,7 @@ bool parseZoomMovingState(const QString &body, int channel, bool *known, bool *m
     return true;
 }
 
+// Cctv3d 맵 Step 타이머 확인 함수
 void ensureCctv3dMapStepTimer(Backend *backend, BackendPrivate *state)
 {
     if (state->m_cctv3dMapStepTimer) {
@@ -692,6 +706,7 @@ void ensureCctv3dMapStepTimer(Backend *backend, BackendPrivate *state)
 
 } // namespace
 
+// Cctv3d 맵 Prepare Sequence 시작 함수
 bool BackendCctv3dMapService::startCctv3dMapPrepareSequence(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
     if (cameraIndex < 0 || cameraIndex > 3) {
@@ -730,6 +745,7 @@ bool BackendCctv3dMapService::startCctv3dMapPrepareSequence(Backend *backend, Ba
     return true;
 }
 
+// Cctv3d 맵 Sequence 시작 함수
 bool BackendCctv3dMapService::startCctv3dMapSequence(Backend *backend, BackendPrivate *state, int cameraIndex)
 {
     if (cameraIndex < 0 || cameraIndex > 3) {
@@ -773,6 +789,7 @@ bool BackendCctv3dMapService::startCctv3dMapSequence(Backend *backend, BackendPr
         state->m_cctv3dMapSequenceToken);
 }
 
+// Cctv3d 맵 Sequence 일시정지 함수
 bool BackendCctv3dMapService::pauseCctv3dMapSequence(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || !state->m_manager) {
@@ -814,6 +831,7 @@ bool BackendCctv3dMapService::pauseCctv3dMapSequence(Backend *backend, BackendPr
     return true;
 }
 
+// Cctv3d 맵 Sequence 재개 함수
 bool BackendCctv3dMapService::resumeCctv3dMapSequence(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || !state->m_manager) {
@@ -855,6 +873,7 @@ bool BackendCctv3dMapService::resumeCctv3dMapSequence(Backend *backend, BackendP
     return true;
 }
 
+// Cctv3d 맵 Sequence 중지 함수
 void BackendCctv3dMapService::stopCctv3dMapSequence(Backend *backend, BackendPrivate *state)
 {
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -897,6 +916,7 @@ void BackendCctv3dMapService::stopCctv3dMapSequence(Backend *backend, BackendPri
     BackendCctv3dMapService::postCctvControlStopWithRetry(backend, state, stopToken, 0);
 }
 
+// CCTV 제어 중지 기반 재시도 전송 함수
 void BackendCctv3dMapService::postCctvControlStopWithRetry(Backend *backend, BackendPrivate *state, int sequenceToken, int attempt)
 {
     if (!backend || !state) {
@@ -993,6 +1013,7 @@ void BackendCctv3dMapService::postCctvControlStopWithRetry(Backend *backend, Bac
     });
 }
 
+// Cctv3d 맵 Sequence Step 실행 함수
 void BackendCctv3dMapService::runCctv3dMapSequenceStep(Backend *backend, BackendPrivate *state, int sequenceToken, int step)
 {
     if (sequenceToken != state->m_cctv3dMapSequenceToken || state->m_cctv3dMapCameraIndex < 0) {
@@ -1033,6 +1054,7 @@ void BackendCctv3dMapService::runCctv3dMapSequenceStep(Backend *backend, Backend
     }
 }
 
+// Cctv3d 맵 이동 상태 폴링 함수
 void BackendCctv3dMapService::pollCctv3dMapMoveStatus(Backend *backend, BackendPrivate *state, int sequenceToken)
 {
     if (sequenceToken != state->m_cctv3dMapSequenceToken || state->m_cctv3dMapCameraIndex < 0) {
@@ -1042,9 +1064,11 @@ void BackendCctv3dMapService::pollCctv3dMapMoveStatus(Backend *backend, BackendP
     state->m_cctv3dMapMoveStatusPollCount += 1;
     const int attempt = state->m_cctv3dMapMoveStatusPollCount;
 
+    // 요청 함수
     QNetworkRequest request(buildCctvApiUrl(backend, "/sunapi/stw-cgi/ptzcontrol.cgi", {
         {"msubmenu", "movestatus"},
         {"action", "view"},
+        // number 처리 함수
         {"Channel", QString::number(state->m_cctv3dMapCameraIndex)},
     }));
     applyCctvSslIfNeeded(state, request);
@@ -1106,6 +1130,7 @@ void BackendCctv3dMapService::pollCctv3dMapMoveStatus(Backend *backend, BackendP
     });
 }
 
+// CCTV 제어 시작 전송 함수
 bool BackendCctv3dMapService::postCctvControlStart(Backend *backend, BackendPrivate *state, int sequenceToken)
 {
     if (sequenceToken != state->m_cctv3dMapSequenceToken || state->m_cctv3dMapCameraIndex < 0) {
@@ -1168,6 +1193,7 @@ bool BackendCctv3dMapService::postCctvControlStart(Backend *backend, BackendPriv
     return true;
 }
 
+// CCTV 제어 스트림 전송 함수
 bool BackendCctv3dMapService::postCctvControlStream(Backend *backend, BackendPrivate *state, int sequenceToken)
 {
     if (sequenceToken != state->m_cctv3dMapSequenceToken) {
@@ -1266,6 +1292,7 @@ bool BackendCctv3dMapService::postCctvControlStream(Backend *backend, BackendPri
     return true;
 }
 
+// CCTV 제어 뷰 전송 함수
 bool BackendCctv3dMapService::postCctvControlView(Backend *backend, BackendPrivate *state, double rx, double ry)
 {
     if (!backend || !state) {
@@ -1278,6 +1305,7 @@ bool BackendCctv3dMapService::postCctvControlView(Backend *backend, BackendPriva
     return true;
 }
 
+// CCTV 스트림 WebSocket 연결 함수
 void BackendCctv3dMapService::connectCctvStreamWs(Backend *backend, BackendPrivate *state, int sequenceToken)
 {
     if (sequenceToken != state->m_cctv3dMapSequenceToken) {
@@ -1428,6 +1456,7 @@ void BackendCctv3dMapService::connectCctvStreamWs(Backend *backend, BackendPriva
             }
         });
     } else if (state->m_cctvStreamWs->state() == QAbstractSocket::ConnectedState
+               // 상태 m CCTV 스트림 WebSocket 상태 처리 함수
                || state->m_cctvStreamWs->state() == QAbstractSocket::ConnectingState) {
         state->m_cctv3dMapStoppingExpected = true;
         state->m_cctvStreamWs->abort();
@@ -1444,6 +1473,7 @@ void BackendCctv3dMapService::connectCctvStreamWs(Backend *backend, BackendPriva
     state->m_cctvStreamWs->open(wsUrl);
 }
 
+// CCTV 스트림 WebSocket 연결 해제 함수
 void BackendCctv3dMapService::disconnectCctvStreamWs(Backend *backend, BackendPrivate *state, bool expectedStop)
 {
     Q_UNUSED(backend);
@@ -1454,6 +1484,7 @@ void BackendCctv3dMapService::disconnectCctvStreamWs(Backend *backend, BackendPr
     }
 
     if (state->m_cctvStreamWs->state() == QAbstractSocket::ConnectedState
+        // 상태 m CCTV 스트림 WebSocket 상태 처리 함수
         || state->m_cctvStreamWs->state() == QAbstractSocket::ConnectingState) {
         state->m_cctvStreamWs->close();
     }

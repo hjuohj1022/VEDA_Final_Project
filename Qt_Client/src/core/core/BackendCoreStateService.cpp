@@ -52,6 +52,7 @@ int BackendCoreStateService::eventAlertPresetMotor2Angle(const BackendPrivate *s
 int BackendCoreStateService::eventAlertPresetMotor3Angle(const BackendPrivate *state) { return state->m_eventAlertPresetMotor3Angle; }
 bool BackendCoreStateService::eventAlertPresetLaserEnabled(const BackendPrivate *state) { return state->m_eventAlertPresetLaserEnabled; }
 
+// Active Cameras 설정 함수
 void BackendCoreStateService::setActiveCameras(Backend *backend, BackendPrivate *state, int count)
 {
     if (state->m_activeCameras != count) {
@@ -60,6 +61,7 @@ void BackendCoreStateService::setActiveCameras(Backend *backend, BackendPrivate 
     }
 }
 
+// 현재 Fps 설정 함수
 void BackendCoreStateService::setCurrentFps(Backend *backend, BackendPrivate *state, int fps)
 {
     if (state->m_currentFps != fps) {
@@ -68,6 +70,7 @@ void BackendCoreStateService::setCurrentFps(Backend *backend, BackendPrivate *st
     }
 }
 
+// Latency 설정 함수
 void BackendCoreStateService::setLatency(Backend *backend, BackendPrivate *state, int ms)
 {
     // Guard invalid/outlier input range.

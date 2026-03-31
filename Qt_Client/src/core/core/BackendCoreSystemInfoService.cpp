@@ -18,6 +18,7 @@
 
 namespace {
 
+// first Non Empty Line 처리 함수
 QString firstNonEmptyLine(const QByteArray &data)
 {
     const QString text = QString::fromLocal8Bit(data).trimmed();
@@ -34,6 +35,7 @@ QString firstNonEmptyLine(const QByteArray &data)
     return {};
 }
 
+// Power Shell One Line 실행 함수
 QString runPowerShellOneLine(const QString &script, int timeoutMs = 1800)
 {
 #ifdef Q_OS_WIN
@@ -56,6 +58,7 @@ QString runPowerShellOneLine(const QString &script, int timeoutMs = 1800)
 #endif
 }
 
+// Gi B 포맷 함수
 QString formatGiB(qulonglong bytes)
 {
     const double gib = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
@@ -63,6 +66,7 @@ QString formatGiB(qulonglong bytes)
 }
 
 #ifdef Q_OS_WIN
+// sample Cpusage Percent 처리 함수
 int sampleCpuUsagePercent()
 {
     static ULONGLONG prevIdle = 0;
@@ -123,6 +127,7 @@ int sampleCpuUsagePercent()
 
 } // namespace
 
+// 클라이언트 시스템 정보 조회 함수
 QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
@@ -197,6 +202,7 @@ QVariantMap BackendCoreSystemInfoService::getClientSystemInfo(Backend *backend, 
     return out;
 }
 
+// Caps 잠금 이벤트 확인 함수
 bool BackendCoreSystemInfoService::isCapsLockOn()
 {
 #ifdef Q_OS_WIN
