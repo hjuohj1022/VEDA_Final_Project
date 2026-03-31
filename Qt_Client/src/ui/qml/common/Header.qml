@@ -51,10 +51,9 @@ Rectangle {
     function clampAccountMenuX(value, menuWidth) {
         return Math.max(12, Math.min(root.width - menuWidth - 12, value))
     }
-    // 계정 메뉴 Y 위치 제한 함수
+    // 계정 메뉴 Y 위치 보정 함수
     function clampAccountMenuY(value, menuHeight) {
-        var maxY = Math.max(8, root.height - menuHeight - 8)
-        return Math.max(8, Math.min(maxY, value))
+        return Math.max(8, value)
     }
     // 화면 안내 문구 생성 함수
     function screenGuideText() {
@@ -501,19 +500,25 @@ Rectangle {
 
                 MouseArea {
                     id: authMouse
+                    property bool menuWasOpenOnPress: false
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // 누름 시 메뉴 열림 상태 기록 함수
+                    onPressed: {
+                        menuWasOpenOnPress = accountMenu.opened
+                    }
                     // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         if (root.isLoggedIn) {
-                            if (accountMenu.opened) {
+                            if (menuWasOpenOnPress) {
                                 accountMenu.close()
                             } else {
                                 backend.refreshTwoFactorStatus()
                                 accountMenu.open()
                             }
+                            menuWasOpenOnPress = false
                         } else {
                             root.requestLogin()
                         }
@@ -530,7 +535,7 @@ Rectangle {
         focus: true
         width: 286
         padding: 0
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnReleaseOutside
         x: {
             var point = authBtn.mapToItem(root, authBtn.width - width, authBtn.height + 10)
             return clampAccountMenuX(point.x, width)
