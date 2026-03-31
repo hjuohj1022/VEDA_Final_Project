@@ -83,9 +83,13 @@ bool BackendCoreEventLogActionService::requestCurrentEventActionUpdate(Backend *
     backend->applyAuthIfNeeded(request);
 
     QJsonObject payload{
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("action_requested"), true },
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("action_type"), actionType },
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("action_result"), actionResult },
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("action_message"), actionMessage },
     };
 

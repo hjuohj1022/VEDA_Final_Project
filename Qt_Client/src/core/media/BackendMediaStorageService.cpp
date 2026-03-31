@@ -22,6 +22,7 @@ struct StorageParseResult {
     double usedBytes = 0.0;
 };
 
+// 저장소 Bytes 포맷 함수
 QString formatStorageBytes(double bytes)
 {
     const double b = std::max(0.0, bytes);
@@ -44,6 +45,7 @@ QString formatStorageBytes(double bytes)
     return QString::number(tb, 'f', 2) + " TB";
 }
 
+// 키 Unitoken 확인 함수
 bool keyHasUnitToken(const QString &keyLower, const QString &unit)
 {
     static const QString seps = "._-";
@@ -67,6 +69,7 @@ bool keyHasUnitToken(const QString &keyLower, const QString &unit)
         || keyLower.contains("-" + u + "-");
 }
 
+// To Bytes 정리 함수
 double normalizeToBytes(const QString &keyLower, double value)
 {
     if (value <= 0.0) {
@@ -143,6 +146,7 @@ void collectNumbersFromJson(const QJsonValue &value,
     }
 }
 
+// 저장소 Payload 파싱 함수
 StorageParseResult parseStoragePayload(const QByteArray &payload)
 {
     StorageParseResult out;
@@ -218,6 +222,7 @@ StorageParseResult parseStoragePayload(const QByteArray &payload)
 }
 } // namespace
 
+// 저장소 확인 함수
 void BackendMediaStorageService::checkStorage(Backend *backend, BackendPrivate *state)
 {
     if (state->m_authToken.trimmed().isEmpty()) {

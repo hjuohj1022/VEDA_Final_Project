@@ -17,22 +17,26 @@
 
 namespace {
 
+// emit 이벤트 알림 이력 Changed 처리 함수
 void emitEventAlertHistoryChanged(Backend *backend)
 {
     emit backend->eventAlertHistoryChanged();
 }
 
+// emit 이벤트 알림 상태 Changed 처리 함수
 void emitEventAlertStateChanged(Backend *backend)
 {
     emit backend->eventAlertStateChanged();
 }
 
+// 문자열 정리 함수
 QString normalizeString(const QJsonObject &obj, const QString &key, const QString &fallback = QString())
 {
     const QString value = obj.value(key).toString().trimmed();
     return value.isEmpty() ? fallback : value;
 }
 
+// 불리언 값 파싱 함수
 bool parseBoolValue(const QJsonValue &value, bool fallback = false)
 {
     if (value.isBool()) {
@@ -53,6 +57,7 @@ bool parseBoolValue(const QJsonValue &value, bool fallback = false)
     return fallback;
 }
 
+// Persisted 열화상 제목 포맷 함수
 QString formatPersistedThermalTitle(const QString &fallback)
 {
     if (fallback.compare(QStringLiteral("Thermal hotspot detected"), Qt::CaseInsensitive) == 0) {
@@ -61,6 +66,7 @@ QString formatPersistedThermalTitle(const QString &fallback)
     return fallback;
 }
 
+// Persisted 열화상 메시지 포맷 함수
 QString formatPersistedThermalMessage(const QJsonObject &payload, const QString &fallback)
 {
     const QJsonObject thermalObj = payload.value("thermal").toObject();
@@ -96,6 +102,7 @@ QString formatPersistedThermalMessage(const QJsonObject &payload, const QString 
     return lines.join(QLatin1Char('\n'));
 }
 
+// 이력 항목 From 로그 생성 함수
 QVariantMap makeHistoryItemFromLog(const QJsonObject &logObject)
 {
     QString source = normalizeString(logObject, QStringLiteral("source"), QStringLiteral("system")).toLower();
@@ -141,6 +148,7 @@ QVariantMap makeHistoryItemFromLog(const QJsonObject &logObject)
 
 } // namespace
 
+// 이벤트 이력 로드 함수
 void BackendCoreEventLogService::loadEventHistory(Backend *backend, BackendPrivate *state, int limit)
 {
     if (!backend || !state || !state->m_manager || state->m_authToken.trimmed().isEmpty()) {
@@ -151,7 +159,9 @@ void BackendCoreEventLogService::loadEventHistory(Backend *backend, BackendPriva
         state->m_eventLogHistoryReply->abort();
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest(QStringLiteral("/events"), {
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("limit"), QString::number(qBound(1, limit, 200)) }
     });
     backend->applyAuthIfNeeded(request);
@@ -205,6 +215,7 @@ void BackendCoreEventLogService::loadEventHistory(Backend *backend, BackendPriva
     });
 }
 
+// 이벤트 이력 삭제 함수
 bool BackendCoreEventLogService::deleteEventHistory(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || !state->m_manager || state->m_authToken.trimmed().isEmpty()) {
@@ -266,7 +277,9 @@ bool BackendCoreEventLogService::deleteEventHistoryItem(Backend *backend,
         state->m_eventLogDeleteReply->abort();
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest(QStringLiteral("/events"), {
+        // Q 문자열 Literal 초기화 함수
         { QStringLiteral("id"), QString::number(eventLogId) }
     });
     backend->applyAuthIfNeeded(request);
@@ -319,6 +332,7 @@ bool BackendCoreEventLogService::deleteEventHistoryItem(Backend *backend,
     return true;
 }
 
+// 현재 이벤트 로그 Id From 이력 동기화 함수
 void BackendCoreEventLogService::syncCurrentEventLogIdFromHistory(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state || state->m_eventAlertLogId != 0 || !state->m_eventAlertActive) {
@@ -354,6 +368,7 @@ void BackendCoreEventLogService::syncCurrentEventLogIdFromHistory(Backend *backe
 
         if (state->m_eventAlertFrameId < 0
             && item.value(QStringLiteral("title")).toString().trimmed() == currentTitle
+            // 항목 조회 함수
             && item.value(QStringLiteral("message")).toString().trimmed() == currentMessage) {
             state->m_eventAlertLogId = eventLogId;
             return;
@@ -361,6 +376,7 @@ void BackendCoreEventLogService::syncCurrentEventLogIdFromHistory(Backend *backe
     }
 }
 
+// Cached 이벤트 이력 정리 함수
 void BackendCoreEventLogService::clearCachedEventHistory(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {

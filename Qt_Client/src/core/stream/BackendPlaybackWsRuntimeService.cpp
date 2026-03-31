@@ -11,6 +11,7 @@
 #include <QUrl>
 #include <QUdpSocket>
 
+// 재생 WebSocket Sdp 소스 확인 함수
 QString BackendPlaybackWsRuntimeService::ensurePlaybackWsSdpSource(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);

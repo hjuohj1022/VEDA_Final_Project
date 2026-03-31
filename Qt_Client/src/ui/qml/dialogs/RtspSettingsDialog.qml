@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -15,7 +15,7 @@ Window {
     modality: Qt.NonModal
     flags: Qt.Dialog | Qt.FramelessWindowHint
     color: "transparent"
-
+    // 다이얼로그 표시 준비 함수
     function prepareAndShow() {
         if (hostWindow) {
             hostWindow.stopRtspConnectCheck()
@@ -29,11 +29,11 @@ Window {
         rtspPassField.text = ""
         visible = true
     }
-
+    // 다이얼로그 닫기 함수
     function closeDialog() {
         visible = false
     }
-
+    // 가시성 변경 처리 함수
     onVisibleChanged: {
         if (!visible) {
             if (hostWindow)
@@ -51,10 +51,12 @@ Window {
 
     TapHandler {
         acceptedButtons: Qt.AllButtons
+        // 탭 입력 처리 함수
         onTapped: backend.resetSessionTimer()
     }
 
     HoverHandler {
+        // 포인트 변경 처리 함수
         onPointChanged: {
             if (!hostWindow)
                 return
@@ -64,6 +66,7 @@ Window {
     }
 
     WheelHandler {
+        // 휠 입력 처리 함수
         onWheel: (event) => {
             backend.resetSessionTimer()
             event.accepted = false
@@ -84,14 +87,17 @@ Window {
             hoverEnabled: true
             acceptedButtons: Qt.AllButtons
             propagateComposedEvents: true
+            // 누름 이벤트 처리 함수
             onPressed: (mouse) => {
                 backend.resetSessionTimer()
                 mouse.accepted = false
             }
+            // 위치 변경 처리 함수
             onPositionChanged: (mouse) => {
                 backend.resetSessionTimer()
                 mouse.accepted = false
             }
+            // 휠 입력 처리 함수
             onWheel: (wheel) => {
                 backend.resetSessionTimer()
                 wheel.accepted = false
@@ -116,6 +122,7 @@ Window {
                 placeholderText: "IP 입력"
                 color: theme ? theme.textPrimary : "white"
                 placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
                     backend.resetSessionTimer()
                     if (!hostWindow)
@@ -140,6 +147,7 @@ Window {
                 inputMethodHints: Qt.ImhDigitsOnly
                 color: theme ? theme.textPrimary : "white"
                 placeholderTextColor: theme ? "#9ca3af" : "#6b7280"
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
                     backend.resetSessionTimer()
                     if (!hostWindow)
@@ -155,6 +163,7 @@ Window {
                     border.color: rtspPortField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                     radius: 6
                 }
+                // 입력 확정 처리 함수
                 onAccepted: {
                     backend.resetSessionTimer()
                     saveRtspButton.clicked()
@@ -167,6 +176,7 @@ Window {
                 text: "고급 설정 (RTSP 계정 직접 입력)"
                 checked: false
                 enabled: hostWindow ? !hostWindow.rtspConnecting : true
+                // 토글 처리 함수
                 onToggled: {
                     backend.resetSessionTimer()
                     if (!checked) {
@@ -206,6 +216,7 @@ Window {
                         border.color: rtspUserField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                         radius: 6
                     }
+                    // 텍스트 편집 처리 함수
                     onTextEdited: backend.resetSessionTimer()
                 }
 
@@ -221,7 +232,9 @@ Window {
                         border.color: rtspPassField.activeFocus ? (theme ? theme.accent : "#f97316") : (theme ? theme.border : "#27272a")
                         radius: 6
                     }
+                    // 텍스트 편집 처리 함수
                     onTextEdited: backend.resetSessionTimer()
+                    // 입력 확정 처리 함수
                     onAccepted: {
                         backend.resetSessionTimer()
                         if (!(hostWindow && hostWindow.rtspConnecting))
@@ -246,6 +259,7 @@ Window {
                     text: "초기화"
                     Layout.preferredWidth: 96
                     enabled: hostWindow ? !hostWindow.rtspConnecting : true
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         var changed = backend.resetRtspConfigToEnv()
@@ -278,6 +292,7 @@ Window {
                     text: "취소"
                     Layout.preferredWidth: 96
                     enabled: true
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         if (!hostWindow) {
@@ -313,6 +328,7 @@ Window {
                     text: (hostWindow && hostWindow.rtspConnecting) ? "연결 시도 중..." : "연결"
                     Layout.preferredWidth: 96
                     enabled: hostWindow ? !hostWindow.rtspConnecting : true
+                    // 클릭 이벤트 처리 함수
                     onClicked: {
                         backend.resetSessionTimer()
                         if (!hostWindow)

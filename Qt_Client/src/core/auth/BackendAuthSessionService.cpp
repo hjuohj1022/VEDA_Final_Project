@@ -4,6 +4,7 @@
 #include "internal/core/BackendCoreEventLogService.h"
 #include "internal/core/Backend_p.h"
 
+// 로그아웃 함수
 void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_isLoggedIn) {
@@ -91,6 +92,7 @@ void BackendAuthSessionService::logout(Backend *backend, BackendPrivate *state)
     emit backend->sessionRemainingSecondsChanged();
 }
 
+// 세션 타이머 초기화 함수
 void BackendAuthSessionService::resetSessionTimer(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);
@@ -109,6 +111,7 @@ void BackendAuthSessionService::resetSessionTimer(Backend *backend, BackendPriva
     }
 }
 
+// 이벤트 세션 Tick 처리 함수
 void BackendAuthSessionService::onSessionTick(Backend *backend, BackendPrivate *state)
 {
     if (!state->m_isLoggedIn) {

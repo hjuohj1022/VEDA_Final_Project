@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 
 Item {
     id: root
@@ -9,11 +9,11 @@ Item {
     property var playbackSegments: []
     property string playbackTimelineInfoText: "녹화 구간 없음"
     signal seekRequested(int seconds)
-
+    // 재생 일시 정지 함수
     function pausePlayback() {
         content.pausePlayback()
     }
-
+    // 재생 재개 함수
     function resumePlayback() {
         content.resumePlayback()
     }
@@ -27,6 +27,7 @@ Item {
         playbackCurrentSeconds: root.playbackCurrentSeconds
         playbackSegments: root.playbackSegments
         playbackTimelineInfoText: root.playbackTimelineInfoText
+        // 탐색 요청 처리 함수
         onSeekRequested: function(seconds) {
             root.seekRequested(seconds)
         }

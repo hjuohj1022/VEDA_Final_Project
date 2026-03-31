@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportWsMuxService.h"
+#include "internal/sunapi/BackendSunapiExportWsMuxService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -10,6 +10,7 @@
 #include <QTimer>
 
 namespace {
+// 파일 재시도 삭제 함수
 void removeFileWithRetry(QObject *ctx, const QString &path, int retries = 120, int intervalMs = 250)
 {
     if (!ctx || path.isEmpty()) {
@@ -27,6 +28,7 @@ void removeFileWithRetry(QObject *ctx, const QString &path, int retries = 120, i
 }
 }
 
+// 재생 내보내기 RTSP 요청 생성 함수
 QByteArray BackendSunapiExportWsMuxService::buildPlaybackExportRtspRequest(Backend *backend,
                                                                             BackendPrivate *state,
                                                                             int &nextCseq,
@@ -52,6 +54,7 @@ QByteArray BackendSunapiExportWsMuxService::buildPlaybackExportRtspRequest(Backe
     return req;
 }
 
+// 재생 내보내기 Annex-B NAL 기록 함수
 void BackendSunapiExportWsMuxService::playbackExportWriteAnnexBNal(Backend *backend,
                                                                     BackendPrivate *state,
                                                                     QFile &outFile,
@@ -70,6 +73,7 @@ void BackendSunapiExportWsMuxService::playbackExportWriteAnnexBNal(Backend *back
     writtenBytes += (startCode.size() + nal.size());
 }
 
+// 재생 내보내기 RTP H264 처리 함수
 void BackendSunapiExportWsMuxService::playbackExportProcessRtpH264(Backend *backend,
                                                                     BackendPrivate *state,
                                                                     const QByteArray &rtp,
@@ -149,6 +153,7 @@ void BackendSunapiExportWsMuxService::playbackExportProcessRtpH264(Backend *back
     }
 }
 
+// 재생 내보내기 인터리브 데이터 처리 함수
 bool BackendSunapiExportWsMuxService::playbackExportConsumeInterleaved(Backend *backend,
                                                                         BackendPrivate *state,
                                                                         const QByteArray &bytes,
@@ -215,6 +220,7 @@ bool BackendSunapiExportWsMuxService::playbackExportConsumeInterleaved(Backend *
     return false;
 }
 
+// 재생 내보내기 취소 함수
 void BackendSunapiExportWsMuxService::cancelPlaybackExport(Backend *backend, BackendPrivate *state)
 {
     const bool hasAnyRuntime =

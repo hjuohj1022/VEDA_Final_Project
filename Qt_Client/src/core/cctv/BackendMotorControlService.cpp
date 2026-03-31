@@ -139,6 +139,7 @@ bool sendControlPost(Backend *backend,
     return true;
 }
 
+// 레이저 상태 Body 파싱 함수
 bool parseLaserStatusBody(const QString &body, QString *summaryText, bool *summaryError)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
@@ -204,6 +205,7 @@ bool parseLaserStatusBody(const QString &body, QString *summaryText, bool *summa
     return true;
 }
 
+// 레이저 상태 Get 전송 함수
 bool sendLaserStatusGet(Backend *backend, BackendPrivate *state)
 {
     const QString actionLabel = "Laser bridge";
@@ -378,6 +380,7 @@ bool BackendMotorControlService::motorEmergency(Backend *backend, BackendPrivate
                            "MOTOR");
 }
 
+// 레이저 활성화 설정 함수
 bool BackendMotorControlService::laserSetEnabled(Backend *backend, BackendPrivate *state, bool enabled)
 {
     return sendControlPost(backend,
@@ -388,16 +391,19 @@ bool BackendMotorControlService::laserSetEnabled(Backend *backend, BackendPrivat
                            "LASER");
 }
 
+// 레이저 이벤트 처리 함수
 bool BackendMotorControlService::laserOn(Backend *backend, BackendPrivate *state)
 {
     return laserSetEnabled(backend, state, true);
 }
 
+// 레이저 Off 처리 함수
 bool BackendMotorControlService::laserOff(Backend *backend, BackendPrivate *state)
 {
     return laserSetEnabled(backend, state, false);
 }
 
+// 레이저 조회 함수
 bool BackendMotorControlService::laserStatus(Backend *backend, BackendPrivate *state)
 {
     return sendLaserStatusGet(backend, state);

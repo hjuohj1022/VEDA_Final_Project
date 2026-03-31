@@ -1,7 +1,8 @@
-﻿#include "Backend.h"
+#include "Backend.h"
 #include "internal/sunapi/BackendSunapiExportWsMuxService.h"
 #include "internal/core/Backend_p.h"
 
+// 재생 내보내기 RTSP 요청 생성 함수
 QByteArray Backend::buildPlaybackExportRtspRequest(int &nextCseq,
                                                    const QString &authHeader,
                                                    const QString &session,
@@ -19,11 +20,13 @@ QByteArray Backend::buildPlaybackExportRtspRequest(int &nextCseq,
                                                                             withSession);
 }
 
+// 재생 내보내기 Annex-B NAL 기록 함수
 void Backend::playbackExportWriteAnnexBNal(QFile &outFile, qint64 &writtenBytes, const QByteArray &nal)
 {
     BackendSunapiExportWsMuxService::playbackExportWriteAnnexBNal(this, d_ptr.get(), outFile, writtenBytes, nal);
 }
 
+// 재생 내보내기 RTP H264 처리 함수
 void Backend::playbackExportProcessRtpH264(const QByteArray &rtp,
                                            QFile &outFile,
                                            qint64 &writtenBytes,
@@ -39,6 +42,7 @@ void Backend::playbackExportProcessRtpH264(const QByteArray &rtp,
                                                                   fuNalType);
 }
 
+// 재생 내보내기 인터리브 데이터 처리 함수
 bool Backend::playbackExportConsumeInterleaved(const QByteArray &bytes,
                                                int h264RtpChannel,
                                                QByteArray &interleavedBuf,
@@ -72,6 +76,7 @@ bool Backend::playbackExportConsumeInterleaved(const QByteArray &bytes,
                                                                               lastProgressMs);
 }
 
+// 재생 내보내기 취소 함수
 void Backend::cancelPlaybackExport()
 {
     BackendSunapiExportWsMuxService::cancelPlaybackExport(this, d_ptr.get());

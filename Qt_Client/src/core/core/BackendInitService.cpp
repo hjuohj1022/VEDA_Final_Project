@@ -19,6 +19,7 @@
 #include <QUdpSocket>
 #include <memory>
 
+// initialize 처리 함수
 void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
 {
     state->m_manager = new QNetworkAccessManager(backend);
@@ -70,6 +71,7 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
     state->m_playbackWsKeepaliveTimer->setInterval(15000);
     QObject::connect(state->m_playbackWsKeepaliveTimer, &QTimer::timeout, backend, [backend, state]() {
         if (!state->m_playbackWsActive || !state->m_streamingWs
+            // 상태 m 스트리밍 WebSocket 상태 처리 함수
             || state->m_streamingWs->state() != QAbstractSocket::ConnectedState) {
             return;
         }
@@ -154,6 +156,7 @@ void BackendInitService::initialize(Backend *backend, BackendPrivate *state)
                              && cseq == state->m_playbackWsFinalSetupCseq
                              && !state->m_playbackWsSession.isEmpty()
                              && state->m_streamingWs
+                             // 상태 m 스트리밍 WebSocket 상태 처리 함수
                              && state->m_streamingWs->state() == QAbstractSocket::ConnectedState) {
                              backend->playbackWsPlay();
                          }

@@ -5,6 +5,7 @@
 #include <memory>
 
 Backend::Backend(QObject *parent)
+    // Q Object 초기화 함수
     : QObject(parent), d_ptr(std::make_unique<BackendPrivate>())
 {
     BackendInitService::initialize(this, d_ptr.get());

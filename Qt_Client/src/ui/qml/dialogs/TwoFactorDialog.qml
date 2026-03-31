@@ -22,7 +22,7 @@ Dialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     x: Math.round((((parent ? parent.width : 0) - width) / 2))
     y: Math.round((((parent ? parent.height : 0) - implicitHeight) / 2))
-
+    // 설정 화면 열기 함수
     function openForSetup() {
         mode = "setup"
         manualKey = ""
@@ -34,7 +34,7 @@ Dialog {
         if (root.backendObject)
             root.backendObject.startTwoFactorSetup()
     }
-
+    // 비활성화 화면 열기 함수
     function openForDisable() {
         mode = "disable"
         manualKey = ""
@@ -45,12 +45,12 @@ Dialog {
         open()
         otpField.forceActiveFocus()
     }
-
+    // 열림 처리 함수
     onOpened: if (root.backendObject) root.backendObject.resetSessionTimer()
 
     Connections {
         target: root.backendObject
-
+        // 이중 인증 설정 준비 처리 함수
         function onTwoFactorSetupReady(manualKey, otpAuthUrl) {
             if (!root.visible || root.mode !== "setup")
                 return
@@ -60,28 +60,28 @@ Dialog {
             root.statusText = ""
             otpField.forceActiveFocus()
         }
-
+        // 이중 인증 설정 완료 처리 함수
         function onTwoFactorSetupCompleted() {
             if (!root.visible || root.mode !== "setup")
                 return
             root.busy = false
             root.close()
         }
-
+        // 이중 인증 설정 실패 처리 함수
         function onTwoFactorSetupFailed(error) {
             if (!root.visible || root.mode !== "setup")
                 return
             root.busy = false
             root.statusText = error
         }
-
+        // 이중 인증 비활성화 완료 처리 함수
         function onTwoFactorDisableCompleted() {
             if (!root.visible || root.mode !== "disable")
                 return
             root.busy = false
             root.close()
         }
-
+        // 이중 인증 비활성화 실패 처리 함수
         function onTwoFactorDisableFailed(error) {
             if (!root.visible || root.mode !== "disable")
                 return
@@ -237,6 +237,7 @@ Dialog {
                                                       : (root.theme ? root.theme.border : "#27272a")
                     radius: 6
                 }
+                // 텍스트 편집 처리 함수
                 onTextEdited: {
                     if (root.backendObject)
                         root.backendObject.resetSessionTimer()
@@ -271,6 +272,7 @@ Dialog {
                 text: "닫기"
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: closeButton.down ? "#3f3f46" : (root.theme ? root.theme.bgSecondary : "#1f2937")
@@ -295,6 +297,7 @@ Dialog {
                 Layout.preferredWidth: 120
                 Layout.preferredHeight: 34
                 enabled: !root.busy && (root.mode === "disable" || root.manualKey.length > 0)
+                // 클릭 이벤트 처리 함수
                 onClicked: {
                     if (root.backendObject)
                         root.backendObject.resetSessionTimer()

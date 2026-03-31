@@ -15,16 +15,14 @@ Dialog {
     width: 640
     height: 500
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    // 다이얼로그를 부모 기준 중앙에 배치
+    // 부모 기준 중앙 배치 함수
     function centerInParent() {
         if (!parent)
             return
         root.x = Math.round((parent.width - root.width) / 2)
         root.y = Math.round((parent.height - root.height) / 2)
     }
-
-    // 드래그 시 다이얼로그 위치를 부모 영역 안으로 제한
+    // 위치 제한 함수
     function setClampedPosition(nextX, nextY) {
         if (!parent) {
             root.x = nextX
@@ -38,13 +36,13 @@ Dialog {
         root.x = Math.max(minX, Math.min(maxX, nextX))
         root.y = Math.max(minY, Math.min(maxY, nextY))
     }
-
+    // 데이터 표시 함수
     function showWithData(data) {
         specs = data || ({})
         open()
         Qt.callLater(centerInParent)
     }
-
+    // 값 조회 함수
     function valueOf(key, fallbackValue) {
         if (!specs || specs[key] === undefined || specs[key] === null)
             return fallbackValue
@@ -226,6 +224,7 @@ Dialog {
                 text: "Close"
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 34
+                // 클릭 이벤트 처리 함수
                 onClicked: root.close()
                 background: Rectangle {
                     color: parent.down ? "#ea580c" : (root.theme ? root.theme.accent : "#f97316")
@@ -247,6 +246,6 @@ Dialog {
         border.color: root.theme ? root.theme.border : "#27272a"
         radius: 10
     }
-
+    // 열림 처리 함수
     onOpened: centerInParent()
 }

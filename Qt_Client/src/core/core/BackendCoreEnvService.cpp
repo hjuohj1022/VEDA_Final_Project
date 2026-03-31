@@ -11,6 +11,7 @@
 #include <QStringList>
 #include <QTextStream>
 
+// 환경 로드 함수
 void BackendCoreEnvService::loadEnv(Backend *backend, BackendPrivate *state)
 {
     Q_UNUSED(backend);

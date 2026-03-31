@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiTimelineService.h"
+#include "internal/sunapi/BackendSunapiTimelineService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
@@ -15,6 +15,7 @@
 #include <QSet>
 #include <algorithm>
 
+// 재생 타임라인 로드 함수
 void BackendSunapiTimelineService::loadPlaybackTimeline(Backend *backend,
                                                         BackendPrivate *state,
                                                         int channelIndex,
@@ -37,6 +38,7 @@ void BackendSunapiTimelineService::loadPlaybackTimeline(Backend *backend,
         return;
     }
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/timeline", {
         {"channel", QString::number(channelIndex)},
         {"date", date}
@@ -183,6 +185,7 @@ void BackendSunapiTimelineService::loadPlaybackTimeline(Backend *backend,
     });
 }
 
+// 재생 월간 녹화 일자 로드 함수
 void BackendSunapiTimelineService::loadPlaybackMonthRecordedDays(Backend *backend,
                                                                  BackendPrivate *state,
                                                                  int channelIndex,
@@ -210,6 +213,7 @@ void BackendSunapiTimelineService::loadPlaybackMonthRecordedDays(Backend *backen
     }
     const QString yearMonth = firstDate.toString("yyyy-MM");
 
+    // API JSON 요청 생성 함수
     QNetworkRequest request = backend->makeApiJsonRequest("/api/sunapi/month-days", {
         {"channel", QString::number(channelIndex)},
         {"year", QString::number(year)},

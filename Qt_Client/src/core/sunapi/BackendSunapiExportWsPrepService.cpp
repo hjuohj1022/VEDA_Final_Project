@@ -1,4 +1,4 @@
-﻿#include "internal/sunapi/BackendSunapiExportWsPrepService.h"
+#include "internal/sunapi/BackendSunapiExportWsPrepService.h"
 
 #include "internal/core/Backend_p.h"
 
@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QUrl>
 
+// 재생 내보내기 FFmpeg 실행 파일 경로 확인 함수
 QString BackendSunapiExportWsPrepService::resolvePlaybackExportFfmpegBinary(const BackendPrivate *state)
 {
     const QString configured = state->m_env.value("PLAYBACK_EXPORT_FFMPEG_PATH").trimmed();
@@ -36,6 +37,7 @@ QString BackendSunapiExportWsPrepService::resolvePlaybackExportFfmpegBinary(cons
     return QStringLiteral("ffmpeg");
 }
 
+// 재생 내보내기 웹소켓 출력 경로 생성 함수
 bool BackendSunapiExportWsPrepService::buildPlaybackExportWsOutputPath(BackendPrivate *state,
                                                                        const QString &savePath,
                                                                        bool *wantsAvi,
@@ -54,6 +56,7 @@ bool BackendSunapiExportWsPrepService::buildPlaybackExportWsOutputPath(BackendPr
         return false;
     }
 
+    // requested Fi 함수
     QFileInfo requestedFi(requestedOutPath);
     QString requestedExt = requestedFi.suffix().trimmed().toLower();
     if (requestedExt.isEmpty()) {

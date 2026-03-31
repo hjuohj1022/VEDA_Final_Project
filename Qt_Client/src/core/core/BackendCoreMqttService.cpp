@@ -16,6 +16,7 @@
 #include <QSslConfiguration>
 #include <QSslKey>
 
+// 설정 MQTT 처리 함수
 void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
 {
     const bool mqttEnabled = (state->m_env.value("MQTT_ENABLED", "1").trimmed() == "1");
@@ -379,6 +380,7 @@ void BackendCoreMqttService::setupMqtt(Backend *backend, BackendPrivate *state)
     state->m_mqttClient->connectToHost();
 }
 
+// reload MQTT 처리 함수
 void BackendCoreMqttService::reloadMqtt(Backend *backend, BackendPrivate *state)
 {
     if (!backend || !state) {

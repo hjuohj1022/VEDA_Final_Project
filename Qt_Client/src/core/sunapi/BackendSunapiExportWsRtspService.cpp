@@ -1,10 +1,11 @@
-﻿#include "internal/sunapi/BackendSunapiExportWsRtspService.h"
+#include "internal/sunapi/BackendSunapiExportWsRtspService.h"
 
 #include "Backend.h"
 #include "internal/core/Backend_p.h"
 
 #include <QRegularExpression>
 
+// 재생 내보내기 RTSP 응답 처리 함수
 void BackendSunapiExportWsRtspService::playbackExportHandleRtspResponse(
     Backend *backend,
     BackendPrivate *state,

@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Team3VideoReceiver 1.0
@@ -27,17 +27,18 @@ Item {
     property int timelineViewStartSec: 0
 
     signal seekRequested(int seconds)
-
+    // 두 자리 숫자 포맷 함수
     function pad2(v) { return (v < 10 ? "0" : "") + v }
+    // 두 자리 숫자 포맷 함수
     function fmt(sec) {
         var s = Math.max(0, Math.min(86399, Math.floor(sec)))
         return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60)
     }
-
+    // 현재 표시 구간 길이 계산 함수
     function currentWindowSec() {
         return Number(timelineWindows[Math.max(0, Math.min(timelineZoomLevel, timelineWindows.length - 1))])
     }
-
+    // 타임라인 시작 위치 제한 함수
     function clampViewStart(startSec, windowSec) {
         var s = Math.floor(startSec)
         var w = Math.max(60, Math.floor(windowSec))
@@ -46,11 +47,11 @@ Item {
         if (s > maxStart) s = maxStart
         return s
     }
-
+    // 타임라인 종료 위치 계산 함수
     function viewEndSec() {
         return Math.min(86400, timelineViewStartSec + currentWindowSec())
     }
-
+    // 현재 재생 위치 표시 범위 보정 함수
     function ensureCurrentInView() {
         var w = currentWindowSec()
         var v0 = timelineViewStartSec
@@ -59,7 +60,7 @@ Item {
             timelineViewStartSec = clampViewStart(playbackCurrentSeconds - (w / 2), w)
         }
     }
-
+    // 라벨 간격 계산 함수
     function labelStepSec() {
         var lv = timelineZoomLevel
         if (lv <= 4) return 3600
@@ -68,24 +69,24 @@ Item {
         if (lv <= 19) return 300
         return 60
     }
-
+    // 라벨 개수 계산 함수
     function labelCount() {
         var step = labelStepSec()
         var range = Math.max(1, viewEndSec() - timelineViewStartSec)
         return Math.floor((range - 1) / step) + 1
     }
-
+    // 초 라벨 생성 함수
     function labelSecondAt(i) {
         return Math.min(viewEndSec() - 1, timelineViewStartSec + (i * labelStepSec()))
     }
-
+    // 라벨 텍스트 생성 함수
     function labelTextAt(i) {
         var sec = labelSecondAt(i)
         var hh = Math.floor(sec / 3600)
         var mm = Math.floor((sec % 3600) / 60)
         return pad2(hh) + ":" + pad2(mm)
     }
-
+    // 줌 단위 보정 함수
     function snapToZoomUnit(sec) {
         var s = Math.max(0, Math.min(86399, Math.floor(sec)))
         if (timelineZoomLevel <= 0)
@@ -93,7 +94,7 @@ Item {
         var unit = (timelineZoomLevel >= 20) ? 60 : 300
         return Math.max(0, Math.min(86399, Math.round(s / unit) * unit))
     }
-
+    // 표시 구간 계산 함수
     function displaySegments() {
         if (!playbackSegments || playbackSegments.length === 0)
             return []
@@ -123,7 +124,7 @@ Item {
         }
         return merged
     }
-
+    // 초 단위 녹화 여부 확인 함수
     function isSecondRecorded(sec) {
         if (!playbackSegments || playbackSegments.length === 0)
             return false
@@ -139,15 +140,15 @@ Item {
         }
         return false
     }
-
+    // 재생 일시 정지 함수
     function pausePlayback() {
         playbackPlayer.pauseStream()
     }
-
+    // 재생 재개 함수
     function resumePlayback() {
         playbackPlayer.resumeStream()
     }
-
+    // 재생 현재 시간 변경 처리 함수
     onPlaybackCurrentSecondsChanged: ensureCurrentInView()
 
     Rectangle {
@@ -199,6 +200,7 @@ Item {
 
                         WheelHandler {
                             target: timelineScale
+                            // 휠 입력 처리 함수
                             onWheel: function(event) {
                                 var oldLevel = root.timelineZoomLevel
                                 var newLevel = oldLevel
@@ -376,8 +378,9 @@ Item {
                                 color: "#f3f4f6"
                                 border.color: "#d4d4d8"
                             }
-
+                            // 이동 처리 함수
                             onMoved: root.seekRequested(root.snapToZoomUnit(value))
+                            // 누름 상태 변경 처리 함수
                             onPressedChanged: {
                                 if (!pressed) {
                                     if (!root.isSecondRecorded(value))

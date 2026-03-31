@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as C
@@ -12,7 +12,7 @@ Item {
     visible: store ? (active && store.showCameraControls) : false
     Layout.fillHeight: visible
     Layout.preferredHeight: visible ? 1 : 0
-
+    // 카메라 이름 동기화 함수
     function syncCameraName() {
         if (!store)
             return
@@ -22,7 +22,7 @@ Item {
             cameraNameField.text = ""
         }
     }
-
+    // 표시 설정 입력값 동기화 함수
     function syncDisplayFields() {
         contrastValueField.text = String(store.displayContrast)
         brightnessValueField.text = String(store.displayBrightness)
@@ -37,14 +37,20 @@ Item {
 
     Connections {
         target: store
+        // 선택 카메라 변경 처리 함수
         function onSelectedCameraIndexChanged() { syncCameraName() }
+        // 카메라 제어 패널 표시 상태 변경 처리 함수
         function onShowCameraControlsChanged() {
             if (store.showCameraControls)
                 syncCameraName()
         }
+        // 대비 값 변경 처리 함수
         function onDisplayContrastChanged() { contrastValueField.text = String(store.displayContrast) }
+        // 밝기 값 변경 처리 함수
         function onDisplayBrightnessChanged() { brightnessValueField.text = String(store.displayBrightness) }
+        // 선명도 값 변경 처리 함수
         function onDisplaySharpnessLevelChanged() { sharpnessValueField.text = String(store.displaySharpnessLevel) }
+        // 색상 값 변경 처리 함수
         function onDisplayColorLevelChanged() { colorValueField.text = String(store.displayColorLevel) }
     }
 
@@ -102,6 +108,7 @@ Item {
                             border.width: 1
                             radius: 6
                         }
+                        // 입력 확정 처리 함수
                         onAccepted: {
                             if (store.selectedCameraIndex < 0)
                                 return
@@ -121,6 +128,7 @@ Item {
                         theme: root.theme
                         Layout.preferredWidth: 56
                         enabled: store.selectedCameraIndex >= 0
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (store.selectedCameraIndex < 0)
                                 return
@@ -145,6 +153,7 @@ Item {
                         theme: root.theme
                         Layout.fillWidth: true
                         enabled: store.selectedCameraIndex >= 0 && store.supportZoom && store.supportFocus
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (store.selectedCameraIndex < 0)
                                 return
@@ -164,6 +173,7 @@ Item {
                         theme: root.theme
                         Layout.fillWidth: true
                         enabled: store.selectedCameraIndex >= 0
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (store.selectedCameraIndex < 0)
                                 return
@@ -195,6 +205,7 @@ Item {
                         theme: root.theme
                         Layout.fillWidth: true
                         enabled: store.selectedCameraIndex >= 0 && store.mapModeEnabled
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (backend.pauseCctv3dMapSequence()) {
                                 store.cameraControlStatus = "3D Map pause 요청을 보냈습니다."
@@ -210,6 +221,7 @@ Item {
                         theme: root.theme
                         Layout.fillWidth: true
                         enabled: store.selectedCameraIndex >= 0 && store.mapModeEnabled
+                        // 클릭 이벤트 처리 함수
                         onClicked: {
                             if (backend.resumeCctv3dMapSequence()) {
                                 store.cameraControlStatus = "3D Map resume 요청을 보냈습니다."
@@ -245,6 +257,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportZoom
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiZoomIn(store.selectedCameraIndex)
                     }
                     C.SidebarControlButton {
@@ -253,6 +266,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportZoom
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiZoomOut(store.selectedCameraIndex)
                     }
                     C.SidebarControlButton {
@@ -261,6 +275,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportZoom
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiZoomStop(store.selectedCameraIndex)
                     }
                 }
@@ -279,6 +294,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportFocus
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiFocusNear(store.selectedCameraIndex)
                     }
                     C.SidebarControlButton {
@@ -287,6 +303,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportFocus
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiFocusFar(store.selectedCameraIndex)
                     }
                     C.SidebarControlButton {
@@ -295,6 +312,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportFocus
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiFocusStop(store.selectedCameraIndex)
                     }
                     C.SidebarControlButton {
@@ -303,6 +321,7 @@ Item {
                         compact: true
                         theme: root.theme
                         enabled: store.selectedCameraIndex >= 0 && store.supportFocus
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiSimpleAutoFocus(store.selectedCameraIndex)
                     }
                 }
@@ -328,6 +347,7 @@ Item {
                         Layout.preferredHeight: 22
                         Layout.maximumHeight: 22
                         enabled: store.selectedCameraIndex >= 0
+                        // 클릭 이벤트 처리 함수
                         onClicked: backend.sunapiResetDisplaySettings(store.selectedCameraIndex)
                     }
                 }
@@ -346,6 +366,7 @@ Item {
                             theme: root.theme
                             Layout.preferredWidth: 16
                             enabled: store.selectedCameraIndex >= 0
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 store.displayContrast = Math.max(1, store.displayContrast - 1)
                                 store.applyDisplaySettings()
@@ -360,10 +381,12 @@ Item {
                             stepSize: 1
                             value: store.displayContrast
                             property bool dragged: false
+                            // 이동 처리 함수
                             onMoved: {
                                 store.displayContrast = Math.round(value)
                                 contrastValueField.text = String(store.displayContrast)
                             }
+                            // 누름 상태 변경 처리 함수
                             onPressedChanged: {
                                 if (pressed) dragged = true
                                 else if (dragged) { dragged = false; store.applyDisplaySettings() }
@@ -375,6 +398,7 @@ Item {
                             theme: root.theme
                             Layout.preferredWidth: 16
                             enabled: store.selectedCameraIndex >= 0
+                            // 클릭 이벤트 처리 함수
                             onClicked: {
                                 store.displayContrast = Math.min(100, store.displayContrast + 1)
                                 store.applyDisplaySettings()
@@ -388,6 +412,7 @@ Item {
                             color: theme ? theme.textPrimary : "white"
                             validator: IntValidator { bottom: 1; top: 100 }
                             background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: theme ? theme.border : "#27272a"; radius: 4 }
+                            // 편집 완료 처리 함수
                             onEditingFinished: {
                                 var n = parseInt(text, 10)
                                 if (isNaN(n)) n = store.displayContrast
@@ -412,10 +437,12 @@ Item {
                             stepSize: 1
                             value: store.displayBrightness
                             property bool dragged: false
+                            // 이동 처리 함수
                             onMoved: {
                                 store.displayBrightness = Math.round(value)
                                 brightnessValueField.text = String(store.displayBrightness)
                             }
+                            // 누름 상태 변경 처리 함수
                             onPressedChanged: {
                                 if (pressed) dragged = true
                                 else if (dragged) { dragged = false; store.applyDisplaySettings() }
@@ -430,6 +457,7 @@ Item {
                             color: theme ? theme.textPrimary : "white"
                             validator: IntValidator { bottom: 1; top: 100 }
                             background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: theme ? theme.border : "#27272a"; radius: 4 }
+                            // 편집 완료 처리 함수
                             onEditingFinished: {
                                 var n = parseInt(text, 10)
                                 if (isNaN(n)) n = store.displayBrightness
@@ -463,6 +491,7 @@ Item {
                                 bottomPadding: 0
                                 checked: store.displaySharpnessEnabled
                                 enabled: store.selectedCameraIndex >= 0
+                                // 토글 처리 함수
                                 onToggled: {
                                     store.displaySharpnessEnabled = checked
                                     store.applyDisplaySettings()
@@ -479,10 +508,12 @@ Item {
                             stepSize: 1
                             value: store.displaySharpnessLevel
                             property bool dragged: false
+                            // 이동 처리 함수
                             onMoved: {
                                 store.displaySharpnessLevel = Math.round(value)
                                 sharpnessValueField.text = String(store.displaySharpnessLevel)
                             }
+                            // 누름 상태 변경 처리 함수
                             onPressedChanged: {
                                 if (pressed) dragged = true
                                 else if (dragged) { dragged = false; store.applyDisplaySettings() }
@@ -497,6 +528,7 @@ Item {
                             color: theme ? theme.textPrimary : "white"
                             validator: IntValidator { bottom: 1; top: 32 }
                             background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: theme ? theme.border : "#27272a"; radius: 4 }
+                            // 편집 완료 처리 함수
                             onEditingFinished: {
                                 var n = parseInt(text, 10)
                                 if (isNaN(n)) n = store.displaySharpnessLevel
@@ -521,10 +553,12 @@ Item {
                             stepSize: 1
                             value: store.displayColorLevel
                             property bool dragged: false
+                            // 이동 처리 함수
                             onMoved: {
                                 store.displayColorLevel = Math.round(value)
                                 colorValueField.text = String(store.displayColorLevel)
                             }
+                            // 누름 상태 변경 처리 함수
                             onPressedChanged: {
                                 if (pressed) dragged = true
                                 else if (dragged) { dragged = false; store.applyDisplaySettings() }
@@ -539,6 +573,7 @@ Item {
                             color: theme ? theme.textPrimary : "white"
                             validator: IntValidator { bottom: 1; top: 100 }
                             background: Rectangle { color: theme ? theme.bgSecondary : "#09090b"; border.color: theme ? theme.border : "#27272a"; radius: 4 }
+                            // 편집 완료 처리 함수
                             onEditingFinished: {
                                 var n = parseInt(text, 10)
                                 if (isNaN(n)) n = store.displayColorLevel

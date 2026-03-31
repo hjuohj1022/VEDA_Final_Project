@@ -29,7 +29,7 @@ Item {
     signal cameraStateChanged(int cameraIndex, bool isLive)
     signal cameraFpsChanged(int cameraIndex, int fps)
     signal doubleClicked()
-
+    // 스트림 일시 정지 함수
     function pauseStream() {
         if (root.source === "")
             return
@@ -38,7 +38,7 @@ Item {
         vlc.userPaused = true
         mediaPlayer.pause()
     }
-
+    // 스트림 재개 함수
     function resumeStream() {
         if (root.source === "")
             return
@@ -49,7 +49,7 @@ Item {
         }
         mediaPlayer.play()
     }
-
+    // 스트림 재시작 함수
     function restartStream() {
         if (root.source === "")
             return
@@ -59,13 +59,13 @@ Item {
         startPlayTimer.interval = 350
         startPlayTimer.start()
     }
-
+    // DPTZ 상태 초기화 함수
     function dptzReset() {
         dptzScale = 1.0
         dptzPanX = 0
         dptzPanY = 0
     }
-
+    // DPTZ 팬 범위 제한 함수
     function dptzClampPan() {
         if (!dptzEnabled || dptzScale <= 1.0) {
             dptzPanX = 0
@@ -78,11 +78,11 @@ Item {
         dptzPanX = Math.max(-maxX, Math.min(maxX, dptzPanX))
         dptzPanY = Math.max(-maxY, Math.min(maxY, dptzPanY))
     }
-
+    // DPTZ 줌 적용 함수
     function dptzZoom(step) {
         dptzZoomAt(step, videoViewport.width / 2, videoViewport.height / 2)
     }
-
+    // 기준 좌표 DPTZ 줌 적용 함수
     function dptzZoomAt(step, focusX, focusY) {
         if (!dptzEnabled) return
 
@@ -112,7 +112,7 @@ Item {
         }
         root.dptzClampPan()
     }
-
+    // DPTZ 사용 여부 변경 처리 함수
     onDptzEnabledChanged: {
         if (!dptzEnabled) dptzReset()
     }
@@ -211,7 +211,7 @@ Item {
                     property int reconnectAttempt: 0
                     property int maxReconnectAttempt: 6
                     property bool userPaused: false
-
+                    // 재생 시작 함수
                     function play() {
                         if (url === "")
                             return
@@ -223,7 +223,7 @@ Item {
                         }
                         mediaPlayer.play()
                     }
-
+                    // 재생 중지 함수
                     function stop() {
                         reconnectTimer.stop()
                         mediaPlayer.stop()
@@ -233,7 +233,7 @@ Item {
                         frameCounter = 0
                         fps = 0
                     }
-
+                    // 재연결 예약 함수
                     function scheduleReconnect() {
                         if (url === "")
                             return
@@ -243,11 +243,11 @@ Item {
                         reconnectTimer.interval = Math.min(2000, 250 * reconnectAttempt)
                         reconnectTimer.restart()
                     }
-
+                    // 디지털 줌 설정 함수
                     function setDigitalZoom(scale, focusX, focusY) {
                         // 무동작 처리(줌 기능 QML 변환 구현)
                     }
-
+                    // 재생 상태 변경 처리 함수
                     onIsPlayingChanged: {
                         root.cameraStateChanged(root.cameraIndex, isPlaying)
                         if (!isPlaying) {
@@ -258,7 +258,7 @@ Item {
                             noFrameSeconds = 0
                         }
                     }
-
+                    // FPS 변경 처리 함수
                     onFpsChanged: {
                         root.cameraFpsChanged(root.cameraIndex, Math.max(0, Math.round(fps)))
                         root.cameraStateChanged(root.cameraIndex, isPlaying)
@@ -268,6 +268,7 @@ Item {
                         id: mediaPlayer
                         audioOutput: null
                         videoOutput: videoOutput
+                        // 플레이어 상태 변경 처리 함수
                         onPlaybackStateChanged: {
                             vlc.isPlaying = (playbackState === MediaPlayer.PlayingState)
                             if (vlc.isPlaying) {
@@ -275,6 +276,7 @@ Item {
                                 reconnectTimer.stop()
                             }
                         }
+                        // 오류 발생 처리 함수
                         onErrorOccurred: function(error, errorString) {
                             vlc.isPlaying = false
                             console.warn("MediaPlayer error:", error, errorString)
@@ -307,6 +309,7 @@ Item {
                     Connections {
                         target: videoOutput.videoSink
                         ignoreUnknownSignals: true
+                        // 비디오 프레임 변경 처리 함수
                         function onVideoFrameChanged(frame) {
                             if (!vlc.isPlaying)
                                 return
@@ -318,6 +321,7 @@ Item {
                         interval: 1000
                         running: true
                         repeat: true
+                        // 트리거 처리 함수
                         onTriggered: {
                             if (!vlc.isPlaying) {
                                 if (vlc.fps !== 0)
@@ -344,6 +348,7 @@ Item {
                         id: reconnectTimer
                         interval: 250
                         repeat: false
+                        // 트리거 처리 함수
                         onTriggered: {
                             if (vlc.url === "")
                                 return
@@ -376,6 +381,7 @@ Item {
                     cursorShape: enabled ? Qt.OpenHandCursor : Qt.ArrowCursor
                     property real lastX: 0
                     property real lastY: 0
+                    // 누름 이벤트 처리 함수
                     onPressed: (mouse) => {
                         lastX = mouse.x
                         lastY = mouse.y
@@ -383,7 +389,9 @@ Item {
                         root.dptzPointerY = mouse.y
                         cursorShape = Qt.ClosedHandCursor
                     }
+                    // 해제 이벤트 처리 함수
                     onReleased: cursorShape = Qt.OpenHandCursor
+                    // 위치 변경 처리 함수
                     onPositionChanged: (mouse) => {
                         root.dptzPointerX = mouse.x
                         root.dptzPointerY = mouse.y
@@ -394,6 +402,7 @@ Item {
                         lastY = mouse.y
                         root.dptzClampPan()
                     }
+                    // 더블 클릭 처리 함수
                     onDoubleClicked: (mouse) => { mouse.accepted = false }
                 }
 
@@ -402,10 +411,12 @@ Item {
                     enabled: root.dptzEnabled
                     hoverEnabled: true
                     acceptedButtons: Qt.NoButton
+                    // 위치 변경 처리 함수
                     onPositionChanged: (mouse) => {
                         root.dptzPointerX = mouse.x
                         root.dptzPointerY = mouse.y
                     }
+                    // 휠 입력 처리 함수
                     onWheel: (wheel) => {
                         if (!root.dptzFocusLocked) {
                             root.dptzLockedFocusX = wheel.x
@@ -425,6 +436,7 @@ Item {
                     id: focusUnlockTimer
                     interval: 180
                     repeat: false
+                    // 트리거 처리 함수
                     onTriggered: root.dptzFocusLocked = false
                 }
             }
@@ -500,6 +512,7 @@ Item {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
+                                        // 클릭 이벤트 처리 함수
                                         onClicked: {
                                             var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
                                             var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
@@ -525,6 +538,7 @@ Item {
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
+                                        // 클릭 이벤트 처리 함수
                                         onClicked: root.dptzReset()
                                     }
                                 }
@@ -550,6 +564,7 @@ Item {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
+                                        // 클릭 이벤트 처리 함수
                                         onClicked: {
                                             var fx = root.dptzPointerX > 0 ? root.dptzPointerX : videoViewport.width / 2
                                             var fy = root.dptzPointerY > 0 ? root.dptzPointerY : videoViewport.height / 2
@@ -573,6 +588,7 @@ Item {
                         interval: 1000
                         running: true
                         repeat: true
+                        // 트리거 처리 함수
                         onTriggered: timeLabel.text = Qt.formatTime(new Date(), "hh:mm:ss")
                     }
                 }
@@ -585,12 +601,14 @@ Item {
             enabled: true
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
+            // 클릭 이벤트 처리 함수
             onClicked: parent.forceActiveFocus()
+            // 더블 클릭 처리 함수
             onDoubleClicked: root.doubleClicked()
         }
 
     }
-
+    // 소스 변경 처리 함수
     onSourceChanged: {
         if (root.source && root.source.length > 0) {
             console.log("[VIDEO][SOURCE]", root.source)
@@ -615,6 +633,7 @@ Item {
         id: startPlayTimer
         interval: 0
         repeat: false
+        // 트리거 처리 함수
         onTriggered: {
             if (root.source !== "") {
                 vlc.play()

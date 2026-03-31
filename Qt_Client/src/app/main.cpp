@@ -9,6 +9,7 @@
 #include "Backend.h"
 #include "ui/QrCodeImageProvider.h"
 
+// 애플리케이션 시작 함수
 int main(int argc, char *argv[])
 {
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
