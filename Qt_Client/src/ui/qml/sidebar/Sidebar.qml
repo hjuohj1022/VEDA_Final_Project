@@ -40,6 +40,7 @@ Rectangle {
     property alias playbackViewMonth: store.playbackViewMonth
     property alias playbackCalendarVisible: store.playbackCalendarVisible
     property alias playbackRecordedDays: store.playbackRecordedDays
+    property alias captureMotorControlPanel: motorControlPanel
 
     signal requestCameraNameChange(int cameraIndex, string name)
     signal requestPlayback(int channelIndex, string dateText, string timeText)
@@ -298,6 +299,7 @@ Rectangle {
         }
 
         SidebarMotorControlPanel {
+            id: motorControlPanel
             Layout.fillWidth: true
             theme: root.theme
             store: store

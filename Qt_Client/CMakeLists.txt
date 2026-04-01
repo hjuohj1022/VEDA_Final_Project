@@ -105,8 +105,10 @@ qt_add_executable(Team3VideoReceiver
     src/core/thermal/BackendThermal.cpp
     src/core/thermal/BackendThermalService.cpp
     src/third_party/qrcodegen/qrcodegen.cpp
+    src/ui/CaptureHelper.cpp
     src/ui/qrcode/QrCodeImageProvider.cpp
     include/core/Backend.h
+    include/ui/CaptureHelper.h
     include/ui/QrCodeImageProvider.h
     src/third_party/qrcodegen/qrcodegen.hpp
     .env

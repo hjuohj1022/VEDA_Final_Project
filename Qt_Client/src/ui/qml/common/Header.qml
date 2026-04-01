@@ -17,6 +17,7 @@ Rectangle {
     property string exportProgressText: ""
     property bool eventAlertActive: false
     property bool eventAlertUnread: false
+    property alias captureAccountMenuPopup: accountMenu
     signal toggleTheme()
     signal requestLogin()
     signal requestLogout()
@@ -28,6 +29,20 @@ Rectangle {
     signal requestRtspSettings()
     signal requestEventAlert()
     signal requestExportCancel()
+    // 캡처용 계정 메뉴 오픈 함수
+    function openAccountMenuForCapture() {
+        if (!root.isLoggedIn)
+            return false
+        backend.resetSessionTimer()
+        backend.refreshTwoFactorStatus()
+        accountMenu.open()
+        return true
+    }
+    // 캡처용 계정 메뉴 닫기 함수
+    function closeAccountMenuForCapture() {
+        if (accountMenu.opened)
+            accountMenu.close()
+    }
     // 세션 시간 포맷 함수
     function formatSession(seconds) {
         var s = Math.max(0, seconds)
