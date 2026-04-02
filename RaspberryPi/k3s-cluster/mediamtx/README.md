@@ -208,5 +208,5 @@ openssl s_client -connect <LB_IP>:8555 \
 - `kubectl logs deploy/mediamtx-server`에서 ffmpeg 오류가 없는가
 - 외부 RTSPS/HLS 경로가 Nginx를 통해 접근 가능한가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-19

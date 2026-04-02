@@ -1,6 +1,6 @@
 ### 컴포넌트 명칭
 
-Raspberry Pi K3s Cluster는 VEDA 시스템의 백엔드 서비스를 Raspberry Pi 기반 K3s 환경에 배포하기 위한 통합 운영 문서입니다. 이 디렉터리는 외부 진입점인 Nginx Gateway부터 Crow Server, MediaMTX, Mosquitto, MariaDB, Thermal DTLS Gateway, MetalLB, 인증서 자산까지 서비스별 배포 파일과 운영 절차를 함께 관리합니다.
+Raspberry Pi K3s Cluster는 A.E.G.I.S 시스템의 백엔드 서비스를 Raspberry Pi 기반 K3s 환경에 배포하기 위한 통합 운영 문서입니다. 이 디렉터리는 외부 진입점인 Nginx Gateway부터 Crow Server, MediaMTX, Mosquitto, MariaDB, Thermal DTLS Gateway, MetalLB, 인증서 자산까지 서비스별 배포 파일과 운영 절차를 함께 관리합니다.
 
 **주요 환경 및 버전**
 - 운영 환경: Raspberry Pi 4 기반 K3s 클러스터
@@ -262,5 +262,5 @@ kubectl apply -f RaspberryPi/k3s-cluster/nginx/nginx-deployment.yaml
 - MariaDB에 `users`, `signup_email_verifications`, `password_reset_tokens`, `event_logs` 스키마가 준비되었는가
 - `GET /health`, `GET /docs`, `GET /events`, `GET /recordings`, `GET /laser/status`, `GET /thermal/status`가 정상 응답하는가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-26

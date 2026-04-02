@@ -163,5 +163,5 @@ kubectl get svc nginx-service
 - `nginx-service`가 `LoadBalancer` 타입인가
 - 할당된 IP가 LAN에서 실제로 접근 가능한가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-19

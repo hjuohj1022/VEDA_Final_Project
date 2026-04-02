@@ -1,6 +1,6 @@
 # RaspberryPi
 
-`RaspberryPi/` 디렉터리는 VEDA 시스템의 Raspberry Pi 기반 서버 환경을 정리한 상위 허브 문서입니다.
+`RaspberryPi/` 디렉터리는 A.E.G.I.S 시스템의 Raspberry Pi 기반 서버 환경을 정리한 상위 허브 문서입니다.
 현재 저장소 기준으로 이 영역은 크게 두 축으로 나뉩니다.
 
 - `yocto/`: Raspberry Pi 노드용 공통 Yocto 이미지와 K3s 노드 초기 설정

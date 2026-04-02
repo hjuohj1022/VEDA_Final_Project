@@ -309,5 +309,5 @@ kubectl exec -it deploy/mariadb -- mariadb -uroot -p -e "SHOW MASTER STATUS;"
 - `SHOW VARIABLES LIKE 'log_bin';` 결과가 `ON` 인가
 - 10분이 지난 dump/binlog가 자동 정리되는가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-28

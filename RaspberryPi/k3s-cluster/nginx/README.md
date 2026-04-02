@@ -223,5 +223,5 @@ openssl s_client -connect <LB_IP>:8555 \
 - `crow-server-service`, `mediamtx-service`, `mqtt-service`, `thermal-dtls-gateway-service`가 모두 준비되었는가
 - `https://<LB_IP>/health`, `https://<LB_IP>/events`, `https://<LB_IP>/recordings`와 `openssl s_client` 테스트가 성공하는가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-26

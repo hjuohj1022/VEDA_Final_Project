@@ -207,5 +207,5 @@ openssl s_client -connect <LB_IP>:8883 \
 - 테스트 클라이언트로 publish/subscribe가 가능한가
 - 레이저와 모터 응답 토픽 흐름이 확인되는가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-19

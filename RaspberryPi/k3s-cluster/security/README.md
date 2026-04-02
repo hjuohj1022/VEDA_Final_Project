@@ -199,5 +199,5 @@ openssl x509 -in ./certs/nginx-mtls/server.crt -noout -subject -issuer -ext subj
 - `nginx-certs`, `mtls-ca`, `mqtt-certs`에 올바른 파일명이 들어갔는가
 - `crow-certs`는 별도의 CCTV 제어 인증서 세트로 유지되고 있는가
 
-**작성자:** VEDA Team  
+**작성자:** A.E.G.I.S Team  
 **마지막 업데이트:** 2026-03-19
